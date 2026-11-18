@@ -20,4 +20,4 @@ The blocks of the last verdict, by number:
 
 For each of them, establish whether the rework resolved it. Report one that is still there as a block with `repeats` set to its number. Beyond those, a new block is something the rework introduced, or a failure you can show in ordinary use. Anything else you now notice is a note.
 
-Run the Proof, read `git diff {{base}} {{sha}}`, then call `publish_verdict`.
+Run the Proof, read `git --no-replace-objects diff {{base}} {{sha}}`, then call `publish_verdict`.
