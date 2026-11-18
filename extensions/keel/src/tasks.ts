@@ -25,6 +25,7 @@ import {
 import { branchHead, commitOf, ensureCheckout, ensureWorktree } from "./git.ts";
 import {
 	buildInput,
+	redirectInput,
 	retryInput,
 	reverifyInput,
 	reviseInput,
@@ -557,23 +558,30 @@ export const retry = single<DecisionInput<"retry" | "abort">>(
 				...(target === work.verifier &&
 					work.candidate && { cwd: work.candidate.checkout }),
 			});
-			const notes = (await annotationsOf(tx, id))
-				.map((a) => `- ${a.text}`)
-				.join("\n");
-			if (
-				target === work.worker &&
-				work.stage === "verifying" &&
-				work.candidate?.verdict !== undefined
-			) {
+			const notes =
+				(await annotationsOf(tx, id)).map((a) => `- ${a.text}`).join("\n") ||
+				"(none)";
+			let content = retryInput({ decision: id, notes });
+			// Only the convergence stop leaves the worker as the target while the stage is still `verifying`. Its verdict
+			// started no rework, so the worker has not seen that verdict's blocks yet.
+			if (target === work.worker && work.stage === "verifying") {
+				const stopped = work.candidate?.verdict;
+				const verdict =
+					stopped === undefined ? undefined : await tx.entry(Verdict, stopped);
+				if (verdict === undefined)
+					throw new Error(`No verdict entry ${stopped}`);
+				content = redirectInput({
+					sha: verdict.data.sha,
+					decision: id,
+					notes,
+					verdict: verdict.data.text,
+					blocks: listedFindings(verdict.data.findings, "block"),
+				});
 				for (const number of Object.keys(work.blockCounts))
 					work.blockCounts[number] = 0;
 				work.stage = "reworking";
 			}
-			await handle?.submit(tx, {
-				type: "input",
-				content: retryInput({ decision: id, notes: notes || "(none)" }),
-				requestId: id,
-			});
+			await handle?.submit(tx, { type: "input", content, requestId: id });
 			await emit(tx, KeelEvent, {
 				text: "The owner asked the agent to go on.",
 				at: runtime.now(),

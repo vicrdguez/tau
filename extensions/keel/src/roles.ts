@@ -40,6 +40,13 @@ export const reworkInput = prose(dir, "prose/inputs/rework.md", [
 	"verdict",
 	"blocks",
 ]);
+export const redirectInput = prose(dir, "prose/inputs/redirect.md", [
+	"sha",
+	"decision",
+	"notes",
+	"verdict",
+	"blocks",
+]);
 export const retryInput = prose(dir, "prose/inputs/retry.md", [
 	"decision",
 	"notes",

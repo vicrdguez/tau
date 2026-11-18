@@ -70,6 +70,9 @@ export type WorkState = {
 		checkout: string;
 		verdict?: EntryId;
 	};
+	/** Every ruling since the Mandate was approved, in the order recorded. The hand-over lists them all. */
+	rulings: EntryId[];
+	/** The rulings the next build takes with it. */
 	pendingRulings: EntryId[];
 	/** Only blocks in the last verdict, keyed by their displayed finding number. */
 	blockCounts: Record<string, number>;
@@ -87,6 +90,7 @@ export const Work = defineDoc<WorkState>({
 		stage: "designing",
 		waiting: {},
 		handled: {},
+		rulings: [],
 		pendingRulings: [],
 		blockCounts: {},
 		receipts: {},

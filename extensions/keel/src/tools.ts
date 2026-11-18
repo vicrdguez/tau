@@ -129,6 +129,7 @@ export const recordRuling = defineTool({
 			const ruling = await tx.appendEntry(Ruling, api.conversationId, {
 				data: args,
 			});
+			work.rulings.push(ruling.id);
 			work.pendingRulings.push(ruling.id);
 			return { text: `Recorded ruling ${ruling.id} for the next build.` };
 		}),
@@ -256,12 +257,10 @@ export const publishVerdict = defineTool({
 				return {
 					refused: "Fail requires at least one block; pass allows only notes.",
 				};
-			let handoverText = "";
-			if (args.verdict === "pass") {
-				const build = await tx.entry(Build, candidate.build);
-				if (!build) throw new Error(`No build entry ${candidate.build}`);
-				handoverText = `Commit ${candidate.sha} on branch ${plan.branch} builds the approved Mandate and passed verification.\n\n${args.text}\n\nNotes:\n${listedFindings(args.findings, "note")}\n\nRulings:\n${await listedRulings(tx, build.data.rulings)}`;
-			}
+			const handoverText =
+				args.verdict === "pass"
+					? `Commit ${candidate.sha} on branch ${plan.branch} builds the approved Mandate and passed verification.\n\n${args.text}\n\nNotes:\n${listedFindings(args.findings, "note")}\n\nRulings:\n${await listedRulings(tx, work.rulings)}`
+					: "";
 			const { sha } = candidate;
 			const verdict = await tx.appendEntry(Verdict, api.conversationId, {
 				data: { ...args, build: candidate.build, sha },
@@ -271,7 +270,9 @@ export const publishVerdict = defineTool({
 			if (survivor !== undefined) {
 				const reason = `Block "${survivor}" survived two fixes. Retry with direction or abort.`;
 				const basis = await tx.appendEntry(Note, worker, {
-					data: { text: reason },
+					data: {
+						text: `${reason}\n\nThe blocks of this verdict, as retry sends them to the worker:\n${listedFindings(args.findings, "block")}`,
+					},
 				});
 				work.waiting.stuck = (await stuck(tx, k, basis, api.now())).id;
 				work.retry = worker;
