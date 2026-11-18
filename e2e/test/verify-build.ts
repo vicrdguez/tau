@@ -22,9 +22,10 @@ const [command, ...outputs] = process.argv.slice(2);
 assert.ok(command, "Pass the installed tau executable.");
 assert.equal(
 	outputs.length,
-	3,
-	"Pass the w1, w2 and websearch source outputs.",
+	4,
+	"Pass the keel, w1, w2 and websearch source outputs.",
 );
+const [keelSource, w1Source, w2Source] = outputs as [string, string, string];
 const root = await mkdtemp(join(tmpdir(), "tau-installed-"));
 const home = join(root, ".tau");
 const env = {
@@ -103,7 +104,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			return;
 		}
 		process.stdout.write("empty extensions []\n");
-		for (const [i, name] of ["w1", "w2", "websearch"].entries()) {
+		for (const [i, name] of ["keel", "w1", "w2", "websearch"].entries()) {
 			const output = outputs[i]!;
 			await access(join(output, "index.ts"));
 			for await (const file of glob("**/*.{js,mjs,cjs}", {
@@ -117,7 +118,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 		assert.equal(
 			added.stdout.split("\n").filter((line) => line.startsWith("added "))
 				.length,
-			3,
+			4,
 			added.stdout,
 		);
 		process.stdout.write(added.stdout);
@@ -126,6 +127,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			assert.deepEqual(
 				items.map((item: any) => [item.name, item.workflow]),
 				[
+					["keel", true],
 					["w1", true],
 					["w2", true],
 					["websearch", false],
@@ -135,6 +137,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			assert.deepEqual(
 				items.map((item: any) => item.schema.required),
 				[
+					["designer", "worker", "verifier", "base"],
 					["designer", "implementer", "reviewer", "base"],
 					["model"],
 					["provider", "apiKey"],
@@ -147,10 +150,13 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 						item.schema.additionalProperties === false,
 				),
 			);
-			assert.equal(items[0].schema.properties.designer.format, "model");
-			assert.equal(items[1].schema.properties.model.format, "model");
-			assert.equal(items[2].schema.properties.apiKey.format, "secret");
-			process.stdout.write("loaded w1, w2, websearch with options schemas\n");
+			assert.equal(items[0].schema.properties.verifier.format, "model");
+			assert.equal(items[1].schema.properties.designer.format, "model");
+			assert.equal(items[2].schema.properties.model.format, "model");
+			assert.equal(items[3].schema.properties.apiKey.format, "secret");
+			process.stdout.write(
+				"loaded keel, w1, w2, websearch with options schemas\n",
+			);
 			const bound = await post(
 				url,
 				"bind",
@@ -182,7 +188,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			);
 		}
 		const changed = join(root, "changed-w2");
-		await cp(outputs[1]!, changed, { recursive: true, dereference: false });
+		await cp(w2Source, changed, { recursive: true, dereference: false });
 		await chmod(changed, 0o777);
 		const prose = join(changed, "agent.md");
 		await chmod(prose, 0o664);
@@ -233,7 +239,7 @@ try {
 		if (!/\.(?:js|json)$/.test(file)) continue;
 		assert.doesNotMatch(
 			await readFile(resolve(command, "../..", file), "utf8"),
-			/tau-w1|tau-w2|tau-websearch/,
+			/tau-wf-keel|tau-w1|tau-w2|tau-websearch/,
 			file,
 		);
 	}
@@ -245,7 +251,7 @@ try {
 	await mkdir(directory, { recursive: true });
 	await chmod(directory, 0o777);
 	const copied = join(directory, "w2");
-	await cp(outputs[1]!, copied, { recursive: true });
+	await cp(w2Source, copied, { recursive: true });
 	await chmod(copied, 0o775);
 	for await (const file of glob("**/*.{ts,md}", { cwd: copied }))
 		await chmod(join(copied, file), 0o664);
@@ -265,9 +271,20 @@ try {
 		"revise",
 	])
 		assert.ok(
-			(await readFile(join(outputs[0]!, `${file}.md`), "utf8")).length > 0,
+			(await readFile(join(w1Source, `${file}.md`), "utf8")).length > 0,
 		);
-	assert.ok((await readFile(join(outputs[1]!, "agent.md"), "utf8")).length > 0);
+	assert.ok((await readFile(join(w2Source, "agent.md"), "utf8")).length > 0);
+	for (const file of [
+		"roles/designer",
+		"inputs/build",
+		"documents/mandate",
+		"principles/prove-it-works",
+		"playbooks/architect/rationale-template",
+	])
+		assert.ok(
+			(await readFile(join(keelSource, "prose", `${file}.md`), "utf8")).length >
+				0,
+		);
 	process.stdout.write("extension source and Markdown installed\n");
 } finally {
 	await rm(root, { recursive: true, force: true });
