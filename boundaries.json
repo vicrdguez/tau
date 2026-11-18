@@ -27,5 +27,12 @@
 		"testOnly": {
 			"tau": ["./testing"]
 		}
+	},
+	"tau-wf-keel": {
+		"extension": true,
+		"tau": [".", "./durable", "./schema", "./chord"],
+		"testOnly": {
+			"tau": ["./testing"]
+		}
 	}
 }
