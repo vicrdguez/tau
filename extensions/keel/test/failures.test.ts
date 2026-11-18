@@ -700,3 +700,103 @@ test("roles: the designer follows the project default, the worker and verifier n
 			assert.equal(record?.owner, undefined, "ownerless");
 		}
 	}));
+
+const failed = () =>
+	call("publish_verdict", {
+		text: "No test covers --json.",
+		verdict: "fail",
+		findings: [{ kind: "block", text: "No test covers --json." }],
+	});
+
+/** The worker ends its turn without publishing, then publishes when the owner messages it. The stuck decision stays open. */
+async function staleStuck(
+	w: World,
+	stage: "building" | "reworking",
+	verifier: Parameters<World["script"]>[1],
+) {
+	if (stage === "reworking") {
+		w.script(
+			"worker",
+			commitStep("export.js", "json", "Add --json"),
+			call("publish_build", { text: "Built." }),
+		);
+		w.script("verifier", failed());
+	}
+	w.script("worker", say("Which format should the rows have?"));
+	const { k, s } = await approved(w);
+	const I = await named(w, "building");
+	await w.open(s.stuck(1));
+	w.script(
+		"worker",
+		commitStep("export.js", "ndjson", "Use NDJSON"),
+		call("publish_build", { text: "Built with NDJSON." }),
+	);
+	w.script("verifier", verifier);
+	await w.submit(I, "Use NDJSON and publish.");
+	await w.settle();
+	await w.open(s.stuck(1));
+	assert.equal(
+		(await w.harness.snapshot(Work, k, context))?.stage,
+		"verifying",
+	);
+	return { k, s, I };
+}
+
+/** The owner answers the stale decision with `retry`: the worker gets `retry.md`, and the decision is settled. */
+async function retriedPlainly(
+	w: World,
+	{ k, s, I }: Awaited<ReturnType<typeof staleStuck>>,
+) {
+	w.script("worker", say("Understood."));
+	const reply = answered(
+		await w.reply(s.stuck(1), "retry", [{ text: "Keep the header row." }]),
+	);
+	await w.settle();
+	const task = await w.harness.getTask(reply.decision.continuation, context);
+	assert.equal(task?.state.outcome?.status, "completed", "keel.retry ran");
+	assert.equal(
+		(await inputs(w, I)).at(-1),
+		retryProse({ decision: s.stuck(1), notes: "- Keep the header row." }),
+		"the owner's notes reach the worker in retry.md",
+	);
+	assert.equal(
+		(await w.harness.snapshot(Work, k, context))?.waiting.stuck,
+		undefined,
+		"the stale decision is settled",
+	);
+	assert.equal(await w.read(s.stuck(2)), undefined);
+}
+
+for (const stage of ["building", "reworking"] as const) {
+	test(`a stuck decision left open from ${stage} and answered while the next build is verified sends retry.md and settles`, () =>
+		using(async (w) => {
+			const stale = await staleStuck(w, stage, failing());
+			assert.equal(
+				(await w.entries(stale.I, "keel.build")).length,
+				stage === "building" ? 1 : 2,
+			);
+			await retriedPlainly(w, stale);
+		}));
+}
+
+test("a stale stuck decision answered after a failing verdict whose rework has not started sends retry.md, not a redirect", () =>
+	using(async (w) => {
+		// The harness cannot order two background tasks, so the rework is held back instead: `keel.rework_start` reads
+		// the options and faults while they are incomplete. The verdict is published and no rework has started.
+		const stale = await staleStuck(w, "building", async () => {
+			await w.harness.commit(
+				(tx) =>
+					Keel.options.set(tx, {
+						designer: "faux/faux-a",
+						verifier: "faux/faux-b",
+					}),
+				context,
+			);
+			return failed();
+		});
+		const [held] = await w.tasks("keel.rework_start");
+		assert.equal(held?.state.outcome?.status, "faulted");
+		assert.equal((await w.entries(stale.I, "keel.build")).length, 1);
+		await w.setOptions({ worker: "faux/faux-a" });
+		await retriedPlainly(w, stale);
+	}));
