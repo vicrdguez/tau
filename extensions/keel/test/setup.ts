@@ -337,6 +337,19 @@ export function data(entry: EntryRecord | undefined): Record<string, unknown> {
 		: {};
 }
 
+/** The text of each input a conversation received, oldest first. */
+export async function inputs(w: World, conversation: ConversationId) {
+	return (await w.entries(conversation, "pi.user")).map((entry) => {
+		const message = entry.model?.[0];
+		if (message?.role !== "user") return "";
+		return typeof message.content === "string"
+			? message.content
+			: message.content
+					.map((part) => (part.type === "text" ? part.text : ""))
+					.join("");
+	});
+}
+
 /** The text a tool returned to the model, from the tool result entries of a conversation. */
 export async function toolResults(w: World, conversation: ConversationId) {
 	return (await w.entries(conversation, "pi.tool-result")).map((entry) => {

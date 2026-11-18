@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { prose } from "tau";
 import {
 	CodingTools as Coding,
 	type ConversationId,
@@ -27,6 +28,7 @@ import {
 	failing,
 	git,
 	hanging,
+	inputs,
 	Keel,
 	named,
 	plannedPath,
@@ -37,6 +39,12 @@ import {
 	type World,
 	world,
 } from "./setup.ts";
+
+const retryProse = prose(
+	join(import.meta.dirname, "../src/prose/inputs"),
+	"retry.md",
+	["decision", "notes"],
+);
 
 async function using<T>(body: (w: World) => Promise<T>) {
 	const w = await world();
@@ -163,6 +171,11 @@ test("row 19: a moved head hands nothing over, names both SHAs, sets reworking, 
 		await w.settle();
 		const retried = w.requests.filter((r) => r.role === "worker").at(-1);
 		assert.ok(retried?.seen.includes("Publish the new head."));
+		assert.equal(
+			(await inputs(w, I)).at(-1),
+			retryProse({ decision: s.stuck(1), notes: "- Publish the new head." }),
+			"a moved head is not a redirect: the worker gets retry.md and no verdict",
+		);
 		assert.ok(
 			await w.harness.commit(
 				(tx) => tx.submissionByRequest(I, s.stuck(1)),
@@ -505,6 +518,8 @@ test("an option changed after the plan cannot change the worktree's base", () =>
 		git(w.repo, "commit", "-qm", "Other");
 		git(w.repo, "checkout", "-q", "main");
 		const main = git(w.repo, "rev-parse", "main");
+		const other = git(w.repo, "rev-parse", "other");
+		assert.notEqual(other, main);
 		w.script(
 			"worker",
 			async () => {
@@ -515,7 +530,9 @@ test("an option changed after the plan cannot change the worktree's base", () =>
 		);
 		w.script(
 			"verifier",
-			call("bash", { command: "git diff main HEAD --name-only" }),
+			call("bash", {
+				command: `git --no-replace-objects diff ${main} HEAD --name-only`,
+			}),
 		);
 		const { k } = await approved(w);
 		const path = plannedPath(w.repo, k);
@@ -523,6 +540,9 @@ test("an option changed after the plan cannot change the worktree's base", () =>
 		const R = await named(w, "verifying");
 		const [diff] = await toolResults(w, R);
 		assert.equal(diff?.text.trim(), "export.js");
+		const [asked] = await inputs(w, R);
+		assert.ok(asked?.includes(main), "the verifier's base is the planned SHA");
+		assert.ok(!asked?.includes(other), "not the commit the option names now");
 	}));
 
 test("a then task that runs twice for one decision does its work once", () =>

@@ -2,24 +2,44 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { prose } from "tau";
 import { configure, type JsonObject } from "tau/durable";
 import {
 	answered,
 	approved,
 	call,
+	commitStep,
 	context,
 	data,
 	git,
+	inputs,
 	Keel,
 	named,
+	plannedPath,
 	say,
 	toolResults,
 	world,
 } from "./setup.ts";
 
 const build = () => call("publish_build", { text: "Ready." });
-const report = (verdict: "pass" | "fail", findings: JsonObject[]) =>
-	call("publish_verdict", { text: "Checked the proof.", verdict, findings });
+const report = (
+	verdict: "pass" | "fail",
+	findings: JsonObject[],
+	text = "Checked the proof.",
+) => call("publish_verdict", { text, verdict, findings });
+const proseInputs = join(import.meta.dirname, "../src/prose/inputs");
+const redirectProse = prose(proseInputs, "redirect.md", [
+	"sha",
+	"decision",
+	"notes",
+	"verdict",
+	"blocks",
+]);
+const reworkProse = prose(proseInputs, "rework.md", [
+	"sha",
+	"verdict",
+	"blocks",
+]);
 const block = (text: string, repeats?: number) => ({
 	kind: "block",
 	text,
@@ -60,7 +80,7 @@ for (const reason of ["wrong stage", "wrong conversation"] as const) {
 	});
 }
 
-test("rulings survive refused publication, attach exactly once to their own build and reach the verifier and owner", async (t) => {
+test("rulings survive refused publication and attach once to their own build; the verifier sees that build's, the owner every one in order", async (t) => {
 	const w = await world();
 	t.after(() => w.close());
 	const first = ruling("Stream the rows"),
@@ -104,23 +124,25 @@ test("rulings survive refused publication, attach exactly once to their own buil
 		builds.map((b) => data(b).rulings),
 		[[records[0]?.id], [records[1]?.id, records[2]?.id]],
 	);
-	const inputs = (await w.entries(R, "pi.user")).map((e) =>
-		JSON.stringify(e.model),
-	);
-	assert.match(inputs[0] ?? "", /1\. Stream the rows/);
-	assert.doesNotMatch(inputs[1] ?? "", /Stream the rows/);
+	const sent = await inputs(w, R);
+	assert.match(sent[0] ?? "", /1\. Stream the rows/);
+	assert.doesNotMatch(sent[1] ?? "", /Stream the rows/);
 	const handover = String(data((await w.entries(k, "keel.handover"))[0]).text);
-	for (const value of [inputs[1] ?? "", handover]) {
-		for (const part of [
-			"1. Use an iterator",
-			"2. Keep CSV",
-			"Fits the seam",
-			"Extra migration",
-			"Mandate: Rules",
-		])
-			assert.ok(value.includes(part), part);
-	}
-	assert.doesNotMatch(handover, /Stream the rows/);
+	const details = ["Fits the seam", "Extra migration", "Mandate: Rules"];
+	for (const part of ["1. Use an iterator", "2. Keep CSV", ...details])
+		assert.ok(sent[1]?.includes(part), `the verifier sees ${part}`);
+	const trail = ["1. Stream the rows", "2. Use an iterator", "3. Keep CSV"];
+	const places = trail.map((part) => handover.indexOf(part));
+	assert.ok(
+		places.every((place) => place >= 0),
+		"the hand-over lists the rulings of the failed build and the passing one",
+	);
+	assert.deepEqual(
+		places,
+		places.toSorted((a, b) => a - b),
+		"in the order recorded",
+	);
+	for (const part of details) assert.ok(handover.includes(part), part);
 	assert.match(handover, /Checked the proof\./);
 	assert.match(handover, /1\. Consider a flag/);
 	assert.match(handover, /2\. Document it/);
@@ -192,6 +214,85 @@ test("third report stops automatic rework; owner retry sends notes and resets al
 		),
 		/A third/,
 	);
+});
+
+test("a block first reported in the stuck verdict reaches the worker with the owner's redirect, and is stuck only after two real fixes", async (t) => {
+	const w = await world();
+	t.after(() => w.close());
+	w.script(
+		"worker",
+		build(),
+		build(),
+		commitStep("export.js", "third", "Third attempt"),
+		build(),
+	);
+	w.script(
+		"verifier",
+		report("fail", [block("Alpha")]),
+		report("fail", [block("Alpha still", 1)]),
+		report(
+			"fail",
+			[block("Alpha a third time", 1), block("Beta")],
+			"Two problems remain.",
+		),
+	);
+	const { k, s } = await approved(w);
+	const I = await named(w, "building");
+	const sha = git(plannedPath(w.repo, k), "rev-parse", "HEAD");
+	assert.notEqual(sha, git(w.repo, "rev-parse", "main"));
+	const basis = async (id: Parameters<typeof w.open>[0]) => {
+		const { basis } = await w.open(id);
+		return String(
+			data(await w.harness.commit((tx) => tx.entry(basis), context)).text,
+		);
+	};
+	const first = await basis(s.stuck(1));
+	assert.match(first, /Alpha a third time/);
+	assert.match(first, /survived two fixes/i);
+	assert.ok(
+		first.includes("1. Alpha a third time\n2. Beta"),
+		"the owner sees every block the worker will be sent",
+	);
+
+	w.script("worker", build(), build());
+	w.script(
+		"verifier",
+		report("fail", [block("Beta still", 2)], "Beta remains."),
+		report("fail", [block("Beta a third time", 1)]),
+	);
+	answered(await w.reply(s.stuck(1), "retry", [{ text: "Change the parser" }]));
+	await w.settle();
+	const got = await inputs(w, I);
+	assert.equal(
+		got[3],
+		redirectProse({
+			sha,
+			decision: s.stuck(1),
+			notes: "- Change the parser",
+			verdict: "Two problems remain.",
+			blocks: "1. Alpha a third time\n2. Beta",
+		}),
+		"the redirect carries the owner's notes and every block of the stuck verdict",
+	);
+	assert.ok(
+		await w.harness.commit(
+			(tx) => tx.submissionByRequest(I, s.stuck(1)),
+			context,
+		),
+		"under the stuck decision's ID",
+	);
+	assert.equal(
+		got[4],
+		reworkProse({ sha, verdict: "Beta remains.", blocks: "1. Beta still" }),
+		"Beta's first repeat after the redirect is an ordinary rework",
+	);
+	assert.equal(got.length, 5);
+	assert.equal((await w.tasks("keel.rework_start")).length, 3);
+	const second = await basis(s.stuck(2));
+	assert.match(second, /Beta a third time/);
+	assert.ok(second.includes("1. Beta a third time"));
+	assert.doesNotMatch(second, /Alpha/);
+	assert.equal(await w.read(s.stuck(3)), undefined);
 });
 
 test("unrelated and reappearing blocks do not share counts; distinct problems can run beyond three rounds", async (t) => {
