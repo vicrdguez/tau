@@ -529,6 +529,8 @@ export const retry = single<DecisionInput<"retry" | "abort">>(
 			const work = await tx.doc(Work, k);
 			if (!expects(work, "stuck", id) || work.retry !== target) return done;
 			settle(work, "stuck", id);
+			const { stalled } = work;
+			delete work.stalled;
 			if (target === "prepare" || target === "checkout") {
 				if (target === "prepare") await tx.createTask(prepare, {}, inD(k));
 				else if (work.candidate && work.verifier)
@@ -562,14 +564,11 @@ export const retry = single<DecisionInput<"retry" | "abort">>(
 				(await annotationsOf(tx, id)).map((a) => `- ${a.text}`).join("\n") ||
 				"(none)";
 			let content = retryInput({ decision: id, notes });
-			// Only the convergence stop leaves the worker as the target while the stage is still `verifying`. Its verdict
-			// started no rework, so the worker has not seen that verdict's blocks yet.
-			if (target === work.worker && work.stage === "verifying") {
-				const stopped = work.candidate?.verdict;
-				const verdict =
-					stopped === undefined ? undefined : await tx.entry(Verdict, stopped);
+			// The verdict that stopped for non-convergence started no rework, so the worker has not seen its blocks yet.
+			if (stalled !== undefined && stalled === work.candidate?.verdict) {
+				const verdict = await tx.entry(Verdict, stalled);
 				if (verdict === undefined)
-					throw new Error(`No verdict entry ${stopped}`);
+					throw new Error(`No verdict entry ${stalled}`);
 				content = redirectInput({
 					sha: verdict.data.sha,
 					decision: id,

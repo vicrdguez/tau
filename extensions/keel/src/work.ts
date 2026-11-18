@@ -76,6 +76,11 @@ export type WorkState = {
 	pendingRulings: EntryId[];
 	/** Only blocks in the last verdict, keyed by their displayed finding number. */
 	blockCounts: Record<string, number>;
+	/**
+	 * The failing verdict that started no rework because one of its blocks survived two fixes. Set while its stuck
+	 * decision waits: a retry redirects the worker only for this verdict.
+	 */
+	stalled?: EntryId;
 	/** A publishing tool's result, by its `api.taskId`. */
 	receipts: Record<string, string>;
 };

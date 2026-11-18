@@ -276,6 +276,7 @@ export const publishVerdict = defineTool({
 				});
 				work.waiting.stuck = (await stuck(tx, k, basis, api.now())).id;
 				work.retry = worker;
+				work.stalled = verdict.id;
 				await emit(tx, KeelEvent, {
 					text: reason,
 					at: api.now(),
