@@ -93,10 +93,7 @@ export function converge(
 					(at === null && repo.trunkHead !== null)
 				)
 					moved(at);
-				if (
-					repo.trunkHead === null &&
-					!(await creation(g, repo.trunk, base))
-				)
+				if (repo.trunkHead === null && !(await creation(g, repo.trunk, base)))
 					await advance(g, repo.trunk, null, base, op.key, true);
 				await advance(g, op.branch, null, base, op.key);
 				return { kind: "started", base };
@@ -169,9 +166,13 @@ export function readPublishable(
 		await ownedBranch(g, worker.from);
 		let touched: string[] = [];
 		if (protectedGlobs?.length !== 0) {
-			const bases = (await g.output("merge-base", "--all", build, owned.head)).trimEnd().split("\n");
+			const bases = (await g.output("merge-base", "--all", build, owned.head))
+				.trimEnd()
+				.split("\n");
 			for (const base of bases)
-				touched = touched.concat(await touchedPaths(g, base, owned.head, protectedGlobs));
+				touched = touched.concat(
+					await touchedPaths(g, base, owned.head, protectedGlobs),
+				);
 			if (bases.length > 1) touched.sort();
 		}
 		const at = await g.head(worker.branch);

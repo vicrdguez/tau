@@ -40,9 +40,7 @@ export const nodeExec: Exec = (argv, cwd, { env, timeoutMs }) =>
 			child.stdout.destroy();
 			child.stderr.destroy();
 		}
-		const timer = proof
-			? setTimeout(stopWaiting, timeoutMs)
-			: undefined;
+		const timer = proof ? setTimeout(stopWaiting, timeoutMs) : undefined;
 		// "close" waits for inherited pipes. Stop any surviving group members
 		// when the command exits, before waiting for its trailing output.
 		if (proof)

@@ -26,13 +26,28 @@ export function zlist(value: string) {
 	return value.split("\0").filter(Boolean);
 }
 
-export async function touchedPaths(g: Git, from: string, to: Sha, globs?: readonly string[]) {
+export async function touchedPaths(
+	g: Git,
+	from: string,
+	to: Sha,
+	globs?: readonly string[],
+) {
 	if (globs?.length === 0 || from === to) return [];
-	return zlist(await g.output(
-		"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none",
-		"--name-only", "-z", oid(from), oid(to), "--",
-		...(globs ?? []).map((glob) => ":(top,glob)" + glob),
-	));
+	return zlist(
+		await g.output(
+			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--no-renames",
+			"--ignore-submodules=none",
+			"--name-only",
+			"-z",
+			oid(from),
+			oid(to),
+			"--",
+			...(globs ?? []).map((glob) => ":(top,glob)" + glob),
+		),
+	);
 }
 
 async function entries(g: Git) {
@@ -90,9 +105,15 @@ export function workerSpec(repo: RepoInfo, w: Worker) {
 	branch(w.branch);
 	oid(w.base);
 }
-export async function freeBranch(g: Git, name: BranchName, integration?: string) {
+export async function freeBranch(
+	g: Git,
+	name: BranchName,
+	integration?: string,
+) {
 	const entry = (await entries(g)).find(
-		(e) => e.worktree !== integration && e.branch?.toLowerCase() === "refs/heads/" + name.toLowerCase(),
+		(e) =>
+			e.worktree !== integration &&
+			e.branch?.toLowerCase() === "refs/heads/" + name.toLowerCase(),
 	);
 	if (entry) occupied(entry.worktree!);
 	// During rebase and bisect, porcelain reports a detached HEAD even
@@ -164,7 +185,11 @@ export async function creation(
 	if (at !== null) {
 		if (at !== target) moved(at);
 		const log = await g.output("reflog", "show", "-1", "--format=%gs", ref);
-		if (effect === undefined ? !log.startsWith(creationPrefix(name)) : log !== creationPrefix(name) + effect + "\n")
+		if (
+			effect === undefined
+				? !log.startsWith(creationPrefix(name))
+				: log !== creationPrefix(name) + effect + "\n"
+		)
 			occupied(ref);
 		return true;
 	}
@@ -201,7 +226,8 @@ export async function advance(
 	if (r.code !== 0) {
 		const actual = await g.head(name);
 		if (actual === to) {
-			if (old === null) await creation(g, name, to, sharedCreation ? undefined : effect);
+			if (old === null)
+				await creation(g, name, to, sharedCreation ? undefined : effect);
 			return;
 		}
 		if (actual !== old) moved(actual);
@@ -250,7 +276,12 @@ function lockReason(target: Remove["target"]) {
 
 /** Registration + lock + both directions of Git's private gitdir link.
  * A stale registration alone proves nothing about the directory now there. */
-async function registered(g: Git, repo: RepoInfo, target: Remove["target"], allowDamaged = false) {
+async function registered(
+	g: Git,
+	repo: RepoInfo,
+	target: Remove["target"],
+	allowDamaged = false,
+) {
 	const { path } = target;
 	const work = pathWork(repo, path);
 	for (const p of [join(repo.commonDir, "keel"), dirname(path), path]) {
@@ -268,27 +299,41 @@ async function registered(g: Git, repo: RepoInfo, target: Remove["target"], allo
 	const admins = join(repo.commonDir, "worktrees");
 	async function pointsTo(admin: string, link: string, expected: string) {
 		const file = join(admin, link);
-		return (await stat(file))?.isFile() &&
-			resolve(admin, (await readFile(file, "utf8")).replace(/\n$/, "")) === expected;
+		return (
+			(await stat(file))?.isFile() &&
+			resolve(admin, (await readFile(file, "utf8")).replace(/\n$/, "")) ===
+				expected
+		);
 	}
 	async function linksMatch(admin: string) {
-		return dirname(admin) === admins && !admin.includes("\0") &&
-			(await stat(admin))?.isDirectory() && (await realpath(admin)) === admin &&
-			await pointsTo(admin, "commondir", repo.commonDir) && await pointsTo(admin, "gitdir", dot);
+		return (
+			dirname(admin) === admins &&
+			!admin.includes("\0") &&
+			(await stat(admin))?.isDirectory() &&
+			(await realpath(admin)) === admin &&
+			(await pointsTo(admin, "commondir", repo.commonDir)) &&
+			(await pointsTo(admin, "gitdir", dot))
+		);
 	}
 	if ((await stat(dot))?.isFile()) {
 		const pointer = /^gitdir: (.+)\n?$/.exec(await readFile(dot, "utf8"));
 		if (pointer) {
 			const admin = resolve(path, pointer[1]!);
-			if (await linksMatch(admin)) return {entry, admin, linked:true, present:true};
+			if (await linksMatch(admin))
+				return { entry, admin, linked: true, present: true };
 		}
 	}
 	// A missing forward link can prove only the *registration*, never a
 	// directory at the old path. Only integration receipts/cleanup use this.
-	if (allowDamaged && target.kind === "checkout" && path === layout.integration(repo, work, target.key)) {
+	if (
+		allowDamaged &&
+		target.kind === "checkout" &&
+		path === layout.integration(repo, work, target.key)
+	) {
 		for (const id of await readdir(admins)) {
 			const admin = join(admins, id);
-			if (await linksMatch(admin)) return {entry, admin, linked:false, present:!!present};
+			if (await linksMatch(admin))
+				return { entry, admin, linked: false, present: !!present };
 		}
 	}
 	occupied(path);
@@ -307,7 +352,7 @@ export async function inspect(
 async function inspectLinked(
 	g: Git,
 	target: Worker | Checkout,
-	{entry, admin}: NonNullable<Awaited<ReturnType<typeof registered>>>,
+	{ entry, admin }: NonNullable<Awaited<ReturnType<typeof registered>>>,
 ) {
 	const wt = new Git(g.exec, target.path);
 	if (
@@ -370,12 +415,20 @@ export async function ensureWorktree(
 }
 
 /** A damaged integration can supply receipts, but cannot host another command. */
-export async function integrationCheckout(g: Git, repo: RepoInfo, target: Checkout, createIfMissing: boolean) {
+export async function integrationCheckout(
+	g: Git,
+	repo: RepoInfo,
+	target: Checkout,
+	createIfMissing: boolean,
+) {
 	const registration = await registered(g, repo, target, true);
-	if (registration) return {
-		admin: registration.admin,
-		owned: registration.linked ? await inspectLinked(g, target, registration) : null,
-	};
+	if (registration)
+		return {
+			admin: registration.admin,
+			owned: registration.linked
+				? await inspectLinked(g, target, registration)
+				: null,
+		};
 	if (!createIfMissing) occupied(target.path);
 	const owned = await ensureWorktree(g, repo, target);
 	return { admin: owned.admin, owned };
@@ -403,9 +456,20 @@ export async function remove(
 		workerSpec(repo, target);
 		const owned = await inspect(g, repo, target);
 		if (!owned) return { kind: "removed" } as const;
-		if (merged === true && mergedHead !== undefined && !(await g.ancestor(owned.head!, mergedHead)))
-			return { kind: "kept", reason: "worker HEAD is not included in mergedHead", files: [] } as const;
-		const files = await dirt(owned.wt, merged === true ? "remove_merged" : "remove");
+		if (
+			merged === true &&
+			mergedHead !== undefined &&
+			!(await g.ancestor(owned.head!, mergedHead))
+		)
+			return {
+				kind: "kept",
+				reason: "worker HEAD is not included in mergedHead",
+				files: [],
+			} as const;
+		const files = await dirt(
+			owned.wt,
+			merged === true ? "remove_merged" : "remove",
+		);
 		if (files.length)
 			return {
 				kind: "kept",

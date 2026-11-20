@@ -110,7 +110,13 @@ export async function integrate(
 		const trunk = await g.head(repo.trunk);
 		if (trunk !== other) moved(trunk);
 		if (await g.ancestor(other, op.expected)) {
-			return { kind: "combined", sha: at, trunk, checks: [], ...(op.protectedGlobs ? { touched: [] } : {}) };
+			return {
+				kind: "combined",
+				sha: at,
+				trunk,
+				checks: [],
+				...(op.protectedGlobs ? { touched: [] } : {}),
+			};
 		}
 	}
 
@@ -143,7 +149,14 @@ export async function integrate(
 	);
 	if (at !== op.expected && at !== candidate) moved(at);
 	const paths = op.protectedGlobs
-		? { touched: await touchedPaths(g, op.expected, candidate, op.protectedGlobs) }
+		? {
+				touched: await touchedPaths(
+					g,
+					op.expected,
+					candidate,
+					op.protectedGlobs,
+				),
+			}
 		: {};
 	const target = {
 		kind: "checkout",
@@ -153,7 +166,12 @@ export async function integrate(
 	} as const;
 	// Never recreate missing proof evidence on the strength of a branch update.
 	const published = at === candidate;
-	const {admin, owned} = await integrationCheckout(g, repo, target, !published);
+	const { admin, owned } = await integrationCheckout(
+		g,
+		repo,
+		target,
+		!published,
+	);
 	if (!owned && published) occupied(target.path);
 	async function changesIn(
 		still: NonNullable<typeof owned>,
@@ -188,7 +206,14 @@ export async function integrate(
 		if (!before) return owned.wt;
 		// Forget skip-worktree/assume-unchanged bits as well as staged dirt.
 		// Checkout detached: reset --hard would move a proof-attached branch.
-		await owned.wt.output("rm", "-rf", "--sparse", "--ignore-unmatch", "--", ".");
+		await owned.wt.output(
+			"rm",
+			"-rf",
+			"--sparse",
+			"--ignore-unmatch",
+			"--",
+			".",
+		);
 		await owned.wt.output("checkout", "--force", "--detach", candidate);
 		before = undefined;
 		return owned.wt;
@@ -197,12 +222,17 @@ export async function integrate(
 		const still = await integrationCheckout(g, repo, target, false);
 		if (still.admin !== admin) occupied(target.path);
 		// A broken checkout no longer resolves a HEAD; do not run Git there.
-		return still.owned ? changesIn(still.owned) : {paths:[".git"], headChanged:true};
+		return still.owned
+			? changesIn(still.owned)
+			: { paths: [".git"], headChanged: true };
 	};
 	const reports: CheckReport[] = [];
 	const failed = (changes?: ProofChanges) => ({
-		kind: "checks_failed" as const, sha: candidate, checks: reports, ...paths,
-		...(changes ? {changes} : {}),
+		kind: "checks_failed" as const,
+		sha: candidate,
+		checks: reports,
+		...paths,
+		...(changes ? { changes } : {}),
 	});
 	for (const [index, spec] of op.checks.entries()) {
 		const r = await check(
@@ -220,7 +250,13 @@ export async function integrate(
 	if (!published && before) return failed(before);
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
-		? { ...paths, kind: "combined", sha: candidate, trunk: other, checks: reports }
+		? {
+				...paths,
+				kind: "combined",
+				sha: candidate,
+				trunk: other,
+				checks: reports,
+			}
 		: { ...paths, kind: "merged", sha: candidate, checks: reports };
 }
 
