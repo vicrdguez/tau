@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -207,6 +207,92 @@ test("rename into a protected glob is not an addition; genuine additions pass, p
 		held,
 	);
 	assert.equal(git(f.root, "rev-parse", f.branch), encode.sha);
+});
+
+test("touched retains the caller's path selection while classification also reports owner policy", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	await mkdir(join(f.worker.path, ".keel"));
+	await writeFile(join(f.worker.path, ".keel", "rule"), "policy");
+	git(f.worker.path, "add", ".");
+	git(f.worker.path, "commit", "-m", "policy addition");
+	const pub = await f.publish(["book"]);
+	assert.equal(pub.kind, "ok");
+	assert.deepEqual(pub.touched, ["book"]);
+	assert.deepEqual(
+		pub.changes.map((c) => c.path),
+		[".keel/rule", "book"],
+	);
+	const none = await f.publish([]);
+	assert.equal(none.kind, "ok");
+	assert.deepEqual(none.touched, []);
+	assert.deepEqual(
+		none.changes.map((c) => c.path),
+		[".keel/rule"],
+	);
+	const plan = { ...item, item: pub.sha, protectedGlobs: ["book"] };
+	const guarded = await f.run({ ...plan, protection });
+	is(guarded, "protected");
+	assert.deepEqual(guarded.touched, ["book"]);
+	assert.deepEqual(guarded.protectedChanges, pub.changes);
+	const unguarded = await f.run(plan);
+	is(unguarded, "merged");
+	assert.deepEqual(unguarded.touched, ["book"]);
+	git(f.worker.path, "rm", "-r", ".keel");
+	await writeFile(join(f.worker.path, ".keel"), "replace policy directory");
+	git(f.worker.path, "add", ".keel");
+	git(f.worker.path, "commit", "-m", "replace policy");
+	const replacement = await f.publish([]);
+	assert.equal(replacement.kind, "ok");
+	assert.deepEqual(
+		replacement.changes.map((c) => [c.path, c.kind]),
+		[
+			[".keel", "added"],
+			[".keel/rule", "deleted"],
+		],
+	);
+});
+
+test("an added .keel symlink is owner policy even for Encode, including an exact merge waiver", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	await symlink("owner-settings", join(f.worker.path, ".keel"));
+	git(f.worker.path, "add", ".keel");
+	git(f.worker.path, "commit", "-m", "redirect settings");
+	const pub = await f.publish([]);
+	assert.equal(pub.kind, "ok");
+	assert.deepEqual(pub.touched, []);
+	const { protectedViolations } = await import("../../src/repo/index.ts");
+	for (const reviewedEncode of [true, false])
+		assert.deepEqual(
+			protectedViolations(pub.changes, reviewedEncode).map((c) => [
+				c.path,
+				c.kind,
+			]),
+			[[".keel", "added"]],
+		);
+	const plan = {
+		...item,
+		item: pub.sha,
+		protectedGlobs: [],
+		protection: {
+			...protection,
+			reviewedEncode: true,
+			allowedChanges: pub.changes,
+		},
+	};
+	const held = await f.run(plan);
+	is(held, "protected");
+	assert.deepEqual(held.touched, []);
+	assert.deepEqual(held.protectedChanges, pub.changes);
+	assert.deepEqual(
+		await f.run({
+			...plan,
+			protection: { ...plan.protection, allowedCandidate: held.sha },
+		}),
+		held,
+	);
+	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
 });
 
 test("a publication waiver does not cover different content at the same protected path", async (t) => {
