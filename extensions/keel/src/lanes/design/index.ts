@@ -355,12 +355,12 @@ export const design: Lane<State> = {
 				};
 			}
 			if (s.phase === "review") {
-				const outcome = answered(s.rounds, e);
+				const outcome = answered(s.audit!, s.reference, s.rounds, e);
 				if (!outcome) return { state: s };
 				const next = { ...s, ...outcome };
 				switch (outcome.phase) {
 					case "bound": {
-						const mandate = binding(s.audit!, s.reference, outcome.rounds);
+						const mandate = binding(s.audit!, outcome.rounds);
 						return {
 							state: { ...next, mandate },
 							send: [toBuild(w.work!, { kind: "bound", mandate })],

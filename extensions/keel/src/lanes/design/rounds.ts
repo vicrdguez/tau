@@ -11,6 +11,7 @@ type Answer = {
 		n: number;
 		text: string;
 		range: { start: number; end: number } | null;
+		excerpt: string | null;
 	}[];
 };
 export type Round = {
@@ -38,6 +39,13 @@ const draftInput = prose(dir, "inputs/design/draft.md", [
 	"direction",
 ]);
 const revise = prose(dir, "inputs/design/revise.md", [
+	"basis",
+	"answer",
+	"direction",
+]);
+const designRider = prose(dir, "inputs/design/design-rider.md", [
+	"label",
+	"text",
 	"basis",
 	"answer",
 	"direction",
@@ -144,8 +152,11 @@ function removed(prev: Round, d: Draft, a: Audit) {
 		.filter((n) => !current.has(n.label))
 		.map((n) => n.label);
 }
+function passage(a: Answer["annotations"][number]) {
+	return a.excerpt === null ? "" : `\n> ${a.excerpt}`;
+}
 function annotation(a: Answer["annotations"][number]) {
-	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}`;
+	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}${passage(a)}`;
 }
 function repliesText(r: Round, prev: Round | undefined) {
 	return (
@@ -232,44 +243,50 @@ export function designerInput(
 			direction,
 		});
 	const r = history.at(-1)!;
-	const designed = redesign(r);
-	return revise({
+	const facts = {
 		basis: basis(a, reference, history),
-		answer: [
-			designed
-				? `Design ${designed.label}: ${r.draft.riders.find((v) => v.label === designed.label)!.text}`
-				: "Rework the Mandate.",
-			...owed(r).map(annotation),
-		].join("\n"),
+		answer: owed(r).map(annotation).join("\n") || "None.",
 		direction,
-	});
+	};
+	const designed = redesign(r);
+	return designed
+		? designRider({
+				...facts,
+				...r.draft.riders.find((v) => v.label === designed.label)!,
+			})
+		: revise(facts);
 }
-export function answered(history: Round[], f: Fact) {
-	const n = history.length;
-	const r = history.at(-1)!;
+export function answered(
+	a: Audit,
+	reference: string,
+	history: Round[],
+	f: Fact,
+) {
+	const ask = reviewAsks(a, reference, history).find(
+		(v) => v.subject === f.subject,
+	);
+	if (!ask || !ask.choices.includes(f.choice)) return null;
+	const n = history.length,
+		r = history.at(-1)!;
 	const answer: Answer = {
 		decision: f.decision,
 		choice: f.choice,
-		annotations: f.annotations.map((a) => ({ ...a, range: a.range ?? null })),
+		annotations: f.annotations.map(({ n, text, range }) => ({
+			n,
+			text,
+			range: range ?? null,
+			excerpt: range ? ask.basis.slice(range.start, range.end) : null,
+		})),
 	};
-	let next: Round;
-	if (
-		f.subject === mainKey(n) &&
-		!r.answer &&
-		["approve", "rework", "decline"].includes(f.choice)
-	)
-		next = { ...r, answer };
-	else {
-		const i = r.riders.findIndex(
-			(v) => !v.answer && riderKey(n, v.label) === f.subject,
-		);
-		if (i === -1 || !["accept", "leave_open", "design"].includes(f.choice))
-			return null;
-		next = {
-			...r,
-			riders: r.riders.map((v, j) => (i === j ? { ...v, answer } : v)),
-		};
-	}
+	const next =
+		f.subject === mainKey(n)
+			? { ...r, answer }
+			: {
+					...r,
+					riders: r.riders.map((v) =>
+						riderKey(n, v.label) === f.subject ? { ...v, answer } : v,
+					),
+				};
 	const rounds = [...history.slice(0, -1), next];
 	return {
 		rounds,
@@ -292,11 +309,7 @@ export function declineText(r: Round) {
 				.join("\n") || "None.",
 	});
 }
-export function binding(
-	a: Audit,
-	reference: string,
-	history: Round[],
-): Mandate {
+export function binding(a: Audit, history: Round[]): Mandate {
 	const r = history.at(-1)!;
 	const d = r.draft;
 	const ns = nodes(d, a).filter(
@@ -310,17 +323,12 @@ export function binding(
 	);
 	return {
 		reviewed: true,
-		encodeRequired: d.seams.length + d.nodes.length > 0 || accepted.length > 0,
-		approvalNotes: history.flatMap((v, i) => {
-			if (v.answer?.choice !== "approve" || !v.answer.annotations.length)
-				return [];
-			const doc = basis(a, reference, history.slice(0, i + 1));
-			return v.answer.annotations.map((n) =>
-				n.range
-					? `${n.text}\n> ${doc.slice(n.range.start, n.range.end)}`
-					: n.text,
-			);
-		}),
+		encodeRequired: d.seams.length > 0 || d.nodes.length > 0,
+		approvalNotes: history.flatMap((v) =>
+			v.answer?.choice === "approve"
+				? v.answer.annotations.map((n) => n.text + passage(n))
+				: [],
+		),
 		delegated: d.riders
 			.filter((p) =>
 				r.riders.some(

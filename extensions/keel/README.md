@@ -40,6 +40,8 @@ paths:
 Round only when posting a ledger entry. Compare the sum of the posted entries with the settled balance.
 ```
 
+The frontmatter accepts a scalar description and inline or block lists of strings. A project name that matches a Keel name appears as `project/<name>`. A malformed project file produces a diagnostic; its body is not delivered. Other files remain available.
+
 Worker bindings use the policy from the item's prepared base; the index and explicit pulls see later edits in that checkout. A verifier receives every project description from the checkout it reviews. Keel binds `model-the-domain` when the designer shapes or revises a Mandate. A failed claimed fix adds `attack-the-premise` to the worker's rework input. A diagnosis gets both `attack-the-premise` and `fix-root-causes`. Project policy stays protected even from Encode.
 
 ## What the owner decides

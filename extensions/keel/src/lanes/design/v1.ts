@@ -33,6 +33,7 @@ type Answer = {
 		n: number;
 		text: string;
 		range: { start: number; end: number } | null;
+		excerpt: string | null;
 	}[];
 };
 export const designV1 = {
