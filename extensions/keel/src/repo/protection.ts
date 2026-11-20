@@ -3,7 +3,7 @@ import type { ProtectedChange, Protection, Sha } from "./types.ts";
 import { touchedPaths, zlist } from "./worktrees.ts";
 
 export function isPolicyPath(path: string) {
-	return path === ".keel" || path.startsWith(".keel/");
+	return /^\.keel(?:\/|$)/i.test(path);
 }
 
 export function protectedViolations(
