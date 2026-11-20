@@ -854,10 +854,8 @@ test("an identical tree needs no landing, but only while trunk is still at the e
 	assert.notEqual(combined, f.base);
 	const plan = {
 		kind: "prepare_landing",
-		key: "same",
-		expectedTrunk: f.base,
-		combined,
-		message: "empty",
+		key: "prepare:same",
+		landing: { key: "same", expectedTrunk: f.base, combined, message: "empty" },
 	} as const;
 	assert.deepEqual(await f.run(plan), { kind: "unchanged", sha: f.base });
 	assert.equal(git(f.root, "rev-parse", "trunk"), f.base);
