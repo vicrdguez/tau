@@ -305,7 +305,8 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	).text;
 	assert.match(request, /# Fix Root Causes/);
 	assert.match(request, /# Attack the Premise/);
-	assert.doesNotMatch(request, /description:|\]\([^)]+\.md\)/);
+	assert.doesNotMatch(request, /description:/);
+	assert.ok(request.includes("[Build the Lever](build-the-lever.md)"));
 	assert.match(request, /negative balance/);
 	assert.match(request, /Diagnoser only: inspect floats/);
 	assert.match(request, /Threads that survived two claimed fixes: totals/);
