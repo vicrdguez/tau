@@ -22,6 +22,7 @@
 - A reviewed Mandate without seams or rules can start with ordinary work.
 - The first plan must answer every approval annotation exactly once by number with a valid disposition and a nonblank reason. Fabricated numbers are refused.
 - Planning shows numbered approval notes and bound nodes. The accepted replies are kept, and the brief carries the cited node's label and content.
+- The planner, worker and verifier can distinguish binding design sections and falsifiable rules from delegated, non-binding riders. A delegated label cannot authorize a brief.
 - A correction adds work without reopening the first plan's approval replies or scheduling a second initial Encode.
 - A worker input supplies its fences for project principles. Only a rework in which a claimed fix survived triggers the premise check.
 - A ruling preserves cited principle names through publication; a worker cannot cite an undelivered principle.

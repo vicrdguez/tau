@@ -4,9 +4,11 @@ import type { ConversationId, JsonObject } from "tau/durable";
 import { workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { buildLane, buildTools } from "../src/lanes/build/index.ts";
+import type { Mandate } from "../src/lanes/design/public.ts";
 import { drive } from "./fixtures/drive.ts";
 
-const mandate = {
+const mandate: Mandate = {
+	delegated: [],
 	reviewed: false,
 	encodeRequired: false,
 	approvalNotes: [] as string[],
@@ -96,7 +98,7 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 		const done = (result: JsonObject) =>
 			send({ kind: "effect_done", key: effect().key, result });
-		function start(bound = { ...mandate, reviewed }) {
+		function start(bound: Mandate = { ...mandate, reviewed }) {
 			send({
 				kind: "bound",
 				mandate: bound,
@@ -191,12 +193,14 @@ test("plans refuse unsafe or duplicate IDs, empty plans, missing dependencies an
 	assert.deepEqual(b.effects(), []);
 });
 
-const reviewed = {
+const reviewed: Mandate = {
 	...mandate,
 	reviewed: true,
 	encodeRequired: true,
 	approvalNotes: ["Cover cash ties", "Keep the integer seam"],
+	delegated: [{ label: "tick-order", text: "Choose tick order locally" }],
 	nodes: [
+		{ label: "port-api", section: "Seam", body: "```ts\nprice(cents);\n```" },
 		{
 			label: "cash-port",
 			rule: "Price takes cents",
@@ -238,6 +242,11 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.match(prompt, /1\. Cover cash ties/);
 	assert.match(prompt, /2\. Keep the integer seam/);
 	assert.match(prompt, /Price takes cents/);
+	assert.match(prompt, /Seam[\s\S]*```ts\nprice\(cents\);\n```/);
+	assert.match(
+		prompt,
+		/delegated[\s\S]*tick-order[\s\S]*Choose tick order locally/i,
+	);
 	for (const bad of [
 		[],
 		replies.slice(1),
@@ -251,10 +260,19 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	}
 	const first = b.send({ kind: "plan", items: [encode], replies });
 	assert.deepEqual(first.state.approvalReplies, replies);
-	b.send({ kind: "brief", ...brief, nodes: ["cash-port"] });
+	assert.ok(
+		"reject" in b.tryEvent({ kind: "brief", ...brief, nodes: ["tick-order"] }),
+	);
+	b.send({ kind: "brief", ...brief, nodes: ["cash-port", "port-api"] });
 	b.done({ kind: "worktree", base: repo.trunkHead });
+	assert.match(
+		b.request("worker").text,
+		/delegated[\s\S]*Choose tick order locally/i,
+	);
 	const report = String(b.pub().send![0]!.event.brief);
 	assert.match(report, /cash-port/);
+	assert.match(report, /port-api/);
+	assert.doesNotMatch(report, /tick-order/);
 	assert.match(report, /Price takes cents/);
 	assert.match(report, /fractional cents fail/);
 	b.send({ kind: "merged", item: "fix", head: merged });
@@ -483,7 +501,7 @@ test("worker input passes the item's path fences and triggers a premise check on
 	b.send(back);
 	assert.notEqual(expectation().situation, "survived_fix");
 	b.pub(undefined, ["tie"]);
-	b.send({ ...back, survivedFix: true });
+	b.send(back);
 	assert.equal(expectation().situation, "survived_fix");
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	b.pub(undefined, ["tie"]);
