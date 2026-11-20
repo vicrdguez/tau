@@ -22,7 +22,11 @@ type MandateV1 = {
 	encodeRequired: boolean;
 	approvalNotes: string[];
 	intent: string;
-	nodes: { label: string; rule: string; probe: string }[];
+	nodes: (
+		| { label: string; rule: string; probe: string }
+		| { label: string; section: string; body: string }
+	)[];
+	delegated: { label: string; text: string }[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
 	protectedPaths: string[];
 };

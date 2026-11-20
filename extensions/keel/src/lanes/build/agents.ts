@@ -3,13 +3,20 @@ import { type AgentDecl, prose } from "../../kernel/lane.ts";
 import { type Build, held, type Item, workerKey } from "./state.ts";
 
 const dir = import.meta.dirname;
+const boundMandate = prose(dir, "../../prose/documents/build-mandate.md", [
+	"reviewed",
+	"nodes",
+	"delegated",
+]);
 function authority(s: Build, labels?: string[]) {
 	const m = s.mandate!;
 	const rows: [string, string][] = [
 		["intent", m.intent],
-		...m.nodes.map(({ label, rule, probe }): [string, string] => [
-			label,
-			[rule, probe].filter(Boolean).join("\n\n"),
+		...m.nodes.map((n): [string, string] => [
+			n.label,
+			"rule" in n
+				? `${n.rule}\n\nProbe: ${n.probe}`
+				: `${n.section}\n\n${n.body}`,
 		]),
 		...m.checks.map(({ id, argv, timeoutMs }): [string, string] => [
 			id,
@@ -21,7 +28,15 @@ function authority(s: Build, labels?: string[]) {
 		.filter(([label]) => !labels || labels.includes(label))
 		.map(([label, content]) => `### ${label}\n\n${content}`)
 		.join("\n\n");
-	return labels ? nodes : `Owner-reviewed: ${m.reviewed}\n\n${nodes}`;
+	return labels
+		? nodes
+		: boundMandate({
+				reviewed: String(m.reviewed),
+				nodes,
+				delegated:
+					m.delegated.map((r) => `- ${r.label}: ${r.text}`).join("\n") ||
+					"None.",
+			});
 }
 const plan = prose(dir, "../../prose/inputs/build/plan.md", [
 	"mandate",
