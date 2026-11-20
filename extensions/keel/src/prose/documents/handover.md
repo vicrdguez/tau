@@ -15,7 +15,7 @@ Verifier notes:
 Non-convergence and diagnosis:
 {{diagnoses}}
 
-Direction the owner gave on findings:
+Your directions and protected-change permissions:
 {{directions}}
 
 Residual risk: {{risk}}

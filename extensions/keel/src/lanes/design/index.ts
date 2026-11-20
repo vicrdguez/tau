@@ -388,7 +388,16 @@ export const design: Lane<State> = {
 				s.readings[e.choice === "first" ? 0 : 1],
 				...e.annotations.map((n) => n.n + ". " + n.text),
 			].join("\n");
-			return { state: { ...s, phase: "directed", direction, seq: s.seq + 1 } };
+			return {
+				state: { ...s, phase: "directed", direction, seq: s.seq + 1 },
+				send: [
+					{
+						lane: "verify",
+						work: w.work,
+						event: { kind: "ambiguity_answer", direction },
+					},
+				],
+			};
 		}
 		if (
 			e.kind === "agent_stalled" &&
