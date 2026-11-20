@@ -33,7 +33,11 @@ export const ROLES = {
 	arena_seat_3: { lane: "design", tools: inspect },
 	arena_judge: { lane: "design", tools: read },
 	arena_challenger: { lane: "design", tools: inspect },
-	coordinator: { lane: "build", tools: read },
+	coordinator: {
+		lane: "build",
+		tools: read,
+		instructions: prose(dir, "../prose/roles/coordinator.md", [])({}),
+	},
 	worker: {
 		lane: "build",
 		tools: change,
@@ -45,7 +49,11 @@ export const ROLES = {
 		tools: inspect,
 		instructions: prose(dir, "../prose/roles/verifier.md", [])({}),
 	},
-	diagnoser: { lane: "verify", tools: inspect },
+	diagnoser: {
+		lane: "verify",
+		tools: inspect,
+		instructions: prose(dir, "../prose/roles/diagnoser.md", [])({}),
+	},
 	investigator: { lane: "queue", tools: inspect },
 	queue_explorer: { lane: "queue", tools: inspect },
 } as const;

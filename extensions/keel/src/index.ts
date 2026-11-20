@@ -1,11 +1,4 @@
-import { createKernel } from "./kernel/kernel.ts";
+import { createWorkflow } from "./workflow.ts";
 
 export { options } from "./roles/index.ts";
-
-export const { extension, entry } = createKernel({
-	lanes: [],
-	tools: [],
-	runEffect: async () => {
-		throw new Error("No Keel effects are installed");
-	},
-});
+export const { extension, entry } = createWorkflow();
