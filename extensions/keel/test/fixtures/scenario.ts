@@ -36,15 +36,13 @@ const thread = "line-ending";
 const evidence = "The checked-out book has no trailing newline.";
 type Phase = "rework" | "through-publish" | "through-land" | "after-landing";
 
-/** Model decisions and coding tool calls only. The script does not send lane events. */
-export async function openScenario(
+/** The production entry and coding tools, with scripted models and a real cwd. */
+export async function openScriptedWorkflow(
 	cwd: string,
 	storage: Storage,
-	phase: Phase,
+	first: boolean,
 	runner?: EffectRunner,
 ) {
-	const first = phase === "rework" || phase === "through-publish";
-	const rework = phase === "rework";
 	const k = createWorkflow(runner);
 	const registry = createRegistry();
 	registry.install(CodingTools);
@@ -88,29 +86,73 @@ export async function openScenario(
 				agent: { ...(await harness.commit(k.entry, ctx)), cwd },
 			})
 		: await harness.root(ctx);
-	const script: FauxResponseStep[] = [];
 	const errors: string[] = [];
-	function call(
+	function turn(
 		role: string,
 		name: string,
 		args: JsonObject,
-		expectedInput?: string,
-	) {
-		script.push((context, _, __, model) => {
+		...expectedInput: string[]
+	): FauxResponseStep {
+		return (context, _, __, model) => {
 			if (model.id !== role)
 				errors.push(`${name}: expected ${role}, got ${model.id}`);
-			if (
-				expectedInput &&
-				!JSON.stringify(
-					context.messages.filter((m) => m.role === "user").at(-1),
-				).includes(expectedInput)
-			)
-				errors.push(`${name}: latest input did not include ${expectedInput}`);
+			const latest = JSON.stringify(
+				context.messages.filter((m) => m.role === "user").at(-1),
+			);
+			for (const part of expectedInput)
+				if (!latest?.includes(part))
+					errors.push(
+						`${name}: latest input did not include ${part}: ${latest}`,
+					);
+			for (const m of context.messages)
+				if (m.role === "toolResult" && m.isError)
+					errors.push(`${m.toolName}: ${JSON.stringify(m.content)}`);
 			return fauxAssistantMessage([fauxToolCall(name, args)], {
 				stopReason: "toolUse",
 			});
-		});
+		};
 	}
+	async function settle() {
+		harness.resume();
+		for (;;) {
+			const { tasks } = await harness.inspect(ctx);
+			if (!tasks.length) break;
+			await Promise.all(
+				tasks.map(async ({ record, state }) => {
+					assert.notEqual(state.kind, "blocked", record.kind);
+					const {
+						state: { outcome },
+					} = await harness.waitForTask(record.id, ctx);
+					assert.notEqual(
+						outcome.status,
+						"faulted",
+						JSON.stringify({ kind: record.kind, outcome }),
+					);
+				}),
+			);
+		}
+		assert.deepEqual(errors, []);
+	}
+	return { store, root, provider, turn, settle };
+}
+
+export async function openScenario(
+	cwd: string,
+	storage: Storage,
+	phase: Phase,
+	runner?: EffectRunner,
+) {
+	const first = phase === "rework" || phase === "through-publish";
+	const rework = phase === "rework";
+	const { store, root, provider, turn, settle } = await openScriptedWorkflow(
+		cwd,
+		storage,
+		first,
+		runner,
+	);
+	const { harness } = store;
+	const script: FauxResponseStep[] = [];
+	const call = (...args: Parameters<typeof turn>) => script.push(turn(...args));
 	const proof = join(cwd, ".git", "merge-proof");
 	if (first) {
 		call(
@@ -221,27 +263,6 @@ export async function openScenario(
 		});
 	}
 	provider.setResponses(script);
-	async function settle() {
-		harness.resume();
-		for (;;) {
-			const { tasks } = await harness.inspect(ctx);
-			if (!tasks.length) break;
-			await Promise.all(
-				tasks.map(async ({ record, state }) => {
-					assert.notEqual(state.kind, "blocked", record.kind);
-					const {
-						state: { outcome },
-					} = await harness.waitForTask(record.id, ctx);
-					assert.notEqual(
-						outcome.status,
-						"faulted",
-						JSON.stringify({ kind: record.kind, outcome }),
-					);
-				}),
-			);
-		}
-		assert.deepEqual(errors, []);
-	}
 	async function assertHistory(expected: {
 		publishes: number;
 		reviews: number;

@@ -16,6 +16,7 @@ import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { ProjectState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { runRepoEffect } from "../src/workflow.ts";
+import { openReview, seedBookPolicy } from "./fixtures/mandate-scenario.ts";
 import { openScenario } from "./fixtures/scenario.ts";
 import { fixture, git } from "./repo/fixture.ts";
 import { latch } from "./toy.ts";
@@ -76,6 +77,81 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 		checkouts,
 	);
 	await s.accept(trunk);
+});
+
+test("reviewed Mandate: rework both annotated nodes, dispose each rider, redesign and approve, then Encode, migrate, verify, land and hand over", async (t) => {
+	const { root } = await fixture(t);
+	const base = await seedBookPolicy(root);
+	const s = await openReview(root, new MemoryStorage(), true);
+	t.after(() => s.harness.close(ctx));
+	await s.start();
+	s.scriptRevision();
+	await s.rework();
+	await s.finish();
+	await assertLanded(root, base, `keel/${s.root.id}/build`, []);
+});
+
+test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening stale riders or starting a build", async (t) => {
+	const { root } = await fixture(t);
+	const file = join(root, ".git", "keel.sqlite");
+	const first = await openReview(root, await openNodeSqliteStorage(file), true);
+	const [review, rider] = await (async () => {
+		try {
+			await first.start();
+			return await Promise.all([
+				first.review("mandate/1"),
+				first.review("rider/1/empty-input"),
+			]);
+		} finally {
+			await first.harness.close(ctx);
+		}
+	})();
+	const kill = fileURLToPath(
+		new URL("./fixtures/mandate-kill.ts", import.meta.url),
+	);
+	await assert.rejects(
+		promisify(execFile)(process.execPath, [kill, root, file], {
+			timeout: 30000,
+		}),
+		{ signal: "SIGKILL", stdout: "kill:revision-owed\n" },
+	);
+	const s = await openReview(root, await openNodeSqliteStorage(file), false);
+	t.after(() => s.harness.close(ctx));
+	assert.deepEqual(
+		await s.subjects(),
+		[],
+		"old round withdrawn and no new review yet",
+	);
+	const stored = await s.harness.commit(
+		(tx) => decision(tx, review.decision.id),
+		ctx,
+	);
+	assert.ok(stored?.status === "answered");
+	assert.equal(stored.choice, "rework");
+	assert.deepEqual(
+		stored.annotations.map((n) => n.text),
+		["Name the future reader.", "Choose the current guide explicitly."],
+	);
+	assert.equal(
+		(await s.harness.commit((tx) => decision(tx, rider.decision.id), ctx))
+			?.status,
+		"withdrawn",
+	);
+	s.scriptRevision();
+	await s.settle();
+	assert.deepEqual(await s.subjects(), [
+		"mandate/2",
+		"rider/2/empty-input",
+		"rider/2/indentation",
+		"rider/2/stdout",
+	]);
+	const text = (await s.review("mandate/2")).text;
+	assert.ok(text.includes("The reporting CLI."));
+	const results = (await s.root.entries({}, 100, undefined, ctx)).items
+		.flatMap((e) => e.model ?? [])
+		.filter((m) => m.role === "toolResult" && m.toolName === "publish_mandate");
+	assert.equal(results.length, 2, "exactly one publication in each round");
+	assert.equal(git(root, "for-each-ref", "refs/heads/keel/"), "");
 });
 
 test("cancel from the idle designer desk while a worker creation is running: one decision, one final inventory, no abort of the desk", {
