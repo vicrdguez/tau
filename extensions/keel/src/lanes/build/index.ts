@@ -18,6 +18,7 @@ import {
 import { mandateLabels } from "../design/public.ts";
 import { fileHolding, type Resume } from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
+import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
@@ -85,6 +86,7 @@ function discover(s: Build, w: World) {
 }
 function prepare(s: Build, i: Item, w: World) {
 	const work = String(w.work);
+	if (i.worker) s.abandoned.push(i.worker);
 	const attempt = ++i.attempt;
 	i.stage = "preparing";
 	i.retry = 0;
@@ -175,7 +177,8 @@ function hold(
 	}
 function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 	const state = s;
-	if (s.phase === "closed" || s.phase === "cancelled") return { state };
+	if (s.phase === "cancelled") return settleCleanup(s,e,w);
+	if (s.phase === "closed") return { state };
 	switch (e.kind) {
 		case "effect_done":
 		case "effect_failed": {
@@ -215,6 +218,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				(result.kind === "removed" || result.kind === "kept")
 			) {
 				i.stage = "merged";
+				if (result.kind === "removed") i.worker = null;
 				schedule(s, w);
 				return {
 					state,
@@ -253,10 +257,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	const state = s;
 	if (s.phase === "cancelled" || s.phase === "closed") return { state };
-	if (e.kind === "cancel") {
-		s.phase = "cancelled";
-		return { state };
-	}
+	if (e.kind === "cancel") return cancel(s,w,plans(s,w));
 	if (e.kind === "closed") {
 		s.phase = "closed";
 		return { state };
@@ -468,6 +469,6 @@ const build: Lane<Build> = {
 	agents,
 	view: buildView,
 	asks: () => [],
-	effects: (s, w) => plans(s, w).map((p) => p.effect),
+	effects: (s, w) => s.phase === "cancelled" ? cleanupEffects(s) : plans(s, w).map((p) => p.effect),
 };
 export const buildLane = defineLane(build, buildV1);

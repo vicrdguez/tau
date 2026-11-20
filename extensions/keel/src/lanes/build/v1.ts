@@ -40,6 +40,9 @@ type V1 = {
 	seq: number;
 	setupSeq: number;
 	setupRetry: number;
+	abandoned: WorkerV1[];
+	cleanup: {worker:WorkerV1;mergedHead:Sha|null;wait:string|null;key:string}[];
+	kept: string[];
 	coordinator: {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
@@ -106,6 +109,9 @@ export const buildV1 = {
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
+		abandoned: [],
+		cleanup: [],
+		kept: [], 
 		coordinator: {
 			tool: null,
 			item: null,
