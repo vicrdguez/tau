@@ -97,6 +97,7 @@ export async function integrate(
 	repo: RepoInfo,
 	op: Integrate,
 ): Promise<RepoResult> {
+	const protectedGlobs = "protectedGlobs" in op ? op.protectedGlobs : undefined;
 	const taking = op.kind === "take_trunk";
 	const into = taking ? op.build : op.into,
 		other = taking ? op.trunk : op.item;
@@ -115,7 +116,7 @@ export async function integrate(
 				sha: at,
 				trunk,
 				checks: [],
-				...(op.protectedGlobs ? { touched: [] } : {}),
+				...(protectedGlobs ? { touched: [] } : {}),
 			};
 		}
 	}
@@ -148,14 +149,9 @@ export async function integrate(
 		taking ? "Take trunk" : op.message,
 	);
 	if (at !== op.expected && at !== candidate) moved(at);
-	const paths = op.protectedGlobs
+	const paths = protectedGlobs
 		? {
-				touched: await touchedPaths(
-					g,
-					op.expected,
-					candidate,
-					op.protectedGlobs,
-				),
+				touched: await touchedPaths(g, op.expected, candidate, protectedGlobs),
 			}
 		: {};
 	const target = {

@@ -46,7 +46,7 @@ export type Landing = Readonly<{
 	combined: Sha;
 	message: string;
 }>;
-export type Integrate = { readonly protectedGlobs?: string[] } & (
+type IntegrationPlan =
 	| Readonly<{
 			kind: "merge_item";
 			key: string;
@@ -65,8 +65,11 @@ export type Integrate = { readonly protectedGlobs?: string[] } & (
 			expected: Sha;
 			trunk: Sha;
 			checks: readonly Check[];
-	  }>
-);
+	  }>;
+// Stored JSON plans either omit the field entirely or carry a list, never undefined.
+export type Integrate =
+	| IntegrationPlan
+	| (IntegrationPlan & { readonly protectedGlobs: readonly string[] });
 export type Remove = Readonly<{
 	kind: "remove";
 	key: string;
