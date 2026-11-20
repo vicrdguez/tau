@@ -65,8 +65,14 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 	assert.ok("reject" in design.reduce(state, bound, world));
 });
 test("the bound protected paths always include the project's verifier playbooks and principles", () => {
-	const {state,send} = advance({...bound, mandate:{...mandate,protectedPaths:["test/orders/**"]}});
-	assert.deepEqual(state.mandate?.protectedPaths, ["test/orders/**", ".keel/**"]);
+	const { state, send } = advance({
+		...bound,
+		mandate: { ...mandate, protectedPaths: ["test/orders/**"] },
+	});
+	assert.deepEqual(state.mandate?.protectedPaths, [
+		"test/orders/**",
+		".keel/**",
+	]);
 	assert.deepEqual(send?.[0]?.event.mandate, state.mandate);
 });
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {

@@ -12,7 +12,7 @@ Start a Keel conversation in a Git project and describe a change. For a bug, per
 | Verifier | Checks each published commit in a detached checkout, then checks the whole build. Names block threads and their evidence, and keeps lesser findings as notes. | `publish_verdict` |
 | Diagnoser | After the same block survives two **claimed** fixes, independently tests the shared premise before the owner is asked. | `publish_diagnosis` |
 
-Designers, verifiers and diagnosers have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. An ordinary item that changes a protected path is held at publication; an Encode item can change such paths. A resume is not a waiver.
+Designers, verifiers and diagnosers have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. Keel always includes `.keel/**` among the protected paths so workers cannot silently change the verification playbook. An ordinary item that changes a protected path is held at publication; an Encode item can change such paths. A resume is not a waiver.
 
 ## What the owner decides
 

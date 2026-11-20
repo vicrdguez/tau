@@ -139,12 +139,18 @@ export const design: Lane<State> = {
 					};
 				switch (e.route) {
 					case "follow": {
-						const mandate = e.mandate as Mandate | undefined;
-						if (!mandate || invalid(mandate) || e.readings)
+						const proposed = e.mandate as Mandate | undefined;
+						if (!proposed || invalid(proposed) || e.readings)
 							return {
 								reject:
 									"Give a Mandate with distinct labels, a probe for each rule and timed proof commands.",
 							};
+						const mandate = {
+							...proposed,
+							protectedPaths: [
+								...new Set([...proposed.protectedPaths, ".keel/**"]),
+							],
+						};
 						return {
 							state: { ...s, phase: "bound", mandate, reference },
 							send: [
@@ -252,21 +258,22 @@ export const design: Lane<State> = {
 				return { reject: "Unknown Design event: " + e.kind };
 		}
 	},
-	asks: (s) =>
-		s.phase === "ambiguous"
-			? [
-					{
-						subject: subject("ground/" + s.seq),
-						title: "Which reading governs this work?",
-						basis: ground({
-							reference: s.reference,
-							first: s.readings[0]!,
-							second: s.readings[1]!,
-						}),
-						choices: ["first", "second", "decline"],
-					},
-				]
-			: [],
+	asks(s) {
+		if (s.phase !== "ambiguous") return [];
+		const basis = ground({
+			reference: s.reference,
+			first: s.readings[0]!,
+			second: s.readings[1]!,
+		});
+		return [
+			{
+				subject: subject(`ground/${s.seq}`),
+				title: basis.split("\n", 1)[0]!,
+				basis,
+				choices: ["first", "second", "decline"],
+			},
+		];
+	},
 	agents: (s) =>
 		s.phase === "entry" || s.phase === "closed" || s.phase === "cancelled"
 			? []
