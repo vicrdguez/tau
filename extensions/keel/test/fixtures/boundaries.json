@@ -1,0 +1,95 @@
+[
+	[
+		"lanes/build/lane.ts",
+		"import type { WorkId } from '../../kernel/ids.ts'",
+		true
+	],
+	[
+		"lanes/build/lane.ts",
+		"export { defineLane } from '../../kernel/lane.ts'",
+		true
+	],
+	[
+		"lanes/build/state.ts",
+		"import { defineState as state, type StateDef } from '../../kernel/state.ts'",
+		true
+	],
+	[
+		"lanes/build/state.ts",
+		"import { defineState as stateDoc } from '../../kernel/state.ts'",
+		true
+	],
+	[
+		"lanes/build/lane.ts",
+		"import type { Plan } from './internal/plan.ts'",
+		true
+	],
+	[
+		"lanes/build/nested/tools.ts",
+		"export type { View } from '../../design/public.ts'",
+		true
+	],
+	["lanes/index.ts", "import { build } from './build/lane.ts'", true],
+	["lanes/build/state.ts", "import '../../kernel/state.ts'", true],
+	["dispatch/nested/join.ts", "import { parse } from '../parse.ts'", true],
+	["dispatch/index.ts", "import type { Task } from 'tau/durable'", true],
+	[
+		"lanes/build/lane.ts",
+		"// import 'tau';\nconst example = \"export * from '../design/state.ts'\"",
+		true
+	],
+	["lanes/build/lane.ts", "import type { Tx } from 'tau'", false],
+	["lanes/build/lane.ts", "import 'tau/durable'", false],
+	["lanes/build/tools.ts", "import { obj } from 'tau/schema'", true],
+	["lanes/build/lane.ts", "const api = await import('tau/durable')", false],
+	["lanes/build/lane.ts", "import 'tau-wf-keel/src/kernel/kernel.ts'", false],
+	["dispatch/index.ts", "export * from 'tau-wf-keel'", false],
+	["lanes/build/lane.ts", "type Model = import('tau/durable').Model", false],
+	[
+		"lanes/build/lane.ts",
+		"import { transact as run } from '../../kernel/kernel.ts'",
+		false
+	],
+	["lanes/build/lane.ts", "export * from '../../kernel/records.ts'", false],
+	[
+		"lanes/build/lane.ts",
+		"import type { Secret } from '../../kernel/nested/future.ts'",
+		false
+	],
+	[
+		"lanes/build/state.ts",
+		"import {\n defineState, /* token access */ stateDoc as doc\n} from '../../kernel/state.ts'",
+		false
+	],
+	[
+		"lanes/build/state.ts",
+		"export { stateDoc as token } from '../../kernel/state.ts'",
+		false
+	],
+	[
+		"lanes/build/state.ts",
+		"import * as state from '../../kernel/state.ts'",
+		false
+	],
+	["lanes/build/state.ts", "export * from '../../kernel/state.ts'", false],
+	[
+		"lanes/build/state.ts",
+		"const state = await import('../../kernel/state.ts')",
+		false
+	],
+	[
+		"lanes/build/nested/tools.ts",
+		"export { helper } from '../../design/./state.ts'",
+		false
+	],
+	[
+		"lanes/build/lane.ts",
+		"import { helper } from '../design/nested/public.ts'",
+		false
+	],
+	[
+		"dispatch/nested/join.ts",
+		"import type { WorkId } from '../../kernel/ids.ts'",
+		false
+	]
+]

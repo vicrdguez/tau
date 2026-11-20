@@ -135,9 +135,17 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 				stderr,
 			);
 			assert.deepEqual(
-				items.map((item: any) => item.schema.required),
+				items.map((item: any) =>
+					item.name === "keel"
+						? item.schema.required
+								.filter(
+									(key: string) => !("default" in item.schema.properties[key]),
+								)
+								.sort()
+						: item.schema.required,
+				),
 				[
-					["designer", "worker", "verifier", "base"],
+					["build", "design", "queue", "verify"],
 					["designer", "implementer", "reviewer", "base"],
 					["model"],
 					["provider", "apiKey"],
@@ -150,7 +158,12 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 						item.schema.additionalProperties === false,
 				),
 			);
-			assert.equal(items[0].schema.properties.verifier.format, "model");
+			for (const [name, property] of Object.entries<{ format?: string }>(
+				items[0].schema.properties,
+			)) {
+				if (!["base", "trunk", "max_workers"].includes(name))
+					assert.equal(property.format, "model", `keel option ${name}`);
+			}
 			assert.equal(items[1].schema.properties.designer.format, "model");
 			assert.equal(items[2].schema.properties.model.format, "model");
 			assert.equal(items[3].schema.properties.apiKey.format, "secret");
