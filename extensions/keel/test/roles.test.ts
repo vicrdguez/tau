@@ -135,6 +135,8 @@ test("configured agents see their coding tools and only their assigned Keel tool
 		return options.read(tx);
 	}, ctx);
 	for (const [role, expected] of [
+		["coordinator", ["read"]],
+		["diagnoser", ["bash", "read"]],
 		["worker", ["bash", "edit", "inspect", "publish", "read", "write"]],
 		["verifier", ["bash", "inspect", "read"]],
 		["designer", ["bash", "read"]],
