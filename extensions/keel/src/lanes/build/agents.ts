@@ -1,6 +1,6 @@
 import { agentKey, token } from "../../kernel/ids.ts";
 import { type AgentDecl, prose } from "../../kernel/lane.ts";
-import { type Build, held, type Item, workerKey } from "./state.ts";
+import { type Build, fencePaths, held, type Item, workerKey } from "./state.ts";
 
 const dir = import.meta.dirname;
 const boundMandate = prose(dir, "../../prose/documents/build-mandate.md", [
@@ -265,10 +265,7 @@ export function agents(s: Build): AgentDecl[] {
 								token: token("publish", i.seq),
 								tools: ["publish_build"],
 								projectPrinciples: i.projectPrinciples,
-								paths: i
-									.brief!.fences.split("\n")
-									.map((p) => p.trim())
-									.filter(Boolean),
+								paths: fencePaths(i),
 								situation:
 									i.input === "rework" &&
 									i.threads.some((id) => i.publication?.addresses.includes(id))

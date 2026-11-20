@@ -141,6 +141,11 @@ export const buildDoc = defineState({
 
 export const held = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
+export const fencePaths = (item: Item) =>
+	item
+		.brief!.fences.split("\n")
+		.map((p) => p.trim())
+		.filter(Boolean);
 export const workerKey = (i: Item) => `worker/${i.id}/${i.attempt}`;
 
 export function buildView(s: Build) {
