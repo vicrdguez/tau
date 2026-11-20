@@ -39,7 +39,9 @@ const ruling = {
 	follows: "existing price model",
 };
 const item = { id: "fix", kind: "build", goal: "fix rounding", deps: [] };
-function setup(max_workers = 1) {
+const clean = {kind:"ok",sha,base:repo.trunkHead,changes:[],touched:[],trunk:null};
+const changed = (path:string,kind:string) => ({path,kind,before:"old",after:"new"});
+function setup(max_workers = 1, reviewed = false) {
 	const world: World = {
 		work,
 		root,
@@ -79,7 +81,7 @@ function setup(max_workers = 1) {
 		const done = (result: JsonObject) =>
 			send({ kind: "effect_done", key: effect().key, result });
 		function start() {
-			send({ kind: "bound", mandate });
+			send({ kind: "bound", mandate:reviewed?{...mandate,reviewed}:mandate });
 			assert.deepEqual(effect().spec, {
 				kind: "read_repo",
 				base: "main",
@@ -109,7 +111,7 @@ function setup(max_workers = 1) {
 			done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 		}
 		const pub = (
-			facts: JsonObject = { kind: "ok", sha, touched: [] },
+			facts: JsonObject = clean,
 			addresses: string[] = [],
 		) =>
 			send({
@@ -126,6 +128,7 @@ function setup(max_workers = 1) {
 		};
 		return {
 			world,
+			view:()=>lane.view(s),
 			start,
 			plan,
 			prepare,
@@ -250,7 +253,7 @@ test("dirty and unrelated work cannot publish, and the tool offers no SHA argume
 test("a protected path holds an ordinary item; direction reaches the worker but does not waive protection", () => {
 	const b = setup();
 	b.working();
-	const touched = { kind: "ok", sha, touched: ["tests/round"] };
+	const touched = { ...clean, base: merged, touched:["tests/round"],changes:[changed("tests/round","modified")] };
 	const filed = b.pub(touched).send!;
 	assert.equal(filed.length, 1);
 	const f = filed[0]!;
@@ -259,6 +262,8 @@ test("a protected path holds an ordinary item; direction reaches the worker but 
 		["queue", null, "file", "fix", "build", work],
 	);
 	assert.match(String(f.event.evidence), /tests\/round/);
+	assert.equal(f.event.goal,mandate.intent);
+	assert.equal(f.event.allow,true);
 	assert.equal(b.agent("worker").paused, true);
 	b.send({
 		kind: "resume",
@@ -276,13 +281,63 @@ test("a protected path holds an ordinary item; direction reaches the worker but 
 		evidence: f.event.evidence!,
 	});
 	assert.match(b.request("worker").text, /restore fixture/);
+	assert.doesNotMatch(b.request("worker").text,/Your worktree is ready/);
 	assert.match(b.request("worker").text, /tests\/round/);
 	const again = b.pub(touched).send![0]!;
 	assert.equal(again.lane, "queue");
 	assert.notEqual(again.event.cause, f.event.cause);
-	const encode = setup();
-	encode.working("encode");
-	assert.equal(encode.pub(touched).send![0]!.lane, "verify");
+	const approved=b.send({kind:"allow",item:"fix",cause:again.event.cause!,direction:"inspect edges",evidence:again.event.evidence!}).send![0]!;
+	assert.equal(approved.lane,"verify");
+	assert.equal(approved.event.allowed,true);
+	assert.equal(approved.event.itemKind,"build");
+	assert.equal(approved.event.base,merged);
+	assert.equal(approved.event.sha,sha);
+	assert.deepEqual(approved.event.protectedChanges,touched.changes);
+	assert.match(String(approved.event.brief),/inspect edges/);
+	assert.equal(b.agent("worker").expects.length,0);
+	b.send({kind:"rework",item:"fix",evidence:"rounding",threads:["edge"]});
+	assert.doesNotMatch(b.request("worker").text,/restore fixture|inspect edges/);
+	assert.equal(b.pub(touched).send![0]!.lane,"queue","approval is not sticky");
+});
+
+test("ordinary additions pass; only reviewed Encode can edit checks; policy changes cannot be waived", () => {
+	for(const [path,kind,itemKind,reviewed,expected] of [
+		["tests/new","added","build",false,"verify"],
+		["tests/old","deleted","encode",false,"queue"],
+		["tests/old","renamed","encode",true,"verify"],
+		[".keel/playbooks/verify.md","added","encode",true,"queue"],
+	] as const){
+		const b=setup(1,reviewed);
+		b.working(itemKind);
+		const changes=[changed(path,kind)];
+		const msg=b.pub({...clean,touched:[path],changes}).send![0]!;
+		assert.equal(msg.lane,expected);
+		if(expected==="verify") {
+			assert.equal(msg.event.allowed,false);
+			assert.deepEqual(msg.event.protectedChanges,changes);
+		} else if(path.startsWith(".keel/")) {
+			assert.notEqual(msg.event.allow,true);
+			const result=b.tryEvent({kind:"allow",cause:msg.event.cause!,item:"fix",direction:"",evidence:""});
+			assert.ok("reject" in result || !result.send?.length);
+			assert.equal(b.agent("worker").paused,true);
+		} else assert.equal(msg.event.allow,true);
+	}
+});
+
+test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
+	const b=setup(2);
+	b.plan([item,{...item,id:"other"}]);
+	b.send({kind:"brief",...brief});
+	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.send({kind:"brief",...brief,item:"other"});
+	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.pub();
+	b.send({kind:"merged",item:"fix",head:merged});
+	const inherited="f".repeat(40);
+	const p=b.pub({...clean,base:inherited}).send![0]!.event;
+	assert.equal(p.head,merged);
+	assert.equal(p.base,inherited);
+	assert.equal(p.trunk,null);
 });
 
 test("rework and integration reach the original worker with fresh expectations; only observed publications advance", () => {
@@ -437,6 +492,25 @@ test("a start that failed after a possible CAS keeps its immutable git plan on e
 	});
 	assert.notEqual(b.effect().key, first.key);
 	assert.deepEqual(b.effect().spec, first.spec);
+});
+
+test("a stopped token files only one finding and its direction is consumed by the resumed turn", () => {
+	const b=setup();
+	b.start();
+	const old=b.request("coordinator");
+	const stop={kind:"agent_stalled",agent:b.agent("coordinator").key,tokens:[old.token],cause:"stopped",lastWords:""};
+	const file=b.send(stop).send![0]!.event;
+	assert.equal(b.send(stop).send?.length ?? 0,0);
+	b.send({kind:"resume",item:null,cause:file.cause!,direction:"one small item",evidence:""});
+	assert.equal(b.send(stop).send?.length ?? 0,0);
+	assert.match(b.request("coordinator").text,/one small item/);
+	b.send({kind:"plan",items:[item]});
+	assert.doesNotMatch(b.request("coordinator").text,/one small item/);
+	b.send({kind:"brief",...brief});
+	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.pub();
+	b.send({kind:"integration",item:"fix",evidence:"merge conflict",threads:[]});
+	assert.doesNotMatch(b.request("worker").text,/Threads:\s*\n/i);
 });
 
 test("stop holds the current turn, resume redelivers direction, and cancellation retires both agents", () => {
@@ -616,12 +690,15 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			kind,
 			item: "full",
 			head,
+			...(kind==="integration"?{inheritedTrunk:sha}:{}),
 			threads: ["precision"],
 			evidence: "the tick grid changed",
 		});
 		const req = b.request("coordinator");
 		assert.deepEqual(req.tools, ["publish_plan"]);
 		assert.match(req.text, /the tick grid changed/);
+		assert.match(req.text,/publish_plan/);
+		if(kind==="integration") assert.ok(req.text.includes(sha));
 		assert.ok("reject" in b.tryEvent({ kind: "plan", items: [item] }));
 		b.send({
 			kind: "plan",
@@ -632,6 +709,8 @@ test("full-set or trunk returns request a new correction on the merged head, not
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
 		assert.match(b.request("worker").text, /precision/);
+		const view=b.view() as {publicationOf(key:string):{inheritedTrunk:string|null}};
+		assert.equal(view.publicationOf(b.agent("worker").key).inheritedTrunk,kind==="integration"?sha:null);
 		assert.deepEqual(
 			b.pub(undefined, ["precision"]).send![0]!.event.addresses,
 			["precision"],
@@ -650,7 +729,7 @@ test("full-set or trunk returns request a new correction on the merged head, not
 					agent: b.agent("worker").key,
 					summary: "invented",
 					addresses: ["invented"],
-					facts: { kind: "ok", sha, touched: [] },
+					facts: clean,
 				}),
 		);
 		assert.deepEqual(
