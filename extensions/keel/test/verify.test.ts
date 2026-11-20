@@ -306,9 +306,13 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	assert.match(String(file.evidence), /not exact/);
 	assert.equal(x.agents().length, 0);
 	const back = x.apply(resume(file));
-	assert.match(String(back.send?.[0]?.event.evidence), /test the premise/);
+	assert.match(String(back.send?.[0]?.event.direction), /test the premise/);
+	assert.doesNotMatch(
+		String(back.send?.[0]?.event.evidence),
+		/test the premise/,
+	);
 	assert.match(String(back.send?.[0]?.event.evidence), /not exact/);
-	assert.doesNotMatch(String(back.send?.[0]?.event.evidence), /Diagnoser only/);
+	assert.doesNotMatch(JSON.stringify(back.send), /Diagnoser only/);
 	x.apply({ kind: "reset_counts", item: "bug" });
 	x.publish("fix3", ["totals"]);
 	x.clean();
@@ -586,7 +590,9 @@ test("owner direction on a merge retry reaches the worker on conflict or the ful
 				paths: ["book"],
 				against: "previous",
 			});
-			next = String(sent.send?.find((m) => m.lane === "build")?.event.evidence);
+			const update = sent.send?.find((m) => m.lane === "build")?.event;
+			assert.doesNotMatch(String(update?.evidence), /test the premise/);
+			next = String(update?.direction);
 		} else {
 			x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
 			x.clean();
@@ -748,7 +754,8 @@ test("policy files cannot be waived at merge even for Encode; resume returns evi
 	const back = result.send?.find((m) => m.lane === "build")?.event;
 	assert.equal(back?.kind, "integration");
 	assert.match(String(back?.evidence), /\.keel\/policy/);
-	assert.match(String(back?.evidence), /test the premise/);
+	assert.match(String(back?.direction), /test the premise/);
+	assert.doesNotMatch(String(back?.evidence), /test the premise/);
 	x.clean();
 	assert.deepEqual(x.effects(), []);
 });
