@@ -13,11 +13,11 @@ export type RepoInfo = Readonly<{
 	trunkHead: Sha | null;
 }>;
 
-/** Trusted, replay-safe observations from the approved Mandate, never tool-call argv. */
+/** Designer-written, replay-safe commands stored in the Mandate, never merge-time tool arguments. */
 export type Check = Readonly<{
 	id: string;
 	argv: readonly string[];
-	timeoutMs?: number;
+	timeoutMs: number;
 }>;
 export type CheckReport = Readonly<{ id: string; code: number; tail: string }>;
 export type ProofChanges = Readonly<{

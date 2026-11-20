@@ -24,18 +24,27 @@ export const nodeExec: Exec = (argv, cwd, { env, timeoutMs }) =>
 		const out: Buffer[] = [],
 			err: Buffer[] = [];
 		let timedOut = false;
+		function killProofGroup() {
+			if (!child.pid) return;
+			try {
+				process.kill(-child.pid, "SIGKILL");
+			} catch (error) {
+				if (!hasCode(error, "ESRCH")) reject(error);
+			}
+		}
 		const timer = proof
 			? setTimeout(() => {
 					timedOut = true;
-					if (child.pid) {
-						try {
-							process.kill(-child.pid, "SIGKILL");
-						} catch (error) {
-							if (!hasCode(error, "ESRCH")) reject(error);
-						}
-					}
+					killProofGroup();
 				}, timeoutMs)
 			: undefined;
+		// "close" waits for inherited pipes. Stop any surviving group members
+		// when the command exits, before waiting for its trailing output.
+		if (proof)
+			child.once("exit", () => {
+				clearTimeout(timer);
+				if (!timedOut) killProofGroup();
+			});
 		function collect(parts: Buffer[], bytes: Buffer) {
 			if (!proof) parts.push(bytes);
 			else

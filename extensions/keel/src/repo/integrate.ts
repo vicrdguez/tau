@@ -46,8 +46,7 @@ async function check(
 	before: ProofChanges | undefined,
 	verifyCheckout: () => Promise<ProofChanges | undefined>,
 ): Promise<{ report?: CheckReport; changes?: ProofChanges }> {
-	const { id, argv } = spec,
-		timeoutMs = spec.timeoutMs ?? 120_000;
+	const { id, argv, timeoutMs } = spec;
 	if (
 		!argv[0] ||
 		!Number.isSafeInteger(timeoutMs) ||
