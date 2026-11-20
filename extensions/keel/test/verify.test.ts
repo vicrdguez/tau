@@ -575,6 +575,67 @@ test("a moved trunk gets a verifier on the exact prepared SHA before CAS; either
 		"rework",
 	);
 });
+for (const result of ["landed", "unchanged"]) {
+	test(`${result}: landing withdraws an open desk confirmation; new cancel requests direct the owner to the hand-over`, () => {
+		const x = flow();
+		const bound = drive(
+			design,
+			design.state.initial(),
+			{
+				kind: "ground",
+				route: "follow",
+				reference: "Ledger format",
+				mandate,
+			},
+			world,
+		);
+		assert.ok("state" in bound);
+		const request = { kind: "request_cancel" };
+		const requested = drive(design, bound.state, request, world);
+		assert.ok("state" in requested);
+		const [confirmation] = design.asks(requested.state, world);
+		assert.ok(confirmation);
+		x.full();
+		x.prepare();
+		if (result === "landed")
+			x.done("prepare_landing", { kind: "prepared", sha: "target" });
+		const recorded = x.done(result === "landed" ? "land" : "prepare_landing", {
+			kind: result,
+			sha: result === "landed" ? "target" : "base",
+		});
+		let desk = requested.state;
+		for (const m of recorded.send ?? []) {
+			if (m.lane !== "design") continue;
+			assert.equal(m.work, world.work);
+			const delivered = drive(design, desk, m.event, world);
+			assert.ok("state" in delivered);
+			desk = delivered.state;
+		}
+		assert.deepEqual(design.asks(desk, world), []);
+		const late = drive(
+			design,
+			desk,
+			{
+				kind: "answered",
+				subject: confirmation.subject,
+				choice: "cancel",
+				annotations: [],
+			},
+			world,
+		);
+		assert.ok("state" in late);
+		assert.deepEqual(late.send ?? [], []);
+		const again = drive(design, desk, request, world);
+		assert.ok("reject" in again);
+		assert.match(again.reject!, /landed/i);
+		assert.match(
+			again.reject!,
+			/accept.*reject.*hand-over|hand-over.*accept.*reject/i,
+		);
+		assert.deepEqual(x.asks()[0]?.choices, ["accept", "reject"]);
+	});
+}
+
 test("no-change preparation releases the slot without CAS and hands over the unchanged commit", () => {
 	const x = flow();
 	x.full();
