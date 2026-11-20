@@ -7,6 +7,7 @@ import type { TestContext } from "node:test";
 import {
 	converge,
 	type Exec,
+	type Landing,
 	layout,
 	nodeExec,
 	type RepoOp,
@@ -64,6 +65,11 @@ export async function fixture(t: TestContext) {
 	const run = (op: RepoOp, exec = nodeExec) => converge(exec, repo, op);
 	const publish = (globs?: readonly string[]) =>
 		readPublishable(nodeExec, repo, worker, globs);
+	async function prepare(plan: Landing) {
+		const result = await run({ ...plan, kind: "prepare_landing" });
+		is(result, "prepared");
+		return result.sha;
+	}
 	async function item() {
 		is(await run(start), "started");
 		is(await run(worker), "worktree");
@@ -92,6 +98,7 @@ export async function fixture(t: TestContext) {
 		checkout,
 		run,
 		publish,
+		prepare,
 		item,
 	};
 }

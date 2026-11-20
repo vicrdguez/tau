@@ -15,7 +15,6 @@ import {
 	converge,
 	layout,
 	nodeExec,
-	prepareLanding,
 	readPublishable,
 	readRepo,
 	type Sha,
@@ -81,8 +80,13 @@ test("completed build creation survives another work landing before replay", asy
 	const start = { ...f.start, key: "start:A", branch: layout.buildBranch("A") };
 	const result = await converge(nodeExec, repo, start);
 	is(result, "started");
-	const plan = { key: "B", expectedTrunk: f.base, combined: other.item, message: "land B" };
-	const target = await prepareLanding(nodeExec, f.repo, plan);
+	const plan = {
+		key: "B",
+		expectedTrunk: f.base,
+		combined: other.item,
+		message: "land B",
+	};
+	const target = await f.prepare(plan);
 	is(await f.run({ ...plan, kind: "land", target }), "landed");
 	assert.deepEqual(await converge(nodeExec, repo, start), result);
 	assert.equal(git(f.root, "rev-parse", start.branch), f.base);
@@ -91,7 +95,12 @@ test("completed build creation survives another work landing before replay", asy
 test("completed worker creation survives another item merging before replay", async (t) => {
 	const f = await fixture(t);
 	const other = await f.item();
-	const worker = { ...f.worker, key: "worker:2", branch: layout.itemBranch("42", "second", 1), path: layout.worktree(f.repo, "42", "second") };
+	const worker = {
+		...f.worker,
+		key: "worker:2",
+		branch: layout.itemBranch("42", "second", 1),
+		path: layout.worktree(f.repo, "42", "second"),
+	};
 	const result = await f.run(worker);
 	is(result, "worktree");
 	is(await f.run(other), "merged");
@@ -142,6 +151,9 @@ test("trunk equal to base, reserved branch aliases and escaping layout names are
 		{ base: "stable", trunk: "main" },
 		{ base: f.branch, trunk: "trunk" },
 		{ trunk: "keel/42/trunk" },
+		{ trunk: "refs/heads/main" },
+		{ trunk: "refs/tags/x" },
+		{ trunk: "HEAD" },
 	])
 		await assert.rejects(readRepo(nodeExec, f.root, opts));
 	assert.throws(() => layout.worktree(f.repo, "42", "../outside"));
@@ -216,7 +228,10 @@ test("verifier cleanup follows the locked registration even after switching bran
 	git(f.checkout.path, "switch", "-c", "comparison");
 	git(f.checkout.path, "commit", "--allow-empty", "-m", "verifier notes");
 	const tip = git(f.checkout.path, "rev-parse", "HEAD");
-	is(await f.run({ kind: "remove", key: "drop", target: f.checkout }), "removed");
+	is(
+		await f.run({ kind: "remove", key: "drop", target: f.checkout }),
+		"removed",
+	);
 	await assert.rejects(access(f.checkout.path));
 	assert.equal(git(f.root, "rev-parse", "comparison"), tip);
 });
@@ -224,7 +239,14 @@ test("a worker lock is not a disposable verifier lock", async (t) => {
 	const f = await fixture(t);
 	await f.item();
 	await writeFile(join(f.worker.path, "notes"), "keep");
-	is(await f.run({ kind: "remove", key: "drop", target: { ...f.checkout, key: f.worker.key, path: f.worker.path } }), "occupied");
+	is(
+		await f.run({
+			kind: "remove",
+			key: "drop",
+			target: { ...f.checkout, key: f.worker.key, path: f.worker.path },
+		}),
+		"occupied",
+	);
 	assert.equal(await readFile(join(f.worker.path, "notes"), "utf8"), "keep");
 });
 test("dirty worker (including ignored files) retained at removal; clean worker removal leaves its ref", async (t) => {
@@ -291,7 +313,12 @@ test("worker removal does not discard private files inside a checked-out submodu
 		"private\n",
 	);
 	await writeFile(join(dep, "private"), "keep");
-	const kept = await f.run({ kind: "remove", key: "drop", target: f.worker, merged: true });
+	const kept = await f.run({
+		kind: "remove",
+		key: "drop",
+		target: f.worker,
+		merged: true,
+	});
 	is(kept, "kept");
 	assert.deepEqual(kept.files, ["dep"]);
 	assert.equal(await readFile(join(dep, "private"), "utf8"), "keep");
@@ -374,13 +401,18 @@ test("landing cannot advance trunk underneath a worktree rebasing it", async (t)
 	const trunk = (await readRepo(nodeExec, f.root)).trunkHead!;
 	assert.throws(() => git(other, "rebase", op.item));
 	assert.equal(git(other, "branch", "--show-current"), "");
+	git(f.root, "switch", "-c", "candidate", trunk);
+	await writeFile(join(f.root, "book"), "combined");
+	git(f.root, "commit", "-am", "combined");
+	const combined = (await readRepo(nodeExec, f.root, { base: "candidate" }))
+		.baseHead;
 	const p = {
 		key: "land",
 		expectedTrunk: trunk,
-		combined: trunk,
+		combined,
 		message: "squash",
 	};
-	const target = await prepareLanding(nodeExec, f.repo, p);
+	const target = await f.prepare(p);
 	is(await f.run({ ...p, kind: "land", target }), "occupied");
 	assert.equal(git(f.root, "rev-parse", "trunk"), trunk);
 });
@@ -397,7 +429,7 @@ test("a foreign checkout of the build or trunk prevents CAS even at the expected
 		combined: merge.item,
 		message: "land",
 	};
-	const sha = await prepareLanding(nodeExec, f.repo, plan);
+	const sha = await f.prepare(plan);
 	is(await f.run({ kind: "land", ...plan, target: sha }), "occupied");
 	assert.equal(git(other, "rev-parse", "HEAD"), f.base);
 });
@@ -410,7 +442,7 @@ test("symbolic trunk cannot redirect a landing to main", async (t) => {
 		combined: merge.item,
 		message: "land",
 	};
-	const target = await prepareLanding(nodeExec, f.repo, plan);
+	const target = await f.prepare(plan);
 	git(f.root, "symbolic-ref", "refs/heads/trunk", "refs/heads/main");
 	is(await f.run({ kind: "land", ...plan, target }), "occupied");
 	assert.equal(git(f.root, "rev-parse", "main"), f.base);
@@ -452,7 +484,12 @@ test("publish rejects dirt, detachment, and unrelated history; reports both ends
 test("publish reports a worker's protected deletion, not the Encode change it merged from build", async (t) => {
 	const f = await fixture(t);
 	const item = await f.item();
-	const encode = { ...f.worker, key: "encode", branch: layout.itemBranch("42", "encode", 1), path: layout.worktree(f.repo, "42", "encode") };
+	const encode = {
+		...f.worker,
+		key: "encode",
+		branch: layout.itemBranch("42", "encode", 1),
+		path: layout.worktree(f.repo, "42", "encode"),
+	};
 	is(await f.run(encode), "worktree");
 	await mkdir(join(encode.path, "tests"));
 	await writeFile(join(encode.path, "tests/check.sh"), "check");
@@ -469,7 +506,10 @@ test("publish reports a worker's protected deletion, not the Encode change it me
 	git(f.worker.path, "commit", "-m", "remove the check");
 	const deleted = await f.publish(["tests/**"]);
 	assert.equal(deleted.kind, "ok");
-	assert.deepEqual([unchanged.touched, deleted.touched], [[], ["tests/check.sh"]]);
+	assert.deepEqual(
+		[unchanged.touched, deleted.touched],
+		[[], ["tests/check.sh"]],
+	);
 });
 test("git ignores inherited redirection/config, replacement refs and a graft at publish", async (t) => {
 	const f = await fixture(t);
@@ -608,16 +648,29 @@ test("conflict reports the path, and creates no conflict state on the build bran
 	assert.deepEqual(await f.run({ ...op, expected }), result);
 	is(result, "conflict");
 	assert.deepEqual(result.paths, ["book"]);
-	const target = { kind: "checkout", key: op.key, path: op.integration } as const;
+	const target = {
+		kind: "checkout",
+		key: op.key,
+		path: op.integration,
+	} as const;
 	is(await f.run({ kind: "remove", key: "drop", target }), "removed");
 	await assert.rejects(access(op.integration));
 	assert.equal(git(f.root, "rev-parse", f.branch), expected);
 });
 test("proof exit terminates children holding the output pipe, pass or fail", async (t) => {
 	const f = await fixture(t);
-	const results = await Promise.all([0, 7].map((code) =>
-		nodeExec(["sh", "-c", "sleep 10 & exit " + code], f.root, { env: { PATH: process.env.PATH }, timeoutMs: 1000 })));
-	assert.deepEqual(results.map(r => r.code), [0, 7]);
+	const results = await Promise.all(
+		[0, 7].map((code) =>
+			nodeExec(["sh", "-c", "sleep 10 & exit " + code], f.root, {
+				env: { PATH: process.env.PATH },
+				timeoutMs: 1000,
+			}),
+		),
+	);
+	assert.deepEqual(
+		results.map((r) => r.code),
+		[0, 7],
+	);
 });
 test("a stored Mandate check without its timeout cannot run", async (t) => {
 	const f = await fixture(t);
@@ -654,34 +707,80 @@ for (const [name, script] of [
 }
 for (const [name, script, paths, headChanged] of [
 	["tracked edit", "echo different > book", ["book"], false],
-	["moved HEAD", "echo different > book && git commit -am changed", ["book"], true],
+	[
+		"moved HEAD",
+		"echo different > book && git commit -am changed",
+		["book"],
+		true,
+	],
 	["empty proof commit", "git commit --allow-empty -m moved", [], true],
 ] as const) {
-	test(name + " fails proof with candidate and paths, on first run and replay", async (t) => {
-		const f = await fixture(t);
-		const op = await f.item();
-		const plan = { ...op, checks: [{ id: "mutates", argv: ["sh", "-c", script], timeoutMs: 5000 }] };
-		const result = await f.run(plan);
-		is(result, "checks_failed");
-		assert.deepEqual(result.changes, { paths, headChanged });
-		assert.equal(result.checks[0]!.code, 0);
-		assert.equal(git(f.root, "rev-parse", result.sha + "^2"), op.item);
-		assert.equal(git(f.root, "show", result.sha + ":book"), "new");
-		assert.deepEqual(await f.run(plan), result);
-		assert.equal(git(f.root, "rev-parse", f.branch), f.base);
-		is(await f.run({ kind: "remove", key: "drop", target: { kind: "checkout", key: op.key, path: op.integration, sha: result.sha } }), "removed");
-		await assert.rejects(access(op.integration));
-	});
+	test(
+		name + " fails proof with candidate and paths, on first run and replay",
+		async (t) => {
+			const f = await fixture(t);
+			const op = await f.item();
+			const plan = {
+				...op,
+				checks: [
+					{ id: "mutates", argv: ["sh", "-c", script], timeoutMs: 5000 },
+				],
+			};
+			const result = await f.run(plan);
+			is(result, "checks_failed");
+			assert.deepEqual(result.changes, { paths, headChanged });
+			assert.equal(result.checks[0]!.code, 0);
+			assert.equal(git(f.root, "rev-parse", result.sha + "^2"), op.item);
+			assert.equal(git(f.root, "show", result.sha + ":book"), "new");
+			assert.deepEqual(await f.run(plan), result);
+			assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+			is(
+				await f.run({
+					kind: "remove",
+					key: "drop",
+					target: {
+						kind: "checkout",
+						key: op.key,
+						path: op.integration,
+						sha: result.sha,
+					},
+				}),
+				"removed",
+			);
+			await assert.rejects(access(op.integration));
+		},
+	);
 }
 test("untracked proof output does not change the candidate or prevent replay and cleanup", async (t) => {
 	const f = await fixture(t);
 	const op = await f.item();
-	const plan = { ...op, checks: [{ id: "build", argv: ["sh", "-c", "mkdir -p target && echo ok > target/out"], timeoutMs: 5000 }] };
+	const plan = {
+		...op,
+		checks: [
+			{
+				id: "build",
+				argv: ["sh", "-c", "mkdir -p target && echo ok > target/out"],
+				timeoutMs: 5000,
+			},
+		],
+	};
 	const result = await f.run(plan);
 	is(result, "merged");
 	assert.deepEqual(await f.run(plan), result);
 	assert.equal(git(f.root, "rev-parse", f.branch), result.sha);
-	is(await f.run({ kind: "remove", key: "drop", target: { kind: "checkout", key: op.key, path: op.integration, sha: result.sha } }), "removed");
+	is(
+		await f.run({
+			kind: "remove",
+			key: "drop",
+			target: {
+				kind: "checkout",
+				key: op.key,
+				path: op.integration,
+				sha: result.sha,
+			},
+		}),
+		"removed",
+	);
 	await assert.rejects(access(op.integration));
 });
 test("project principle and verifier playbook bytes come from the planned commit, not an external symlink", async (t) => {
@@ -720,8 +819,8 @@ test("landing prepares the exact reviewable commit then survives a lost CAS resu
 		combined: merge.item,
 		message: "land the book",
 	};
-	const target = await prepareLanding(nodeExec, f.repo, plan);
-	assert.equal(await prepareLanding(nodeExec, f.repo, plan), target);
+	const target = await f.prepare(plan);
+	assert.equal(await f.prepare(plan), target);
 	assert.equal(git(f.root, "show", "-s", "--format=%P", target), f.base);
 	assert.equal(
 		git(f.root, "rev-parse", target + "^{tree}"),
@@ -741,6 +840,30 @@ test("landing prepares the exact reviewable commit then survives a lost CAS resu
 	assert.equal(git(f.root, "for-each-ref", "--format=%(refname)"), refs);
 	assert.equal(git(f.root, "rev-parse", "main"), f.base);
 });
+test("an identical tree needs no landing, but only while trunk is still at the expected commit", async (t) => {
+	const f = await fixture(t);
+	is(await f.run(f.start), "started");
+	git(
+		f.root,
+		"commit",
+		"--allow-empty",
+		"-m",
+		"distinct commit, identical tree",
+	);
+	const combined = (await readRepo(nodeExec, f.root)).baseHead;
+	assert.notEqual(combined, f.base);
+	const plan = {
+		kind: "prepare_landing",
+		key: "same",
+		expectedTrunk: f.base,
+		combined,
+		message: "empty",
+	} as const;
+	assert.deepEqual(await f.run(plan), { kind: "unchanged", sha: f.base });
+	assert.equal(git(f.root, "rev-parse", "trunk"), f.base);
+	git(f.root, "update-ref", "refs/heads/trunk", combined, f.base);
+	assert.deepEqual(await f.run(plan), { kind: "moved", actual: combined });
+});
 test("competing landings have one winner; even a same-key trailer on the wrong tree is moved", async (t) => {
 	const f = await fixture(t);
 	const merge = await f.item();
@@ -749,7 +872,7 @@ test("competing landings have one winner; even a same-key trailer on the wrong t
 		return {
 			...p,
 			kind: "land" as const,
-			target: await prepareLanding(nodeExec, f.repo, p),
+			target: await f.prepare(p),
 		};
 	}
 	const a = await plan("A", merge.item),
