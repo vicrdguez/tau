@@ -71,6 +71,7 @@ const shared = defineLane(
 		asks: () => [],
 		agents: () => [],
 		effects: () => [],
+		onFact: (state) => ({ state }),
 		reduce(s, e) {
 			if (e.kind === "forbidden") return { reject: "not allowed" };
 			if (e.kind === "changed") return { state: { seen: [] } };
@@ -91,10 +92,8 @@ const toyLane = defineLane(
 		name: "toy",
 		state: Toy,
 		view: (s) => s,
-		reduce(s, e, world) {
+		onFact(s, e) {
 			switch (e.kind) {
-				case "ask":
-					return { state: { ...s, ask: String(e.basis) } };
 				case "answered":
 					return {
 						state: {
@@ -104,6 +103,21 @@ const toyLane = defineLane(
 							notes: [JSON.stringify(e.annotations)],
 						},
 					};
+				case "effect_done":
+					return {
+						state: { ...s, facts: [...s.facts, String(e.result.value)] },
+						send: s.ask === "bad follow-up" ? [{ lane: "shared", work: null, event: { kind: "forbidden" } }] : [],
+					};
+				case "effect_failed":
+					return { state: { ...s, facts: [...s.facts, e.error] } };
+				case "agent_stalled":
+					return { state: { ...s, stalls: s.stalls + 1, notes: [e.cause], turn: 0 } };
+			}
+		},
+		reduce(s, e, world) {
+			switch (e.kind) {
+				case "ask":
+					return { state: { ...s, ask: String(e.basis) } };
 				case "all":
 					return {
 						state: { ...s, ask: "A", agents: 1, turn: 1, effect: true },
@@ -129,25 +143,8 @@ const toyLane = defineLane(
 					return { state: { ...s, agents: 0, effect: false, ask: null } };
 				case "effect":
 					return { state: { ...s, effect: true } };
-				case "effect_done":
-					if (s.ask === "reject fact") return { reject: "unexpected result" };
-					return {
-						state: {
-							...s,
-							facts: [...s.facts, String((e.result as JsonObject).value)],
-						},
-					};
-				case "effect_failed":
-					return { state: { ...s, facts: [...s.facts, String(e.error)] } };
-				case "agent_stalled":
-					return {
-						state: {
-							...s,
-							stalls: s.stalls + 1,
-							notes: [String(e.cause)],
-							turn: 0,
-						},
-					};
+				case "claimed":
+					return { state: s, reply: String(world.runningEffect?.(effectKey("once"))) };
 				case "publish":
 					return {
 						state: { ...s, publications: s.publications + 1, turn: 0 },

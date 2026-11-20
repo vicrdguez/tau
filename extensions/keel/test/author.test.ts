@@ -9,6 +9,7 @@ import {
 	defineLane,
 	defineLaneTool,
 	type Lane,
+	type World,
 	prose,
 } from "../src/kernel/lane.ts";
 import { BindingState, ProjectState } from "../src/kernel/records.ts";
@@ -31,7 +32,7 @@ const lane: Lane<ReturnType<typeof plan.initial>> = {
 	view: (s) => ({ ...s, stage: () => s.phase }),
 	asks: () => [],
 	agents: (s) =>
-		s.phase === "empty"
+		s.phase === "empty" || s.phase === "retired"
 			? []
 			: [
 					{
@@ -63,18 +64,15 @@ const lane: Lane<ReturnType<typeof plan.initial>> = {
 		s.phase === "effect"
 			? [{ key: effectKey("spawn"), spec: { declaredRoot: facts.root } }]
 			: [],
+	onFact(s, e) {
+		return e.kind === "effect_done"
+			? { state: { ...s, phase: "done", answered: [String(e.result.child)] } }
+			: { state: s };
+	},
 	reduce(s, e, world) {
 		if (e.kind === "reject") return { reject: "not adopted" };
 		if (e.kind === "brief")
 			return { state: { ...s, answered: [...s.answered, String(e.token)] } };
-		if (e.kind === "effect_done")
-			return {
-				state: {
-					...s,
-					phase: "done",
-					answered: [String((e.result as JsonObject).child)],
-				},
-			};
 		return { state: { ...s, phase: e.kind, root: world.root } };
 	},
 };
@@ -92,6 +90,7 @@ const queueLane = defineLane(
 		agents: () => [],
 		effects: () => [],
 		asks: () => [],
+		onFact: (state) => ({ state }),
 		reduce(s, e, w) {
 			if (e.kind === "seed")
 				return {
@@ -174,19 +173,14 @@ async function setup(t: TestContext) {
 				section: { key: "secret", render: () => "worker index" },
 			},
 		],
-		runEffect: async (input, context, runtime) => {
+		runEffect: async (input, _context, owner) => {
 			assert.equal(input.root, "/projects/quant-engine");
 			assert.equal(input.spec.declaredRoot, input.root);
-			let child = 0;
-			await runtime.commit(async (tx) => {
-				child = (
-					await tx.createConversation({
-						ownership: { kind: "task", taskId: runtime.taskId },
-					})
-				).id;
-				return undefined;
-			}, context);
-			return { child };
+			assert.ok(!("commit" in owner) && !("sleepUntil" in owner));
+			const child = (await owner.scanChildren(1)).items[0];
+			if (child) return { child: child.id };
+			await owner.createChild();
+			throw new Error("retry after creating the child");
 		},
 	});
 	t.after(() => x.harness.close(ctx));
@@ -317,7 +311,7 @@ test("when two handoffs are open an unqualified call is refused; a named handoff
 		[token("A", 1)],
 	);
 });
-test("an effect can own a child in the repository named by reducer and declaration", async (t) => {
+test("an effect can recover its own child without receiving authority over task progress", async (t) => {
 	const { x } = await setup(t);
 	await x.deliver("plan", x.root.id, { kind: "effect" });
 	x.harness.resume();
@@ -335,6 +329,17 @@ test("an effect can own a child in the repository named by reducer and declarati
 		state?.answered,
 	);
 	assert.equal(children.items.length, 1);
+});
+test("a plain tool admits only an active bound agent", async (t) => {
+	const { x, call } = await setup(t);
+	assert.equal((await call("principle")).isError, true, "unbound entry");
+	await call("start", { action: "active" });
+	assert.equal((await call("principle")).isError, false, "bound and active");
+	for (const kind of ["paused", "retired"]) {
+		await x.deliver("plan", x.root.id, { kind });
+		await x.finish("keel.stop");
+		assert.equal((await call("principle")).isError, true, kind);
+	}
 });
 test("plain tools and prompt sections follow role assignments even at entry", async (t) => {
 	const { x } = await setup(t);
@@ -364,6 +369,19 @@ test("registration requires a fixture at the state version", () => {
 	assert.throws(() => defineLane(lane), /fixture/i);
 	assert.throws(() => defineLane(lane, { ...fixture, version: 2 }), /fixture/i);
 	void (() => {
+		type Contract = typeof lane;
+		// @ts-expect-error facts are delivered, never refused
+		const reject: Contract["onFact"] = () => ({ reject: "not now" });
+		const needsViews = (_: ReturnType<typeof plan.initial>, w: World): never => {
+			throw Error(String(w.view("other")));
+		};
+		// @ts-expect-error declarations cannot require views or a clock
+		const asks: Contract["asks"] = needsViews;
+		// @ts-expect-error declarations cannot require views or a clock
+		const agents: Contract["agents"] = needsViews;
+		// @ts-expect-error declarations cannot require views or a clock
+		const effects: Contract["effects"] = needsViews;
+		void [reject, asks, agents, effects];
 		// @ts-expect-error an older fixture missing a field cannot pin this state
 		defineLane(lane, {
 			version: 1,

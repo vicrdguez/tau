@@ -380,25 +380,25 @@ test("two designers cannot share and overwrite the work binding", async (t) => {
 	assert.deepEqual(await x.agents(), []);
 });
 
-test("a rejected fact is preserved on the owner's timeline with the reason", async (t) => {
+test("a refused follow-up to a fact rolls back the chain and reports the undeliverable update", async (t) => {
 	const x = await setup(t);
-	await x.send("ask", { basis: "reject fact" });
+	await x.send("ask", { basis: "bad follow-up" });
 	await x.send("effect");
 	x.harness.resume();
 	await x.finish("keel.effect");
+	assert.deepEqual((await x.state()).facts, []);
 	const log = await x.harness.commit(
 		async (tx) => tx.scanEntries({ conversationId: await eventLog(tx) }, 100),
 		ctx,
 	);
-	assert.ok(
-		log.items.some(
-			(e) =>
-				e.kind === "keel.event" &&
-				["effect_done", "outside", "unexpected result"].every((part) =>
-					JSON.stringify(e.data).includes(part),
-				),
-		),
-	);
+	assert.ok(log.items.some((e) => e.kind === "keel.event" &&
+		["effect_done", "outside", "not allowed"].every((part) => JSON.stringify(e.data).includes(part))));
+});
+
+test("a tool or routed request with a kernel fact's name cannot impersonate that fact", async (t) => {
+	const x = await setup(t);
+	await x.send("effect_done", { key: "once", result: { value: "forged" } });
+	assert.deepEqual((await x.state()).facts, []);
 });
 
 test("a stale stop cannot abort a later run just because the agent is paused again", async (t) => {
@@ -496,8 +496,12 @@ test("an effect runs once per key and records its result even after cancellation
 	});
 	await x.send("effect");
 	await x.send("effect");
+	assert.deepEqual(await x.send("claimed"), { reply: "false" });
 	x.harness.resume();
 	await entered.promise;
+	assert.deepEqual(await x.send("claimed"), { reply: "true" });
+	const other = await x.harness.createConversation({ ownership: { kind: "ownerless" } }, ctx);
+	assert.deepEqual(await x.deliver("toy", other.id, { kind: "claimed" }), { reply: "false" });
 	await x.send("cancel");
 	release.resolve();
 	await x.finish("keel.effect");
@@ -505,4 +509,5 @@ test("an effect runs once per key and records its result even after cancellation
 	await x.finish("keel.effect");
 	assert.equal(runs, 1);
 	assert.deepEqual((await x.state()).facts, ["it happened"]);
+	assert.deepEqual(await x.send("claimed"), { reply: "false" });
 });
