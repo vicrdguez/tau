@@ -107,3 +107,16 @@ test("a merged head must contain the current worker before ignored outputs may b
 	is(merged, "merged");
 	is(await f.run({...remove, mergedHead: merged.sha}), "removed");
 });
+
+test("starts planned without trunk can share only keel's first trunk creation", async (t) => {
+	const f = await fixture(t);
+	const other = { ...f.start, key: "start:43", branch: layout.buildBranch("43") };
+	git(f.root, "branch", "trunk", f.base);
+	assert.deepEqual(await f.run(other), {kind:"occupied", path:"refs/heads/trunk"});
+	git(f.root, "branch", "-D", "trunk");
+	const starts = await Promise.all([f.run(f.start), f.run(other)]);
+	for (const s of starts) assert.deepEqual(s, {kind:"started", base:f.base});
+	assert.equal(git(f.root, "rev-parse", other.branch), f.base);
+	const later = { ...f.start, key: "start:44", branch: layout.buildBranch("44") };
+	is(await f.run(later), "started");
+});
