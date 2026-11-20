@@ -12,6 +12,7 @@ import {
 } from "../../kernel/lane.ts";
 import {
 	layout,
+	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 	type Sha,
@@ -141,7 +142,8 @@ function transition(prev: State, world: World) {
 			toBuild(work, {
 				kind,
 				item: c.item,
-				evidence: [evidence, c.direction].filter(Boolean).join("\n"),
+				evidence,
+				...(c.direction && { direction: c.direction }),
 				threads,
 				head: s.head!,
 				...(inheritedTrunk && { inheritedTrunk }),
@@ -171,7 +173,7 @@ function transition(prev: State, world: World) {
 			protectedGlobs: s.mandate!.protectedPaths,
 			protection: {
 				reviewedEncode: c.reviewedEncode,
-				allowedChanges: c.allowed ? c.protectedChanges : [],
+				allowedChanges: c.waivers,
 				allowedCandidate: null,
 				trunk: c.trunk,
 			},
@@ -230,12 +232,14 @@ function transition(prev: State, world: World) {
 							agentFor(c) === e.agent &&
 							e.tokens.includes(token(e.agent, c.turn)),
 					);
-					if (c && !s.holds.some((h) => h.item === c.item && h.job === null))
+					if (c && !s.holds.some((h) => h.item === c.item && h.job === null)) {
+						c.direction = "";
 						hold(
 							c.item,
 							`${e.agent}: ${e.cause}. ${e.lastWords}`,
-							"Give the stopped agent a fresh turn with your direction.",
+							"Give the stalled agent a fresh turn with your direction.",
 						);
+					}
 					break;
 				}
 
@@ -299,16 +303,14 @@ function transition(prev: State, world: World) {
 			);
 		} else if (r.kind === "protected" && op.kind === "merge_item") {
 			c.protectedChanges = [...r.protectedChanges];
-			c.allowed = false;
+			c.waivers = [];
 			hold(
 				j.item,
 				`Protected changes in the merge candidate ${r.sha}: ${c.protectedChanges.map((p) => p.kind + ": " + p.path).join(", ")}`,
 				"Return the change to the worker with your direction; do not merge this candidate.",
 				j.key,
 				r.sha,
-				!c.protectedChanges.some(
-					(p) => p.path === ".keel" || p.path.startsWith(".keel/"),
-				),
+				protectedViolations(c.protectedChanges, true).length === 0,
 			);
 		} else {
 			discard(j);
@@ -339,6 +341,8 @@ function transition(prev: State, world: World) {
 					if (op.kind === "merge_item" && r.kind === "merged") {
 						s.head = r.sha;
 						c.phase = "merged";
+						if (r.protectedChanges)
+							c.protectedChanges = [...r.protectedChanges];
 						send.push(
 							toBuild(work, { kind: "merged", item: c.item, head: r.sha }),
 						);
@@ -465,7 +469,7 @@ function transition(prev: State, world: World) {
 								.join("\n")
 						: "",
 					protectedChanges: full ? [] : e.protectedChanges,
-					allowed: !full && e.allowed,
+					waivers: !full && e.allowed ? e.protectedChanges : [],
 					reviewedEncode:
 						!full && e.itemKind === "encode" && e.mandate.reviewed,
 					trunk: full ? null : e.trunk,
@@ -612,13 +616,13 @@ function transition(prev: State, world: World) {
 				if (
 					e.kind === "allow" &&
 					(!h.candidate ||
-						c.protectedChanges.some(
-							(p) => p.path === ".keel" || p.path.startsWith(".keel/"),
-						))
+						protectedViolations(c.protectedChanges, true).length !== 0)
 				)
 					break;
 				s.holds = s.holds.filter((x) => x !== h);
-				c.direction = [c.direction, h.evidence, e.direction]
+				const returning =
+					e.kind === "resume" && (h.candidate || c.phase === "nonconvergent");
+				c.direction = [c.direction, returning ? "" : h.evidence, e.direction]
 					.filter(Boolean)
 					.join("\n");
 				c.turn = ++s.seq;
@@ -629,12 +633,12 @@ function transition(prev: State, world: World) {
 							j.op.protection.allowedCandidate = h.candidate;
 							c.sha = h.candidate;
 							c.base = j.op.expected;
-							c.allowed = true;
+							c.waivers = c.protectedChanges;
 							checkout(c);
 						} else {
 							discard(j);
 							clearIntegration(j);
-							back(c, "integration", "", []);
+							back(c, "integration", h.evidence, []);
 							break;
 						}
 					}
@@ -647,7 +651,7 @@ function transition(prev: State, world: World) {
 					back(
 						c,
 						"rework",
-						"",
+						h.evidence,
 						s.verdicts
 							.findLast((v) => v.item === c.item)!
 							.blocks.map((b) => b.thread),

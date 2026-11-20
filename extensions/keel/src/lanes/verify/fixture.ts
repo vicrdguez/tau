@@ -106,7 +106,7 @@ type V1 = {
 		checkout: CheckoutV1 | null;
 		direction: string;
 		protectedChanges: ChangeV1[];
-		allowed: boolean;
+		waivers: ChangeV1[];
 		reviewedEncode: boolean;
 		trunk: Sha | null;
 		playbook: string | null;

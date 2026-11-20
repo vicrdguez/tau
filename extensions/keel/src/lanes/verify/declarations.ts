@@ -72,6 +72,18 @@ export function agentFor(c: Review) {
 		? agentKey(`diagnose/${c.checkout!.key}`)
 		: agentKey(`verify/${c.item}`);
 }
+function protectedFiles(c: Review) {
+	return c.protectedChanges.map((change) => {
+		const allowed = c.waivers.some(
+			(w) =>
+				w.path === change.path &&
+				w.kind === change.kind &&
+				w.before === change.before &&
+				w.after === change.after,
+		);
+		return `${c.item}: ${change.kind}: ${change.path} (${allowed ? "owner allowed" : "no owner waiver"})`;
+	});
+}
 function input(s: State, c: Review) {
 	const history = s.verdicts.filter((v) => v.item === c.item);
 	const facts = form({
@@ -79,14 +91,13 @@ function input(s: State, c: Review) {
 		base: c.base,
 		path: c.checkout!.path,
 		brief: c.brief,
-		protected: c.protectedChanges.length
-			? c.protectedChanges
-					.map(
-						(change) =>
-							`${change.kind}: ${change.path} (${c.allowed ? "owner allowed" : "no owner waiver"})`,
-					)
-					.join("\n")
-			: "None.",
+		protected:
+			(c.scope === "item"
+				? protectedFiles(c)
+				: s.checks
+						.filter((other) => other.phase === "merged")
+						.flatMap(protectedFiles)
+			).join("\n") || "None.",
 		mandate: JSON.stringify(s.mandate, null, 2),
 		rulings: rulings(c.rulings),
 		playbook: c.playbook ?? "None.",

@@ -34,7 +34,7 @@ export type Review = {
 	checkout: Checkout | null;
 	direction: string;
 	protectedChanges: ProtectedChange[];
-	allowed: boolean;
+	waivers: ProtectedChange[];
 	reviewedEncode: boolean;
 	trunk: Sha | null;
 	playbook: string | null;
