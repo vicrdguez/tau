@@ -289,7 +289,7 @@ try {
 	assert.ok((await readFile(join(w2Source, "agent.md"), "utf8")).length > 0);
 	for (const file of [
 		"roles/designer",
-		"inputs/build",
+		"inputs/build/brief",
 		"documents/mandate",
 		"principles/prove-it-works",
 		"playbooks/architect/rationale-template",
