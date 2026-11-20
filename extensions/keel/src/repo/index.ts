@@ -34,7 +34,7 @@ import {
 } from "./worktrees.ts";
 
 export { type Exec, layout, nodeExec } from "./git.ts";
-export { protectedViolations } from "./protection.ts";
+export { isPolicyPath, protectedViolations } from "./protection.ts";
 export type * from "./types.ts";
 
 function roles(base: string, trunk: string) {
@@ -183,7 +183,7 @@ export function readPublishable(
 			owned.head,
 			owned.head,
 			inheritedTrunk,
-			protectedGlobs && [...protectedGlobs, ".keel/**"],
+			protectedGlobs,
 		);
 		const at = await g.head(worker.branch);
 		if (at !== owned.head) moved(at);

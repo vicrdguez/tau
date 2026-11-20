@@ -2,13 +2,16 @@ import { type Git, oid, success } from "./git.ts";
 import type { ProtectedChange, Protection, Sha } from "./types.ts";
 import { touchedPaths, zlist } from "./worktrees.ts";
 
+export function isPolicyPath(path: string) {
+	return path === ".keel" || path.startsWith(".keel/");
+}
+
 export function protectedViolations(
 	changes: readonly ProtectedChange[],
 	reviewedEncode: boolean,
 ) {
 	return changes.filter(
-		(c) =>
-			c.path.startsWith(".keel/") || (!reviewedEncode && c.kind !== "added"),
+		(c) => isPolicyPath(c.path) || (!reviewedEncode && c.kind !== "added"),
 	);
 }
 
@@ -19,7 +22,7 @@ export function holds(
 ) {
 	return protectedViolations(changes, policy.reviewedEncode).some(
 		(c) =>
-			c.path.startsWith(".keel/") ||
+			isPolicyPath(c.path) ||
 			(policy.allowedCandidate !== candidate &&
 				!policy.allowedChanges.some(
 					(a) =>
@@ -70,7 +73,6 @@ async function changed(
 ) {
 	if (from === to) return [];
 	const paths = globs ? new Set(await touchedPaths(g, from, to, globs)) : null;
-	if (paths?.size === 0) return [];
 	const raw = zlist(
 		await g.output(
 			"diff",
@@ -86,7 +88,7 @@ async function changed(
 			"--",
 		),
 	);
-	const changes: ProtectedChange[] = [];
+	const changes: { change: ProtectedChange; selected: boolean }[] = [];
 	for (let i = 0; i < raw.length; ) {
 		const [oldMode, newMode, oldId, newId, status] =
 			raw[i++]!.slice(1).split(" ");
@@ -102,9 +104,11 @@ async function changed(
 		// Include both endpoints so allowing one rename doesn't authorize a different one.
 		const before = `${oldMode}:${oldId}${kind === "renamed" ? `:${path}` : ""}`,
 			after = `${newMode}:${newId}${kind === "renamed" ? `:${dest}` : ""}`;
-		for (const name of dest === path ? [path] : [path, dest])
-			if (!paths || paths.has(name))
-				changes.push({ path: name, kind, before, after });
+		for (const name of dest === path ? [path] : [path, dest]) {
+			const selected = !paths || paths.has(name);
+			if (selected || isPolicyPath(name))
+				changes.push({ change: { path: name, kind, before, after }, selected });
+		}
 	}
 	return changes;
 }
@@ -122,7 +126,17 @@ export async function changeReport(
 ) {
 	const inherited = trunk && (await g.ancestor(trunk, item)) ? trunk : null;
 	const changes = new Map<string, ProtectedChange>();
-	const remember = (c: ProtectedChange) => changes.set(JSON.stringify(c), c);
+	const touched = new Set<string>();
+	const remember = ({
+		change,
+		selected,
+	}: {
+		change: ProtectedChange;
+		selected: boolean;
+	}) => {
+		changes.set(JSON.stringify(change), change);
+		if (selected) touched.add(change.path);
+	};
 	let diffBase: Sha | null = null;
 	for (const build of bases) {
 		const { base, conflicts } = await comparison(g, build, inherited);
@@ -132,7 +146,7 @@ export async function changeReport(
 			// Taking either side of a genuine conflict is a resolution, not mere inheritance.
 			for (const parent of [build, inherited!])
 				for (const c of await changed(g, parent, target, globs))
-					if (unresolved.has(c.path)) remember(c);
+					if (unresolved.has(c.change.path)) remember(c);
 		}
 		diffBase =
 			diffBase === null ? base : (await comparison(g, diffBase, base)).base;
@@ -143,6 +157,6 @@ export async function changeReport(
 	return {
 		base: diffBase!,
 		changes: classified,
-		touched: [...new Set(classified.map((c) => c.path))],
+		touched: [...touched].sort(),
 	};
 }

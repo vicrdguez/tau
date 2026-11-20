@@ -159,7 +159,7 @@ export async function integrate(
 			other,
 			candidate,
 			policy?.trunk ?? null,
-			policy ? [...protectedGlobs, ".keel/**"] : protectedGlobs,
+			protectedGlobs,
 		);
 		if (policy && holds(changes, policy, candidate))
 			return {
