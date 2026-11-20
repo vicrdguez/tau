@@ -73,6 +73,7 @@ type V1 = {
 		attempt: number;
 		seq: number;
 		retry: number;
+	mergedHead: Sha | null;
 		input: "brief" | "rework" | "integration";
 		evidence: string;
 		threads: string[];

@@ -28,6 +28,7 @@ export type Item = Goal & {
 	attempt: number;
 	seq: number;
 	retry: number;
+	mergedHead: Sha | null;
 	input: "brief" | "integration" | "rework";
 	evidence: string;
 	threads: string[];

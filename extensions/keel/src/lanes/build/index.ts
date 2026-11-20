@@ -77,6 +77,12 @@ function schedule(s: Build, w: World) {
 	);
 	if (next) coordinator(s, "brief_item", next.id);
 }
+function discover(s: Build, w: World) {
+	s.phase = "discover";
+	s.setupSeq = ++s.seq;
+	s.setupRetry = 0;
+	s.branches = { base: w.options.base, trunk: w.options.trunk };
+}
 function prepare(s: Build, i: Item, w: World) {
 	const work = String(w.work);
 	const attempt = ++i.attempt;
@@ -133,6 +139,7 @@ function plans(
 						kind: "remove",
 						key: `remove:${worker.key}`,
 						merged: true,
+						mergedHead: i.mergedHead!,
 						target: worker,
 					};
 		return [
@@ -159,12 +166,19 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		obstruction: string,
 		evidence: string,
 	): Reduction<Build> {
+		const stage = s.items.find(i => i.id === item)?.stage;
+		const resume = s.phase === "discover" ? "Read the repository again using the current branch options."
+			: stage === "preparing" && obstruction === "occupied" ? "Prepare a new worker checkout at a fresh path."
+			: s.phase === "start" || stage === "preparing" || stage === "cleaning" ? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
+			: obstruction === "protected" ? "Return to the worker to revise and republish; this does not allow the protected change."
+			: item ? "Return to the worker in the same checkout to continue and republish."
+			: "Return to the coordinator to continue the requested turn.";
 		const cause = `build/${++s.seq}`;
 		s.holds.push({ cause, item, obstruction, evidence });
 		return {
 			state,
 			send: [
-				fileHolding({ work: w.work!, lane: "build", item, cause, evidence }),
+				fileHolding({ work: w.work!, lane: "build", goal: s.mandate!.intent, resume, item, cause, evidence }),
 			],
 		};
 	}
@@ -176,9 +190,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (s.phase !== "idle")
 				return { reject: "The Mandate is already bound." };
 			s.mandate = e.mandate;
-			s.phase = "discover";
-			s.setupSeq = ++s.seq;
-			s.branches = { base: w.options.base, trunk: w.options.trunk };
+			discover(s,w);
 			return { state };
 		case "plan": {
 			if (s.coordinator.tool !== "publish_plan" || held(s, null))
@@ -194,6 +206,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					attempt: 0,
 					seq: 0,
 					retry: 0,
+					mergedHead: null,
 					input: "brief",
 					evidence: "",
 					threads: [],
@@ -238,6 +251,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (e.kind === "effect_failed")
 				return hold(id, "failed", `${e.key}: ${e.error}`);
 			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
+			const i = s.items.find((i) => i.id === id);
+			if (i?.stage === "preparing" && result.kind === "moved" && result.actual === s.head && i.worker!.base !== s.head) {
+				prepare(s, i, w);
+				break;
+			}
 			if (result.kind === "moved" || result.kind === "occupied")
 				return hold(id, result.kind, `${e.key}: ${JSON.stringify(result)}`);
 			if (id === null && s.phase === "discover" && result.kind === "repo") {
@@ -253,7 +271,6 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				coordinator(s, "publish_plan");
 				return { state };
 			}
-			const i = s.items.find((i) => i.id === id);
 			if (i?.stage === "preparing" && result.kind === "worktree") {
 				i.stage = "building";
 				i.seq = ++s.seq;
@@ -362,7 +379,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			const i = s.items.find((i) => i.id === e.item);
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be merged." };
-			s.head = e.head;
+			s.head = i.mergedHead = e.head;
 			i.stage = "cleaning";
 			i.retry = 0;
 			break;
@@ -415,7 +432,8 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				.join("\n");
 			if (!i) {
 				s.coordinator.seq = ++s.seq;
-				if (s.phase === "discover" || s.phase === "start") s.setupRetry++;
+				if (s.phase === "discover") discover(s,w);
+				else if (s.phase === "start") s.setupRetry++;
 			} else if (!held(s, i.id)) {
 				if (i.stage === "preparing" && h.obstruction === "occupied")
 					prepare(s, i, w);
