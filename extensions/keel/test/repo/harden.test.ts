@@ -25,12 +25,15 @@ test("a lost proof retries on the candidate, without resetting an attached branc
 	const op = await f.item();
 	const plan = { ...op, checks: [{
 		id: "restore", timeoutMs: 5000, argv: ["sh", "-ec",
-			'test "$(cat book)" = new; echo scratch > book; git restore book; echo restored']
+			'test ! -e proof.tmp; test "$(cat book)" = new; echo scratch > book; git restore book; echo restored']
 	}] };
 	const stop = Error("runner lost before the proof restored book");
 	await assert.rejects(f.run(plan, async (argv, cwd, options) => {
 		if (options.timeoutMs) {
 			git(cwd, "switch", "trunk");
+			await writeFile(join(cwd, "proof.tmp"), "interrupted stage");
+			git(cwd, "add", "proof.tmp");
+			git(cwd, "update-index", "--skip-worktree", "book");
 			await writeFile(join(cwd, "book"), "scratch");
 			throw stop;
 		}
