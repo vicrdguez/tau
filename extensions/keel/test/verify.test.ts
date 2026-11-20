@@ -260,7 +260,18 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 		else assert.ok(!r.send?.length);
 	}
 	const a = x.agent("diagnoser");
-	const request = a.expects[0]!.input!();
+	const stalled = x.apply({
+		kind: "agent_stalled",
+		agent: a.key,
+		tokens: [a.expects[0]!.token],
+		cause: "stopped",
+		lastWords: "checking that premise",
+	});
+	const stall = stalled.send?.[0]?.event;
+	assert.ok(stall);
+	x.apply({ kind: "reset_counts", item: "bug" });
+	x.apply(resume(stall));
+	const request = x.agent("diagnoser").expects[0]!.input!();
 	assert.match(request, /negative balance/);
 	assert.match(request, /Threads that survived two claimed fixes: totals/);
 	const r = x.call(
