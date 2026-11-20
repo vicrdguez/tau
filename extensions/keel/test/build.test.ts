@@ -124,6 +124,7 @@ function setup(max_workers = 1) {
 			return { token: exp.token, tools: exp.tools, text: exp.input() };
 		};
 		return {
+			world,
 			start,
 			plan,
 			prepare,
@@ -346,7 +347,10 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 			direction: "try another checkout",
 		});
 		assert.notEqual(b.effect().key, first.key);
-		if (outcome !== "occupied") assert.deepEqual(b.effect().spec, first.spec);
+		if (outcome !== "occupied") {
+			assert.deepEqual(b.effect().spec, first.spec);
+			assert.match(String(file.resume), /same pinned/i);
+		}
 		else
 			assert.notEqual(
 				(b.effect().spec.op as JsonObject).path,
@@ -362,6 +366,32 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 		assert.match(b.request("worker").text, /try another checkout/);
 	});
 }
+
+test("a worker racing a recorded merge is prepared from the new head without owner intervention", () => {
+	const b = setup(2);
+	b.plan([item, { ...item, id: "other" }]);
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.send({ kind: "brief", ...brief, item: "other" });
+	const original = b.effect();
+	b.pub();
+	b.send({ kind: "merged", item: "fix", head: merged });
+	const result = b.send({ kind: "effect_done", key: original.key, result: { kind: "moved", actual: merged } });
+	assert.equal(result.send?.length ?? 0, 0);
+	const next = b.effects().find(e => (e.spec.op as JsonObject).kind === "worktree")!;
+	assert.notEqual(next.key, original.key);
+	assert.notEqual((next.spec.op as JsonObject).path, (original.spec.op as JsonObject).path);
+	assert.equal((next.spec.op as JsonObject).base, merged);
+});
+
+test("a discovery resumed after bad options reads the current base and trunk", () => {
+	const b = setup();
+	b.send({ kind: "bound", mandate });
+	const failure = b.send({kind:"effect_failed",key:b.effect().key,error:"missing base"}).send![0]!.event;
+	Object.assign(b.world.options, {base:"stable",trunk:"release"});
+	b.send({kind:"resume",item:null,cause:failure.cause!,direction:"retry",evidence:failure.evidence!});
+	assert.deepEqual(b.effect().spec,{kind:"read_repo",base:"stable",trunk:"release"});
+});
 
 test("a start that failed after a possible CAS keeps its immutable git plan on explicit retry", () => {
 	const b = setup();
@@ -433,6 +463,7 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 	const op = b.effect().spec.op as JsonObject;
 	assert.equal(op.kind, "remove");
 	assert.equal(op.merged, true);
+	assert.equal(op.mergedHead, merged);
 	assert.equal(
 		(op.target as JsonObject).path,
 		"/repo/.git/keel/32/worker-fix-1",
