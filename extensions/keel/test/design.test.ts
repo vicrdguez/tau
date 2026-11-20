@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
+import { drive } from "./fixtures/drive.ts";
 
 const work = 17 as WorkId;
 const world: World = {
@@ -45,7 +46,7 @@ const ambiguous = {
 	readings: ["Use the venue minimum.", "Use the exchange minimum."],
 };
 function advance(event: LaneEvent, state = design.state.initial()) {
-	const result = design.reduce(state, event, world);
+	const result = drive(design, state, event, world);
 	assert.ok(!("reject" in result), JSON.stringify(result));
 	return result;
 }
@@ -151,7 +152,7 @@ test("an ambiguity needs distinct readings; the current answer supplies the read
 	assert.ok(input.includes(ambiguous.readings[1]!));
 	assert.ok(input.includes("Include auctions."));
 	assert.deepEqual(design.asks(directed, world), []);
-	assert.ok("reject" in design.reduce(directed, answer, world));
+	assert.deepEqual(advance(answer, directed), { state: directed });
 	assert.equal(advance(bound, directed).state.mandate?.intent, mandate.intent);
 });
 test("declining an ambiguity closes the ask without a build", () => {

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { verify } from "../src/lanes/verify/index.ts";
+import { drive } from "./fixtures/drive.ts";
 
 const world: World = {
 	work: 41 as WorkId,
@@ -51,7 +52,7 @@ const block = (thread: string) => ({
 function flow() {
 	let state = verify.state.initial();
 	const apply = (event: LaneEvent) => {
-		const result = verify.reduce(state, event, world);
+		const result = drive(verify, state, event, world);
 		assert.ok("state" in result, JSON.stringify(result));
 		state = result.state;
 		return result;

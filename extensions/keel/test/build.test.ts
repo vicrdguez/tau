@@ -4,6 +4,7 @@ import type { ConversationId, JsonObject } from "tau/durable";
 import { workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { buildLane, buildTools } from "../src/lanes/build/index.ts";
+import { drive } from "./fixtures/drive.ts";
 
 const mandate = {
 	intent: "repair pricing",
@@ -56,7 +57,7 @@ function setup(max_workers = 1) {
 	};
 	return buildLane.use((lane) => {
 		let s = lane.state.initial();
-		const tryEvent = (e: LaneEvent) => lane.reduce(s, e, world);
+		const tryEvent = (e: LaneEvent) => drive(lane, s, e, world);
 		function send(e: LaneEvent) {
 			const result = tryEvent(e);
 			if ("reject" in result) assert.fail(result.reject);

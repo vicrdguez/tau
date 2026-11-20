@@ -4,6 +4,7 @@ import type { ConversationId } from "tau/durable";
 import { type WorkId, workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, RegisteredLane, World } from "../src/kernel/lane.ts";
 import { queueLane, queueTools } from "../src/lanes/queue/index.ts";
+import { drive } from "./fixtures/drive.ts";
 import { trunkLane } from "../src/lanes/verify/trunk.ts";
 
 const id = (n: number) => workId(n as ConversationId);
@@ -31,7 +32,7 @@ function project(entry: RegisteredLane) {
 		return {
 			asks: () => lane.asks(state, world),
 			send(event: LaneEvent) {
-				const result = lane.reduce(state, event, world);
+				const result = drive(lane, state, event, world);
 				assert.ok(!("reject" in result), JSON.stringify(result));
 				state = result.state;
 				return result.send ?? [];
