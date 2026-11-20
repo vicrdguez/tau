@@ -30,15 +30,18 @@ const repo = {
 };
 const mandate = {
 	reviewed: false,
+	encodeRequired:false,
+	approvalNotes:[],
 	intent: "Balance every ledger.",
 	nodes: [{ label: "sums", rule: "Sums match", probe: "compare totals" }],
 	checks: [{ id: "totals", argv: ["run", "proof"], timeoutMs: 10 }],
 	protectedPaths: [],
 };
 const rulings = [
-	{ what: "low ruling", why: "easy", rank: 1, cost: "small", follows: "sums" },
+	{ principles:[], what: "low ruling", why: "easy", rank: 1, cost: "small", follows: "sums" },
 	{
 		what: "high ruling",
+		principles:[],
 		why: "hard",
 		rank: 5,
 		cost: "large",

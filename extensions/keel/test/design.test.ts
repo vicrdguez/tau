@@ -57,12 +57,12 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 		{
 			lane: "build",
 			work,
-			event: { kind: "bound", mandate: { ...mandate, reviewed: false } },
+			event: { kind: "bound", mandate: { ...mandate, reviewed: false, encodeRequired:false, approvalNotes:[] } },
 		},
 	]);
 	assert.deepEqual(design.asks(state, world), []);
 	assert.equal(state.reference, bound.reference);
-	assert.deepEqual(state.mandate, { ...mandate, reviewed: false });
+	assert.deepEqual(state.mandate, { ...mandate, reviewed:false, encodeRequired:false, approvalNotes:[] });
 	assert.deepEqual(
 		design.agents(state, world).map((a) => [a.key, a.role, a.expects]),
 		[["designer", "designer", []]],
@@ -85,7 +85,7 @@ test("Ground under prompt authority never grants a self-declared Mandate review"
 		...bound,
 		mandate: { ...mandate, reviewed: true },
 	});
-	assert.deepEqual(state.mandate, { ...mandate, reviewed: false });
+	assert.deepEqual(state.mandate, { ...mandate, reviewed:false, encodeRequired:false, approvalNotes:[] });
 });
 
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
@@ -123,20 +123,6 @@ test("Ground refuses missing authority, colliding labels, empty probes and unusa
 			"reject" in design.reduce(design.state.initial(), e, world),
 			JSON.stringify(e),
 		);
-});
-test("precedent-setting work is recorded with a plain owner notice and no build", () => {
-	const result = advance({
-		kind: "ground",
-		route: "precedent",
-		reference: "No approved allocation rule.",
-	});
-	assert.equal(result.state.reference, "No approved allocation rule.");
-	assert.deepEqual(result.send ?? [], []);
-	assert.match(
-		result.notes?.[0]?.text ?? "",
-		/design rounds are not built yet/i,
-	);
-	assert.ok(!design.asks(result.state, world).length);
 });
 test("an ambiguity needs distinct readings; the current answer supplies the reading and annotations to Ground", () => {
 	assert.ok(
@@ -333,6 +319,8 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 	assert.equal(design.state.scope, "conversation");
 	assert.deepEqual(design.state.initial(), {
 		phase: "entry",
+		audit:null,
+		rounds:[],
 		reference: "",
 		mandate: null,
 		readings: [],
