@@ -23,6 +23,7 @@ const fixtures = {
 		scope: "session",
 		initial: {
 			anchor: null,
+			root: null,
 			works: [],
 			asks: {},
 			ledger: { agents: {}, effects: {} },

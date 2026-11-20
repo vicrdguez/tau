@@ -6,6 +6,7 @@ import type { AddressV1, Check, Exact } from "./fixture.ts";
 import * as work from "./keel.work.ts";
 
 export type V1 = {
+	root: string | null;
 	anchor: ConversationId | null;
 	works: WorkId[];
 	asks: Record<
@@ -21,6 +22,7 @@ export type CurrentMatchesV1 = Check<
 const anchor = 10 as ConversationId;
 export const current = {
 	anchor,
+	root: "/projects/quant-engine",
 	works: [workId(anchor)],
 	asks: {
 		review: {

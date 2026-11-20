@@ -273,6 +273,74 @@ test("a rejected routed message publishes none of the preceding lane changes", a
 	assert.deepEqual(await x.send("bounce"), { reject: "not allowed" });
 	assert.equal((await x.state()).publications, 0);
 });
+
+test("a withdrawn, unclaimed effect can be declared again", async (t) => {
+	let runs = 0;
+	const x = await setup(t, { runEffect: async () => ({ value: String(++runs) }) });
+	await x.send("effect");
+	await x.send("cancel");
+	await x.send("effect");
+	x.harness.resume();
+	await x.finish("keel.effect");
+	assert.equal(runs, 1);
+	assert.deepEqual((await x.state()).facts, ["1"]);
+});
+
+test("no decision can be derived from an independently changing project lane", async (t) => {
+	const x = await setup(t);
+	await x.send("forward");
+	await x.send("ask", { basis: "dependent" });
+	await x.deliver("shared", null, { kind: "changed" });
+	assert.equal(await x.harness.commit(tx => decision(tx, id(1, x.root.id)), ctx), undefined);
+});
+
+test("both creation and delivery resolve null cwd to the host's project directory", async (t) => {
+	const x = await setup(t);
+	await x.send("agent");
+	const [id] = await x.agents();
+	assert.ok(id);
+	const worker = await x.harness.conversation(id, ctx);
+	assert.equal((await worker?.agent(ctx))?.cwd, "/projects/quant-engine");
+	x.provider.setResponses([publish()]);
+	x.harness.resume();
+	await x.finish("keel.deliver");
+	assert.equal((await worker?.agent(ctx))?.cwd, "/projects/quant-engine");
+});
+
+for (const mode of ["failed", "queued stop", "placed stop"] as const)
+	test(`a ${mode} run reports the still-open obligation`, { timeout: 5000 }, async (t) => {
+		const x = await setup(t);
+		const entered = latch<void>();
+		const release = latch<void>();
+		const failure = fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid request" });
+		x.provider.setResponses([async (_, options) => {
+			entered.resolve();
+			options?.signal?.addEventListener("abort", () => release.resolve(), { once: true });
+			await release.promise;
+			return failure;
+		}, failure]);
+		await x.send("agent");
+		x.harness.resume();
+		await entered.promise;
+		const [worker] = await x.agents();
+		assert.ok(worker);
+		if (mode !== "placed stop") {
+			await x.send("agent");
+			for (let i = 0; ; i++) {
+				const record = await x.harness.commit(tx => tx.submissionByRequest(worker, token("worker/0", 2)), ctx);
+				if (record?.status === "queued") break;
+				assert.ok(i < 200, "replacement input did not queue");
+				await new Promise(resolve => setTimeout(resolve, 5));
+			}
+		}
+		if (mode === "failed") release.resolve();
+		else await (await x.harness.conversation(worker, ctx))!.abort(ctx);
+		await x.finish("keel.deliver");
+		assert.equal(x.provider.state.callCount, mode === "failed" ? 2 : 1);
+		assert.equal((await x.state()).stalls, 1);
+		assert.deepEqual((await x.state()).notes, [mode === "failed" ? "failed" : "stopped"]);
+	});
+
 test("three failed effect attempts deliver one failure to the lane", async (t) => {
 	let n = 0;
 	const x = await setup(t, {
