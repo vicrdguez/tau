@@ -53,6 +53,7 @@ export type Build = {
 	seq: number;
 	setupSeq: number;
 	setupRetry: number;
+	refreshTrunk: Sha | null;
 	abandoned: Worker[];
 	cleanup: {worker:Worker;mergedHead:Sha|null;wait:string|null;key:string}[];
 	kept: string[];
@@ -90,6 +91,7 @@ export const buildDoc = defineState({
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
+		refreshTrunk:null,
 		abandoned: [],
 		cleanup: [],
 		kept: [], 

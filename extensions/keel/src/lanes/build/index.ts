@@ -109,9 +109,9 @@ function plans(
 ): { item: string | null; effect: EffectDecl }[] {
 	const work = String(w.work);
 	if ((s.phase === "discover" || s.phase === "start") && !held(s, null)) {
-		const key = `${s.phase}:${work}:${s.setupSeq}`;
+		const key = `${s.refreshTrunk ? "refresh" : s.phase}:${work}:${s.setupSeq}`;
 		const effect: EffectDecl =
-			s.phase === "discover"
+			s.phase === "discover" || s.refreshTrunk
 				? {
 						key: delivery(key, s.setupRetry),
 						spec: { kind: "read_repo", ...s.branches },
@@ -188,6 +188,21 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 			if (e.kind === "effect_failed")
 				return hold(s,w,id, "failed", `${e.key}: ${e.error}`);
 			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
+			if (s.phase === "start" && result.kind === "moved" && result.keelMoved && result.actual) {
+				s.refreshTrunk=result.actual;
+				s.setupRetry++;
+				return {state};
+			}
+			if (s.phase === "start" && s.refreshTrunk && result.kind === "repo") {
+				// Only the move repo attributed may replace our immutable start plan.
+				if (result.repo.trunkHead === s.refreshTrunk) {
+					s.repo=result.repo;
+					s.setupSeq=++s.seq;
+					s.setupRetry=0;
+				}
+				s.refreshTrunk=null;
+				return {state};
+			}
 			const i = s.items.find((i) => i.id === id);
 			if (i?.stage === "preparing" && result.kind === "moved" && result.actual === s.head && i.worker!.base !== s.head) {
 				prepare(s, i, w);

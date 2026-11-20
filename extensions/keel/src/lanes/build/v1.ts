@@ -40,6 +40,7 @@ type V1 = {
 	seq: number;
 	setupSeq: number;
 	setupRetry: number;
+	refreshTrunk: Sha | null;
 	abandoned: WorkerV1[];
 	cleanup: {worker:WorkerV1;mergedHead:Sha|null;wait:string|null;key:string}[];
 	kept: string[];
@@ -109,6 +110,7 @@ export const buildV1 = {
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
+		refreshTrunk:null,
 		abandoned: [],
 		cleanup: [],
 		kept: [], 
