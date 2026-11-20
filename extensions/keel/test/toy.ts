@@ -106,12 +106,17 @@ const toyLane = defineLane(
 				case "effect_done":
 					return {
 						state: { ...s, facts: [...s.facts, String(e.result.value)] },
-						send: s.ask === "bad follow-up" ? [{ lane: "shared", work: null, event: { kind: "forbidden" } }] : [],
+						send:
+							s.ask === "bad follow-up"
+								? [{ lane: "shared", work: null, event: { kind: "forbidden" } }]
+								: [],
 					};
 				case "effect_failed":
 					return { state: { ...s, facts: [...s.facts, e.error] } };
 				case "agent_stalled":
-					return { state: { ...s, stalls: s.stalls + 1, notes: [e.cause], turn: 0 } };
+					return {
+						state: { ...s, stalls: s.stalls + 1, notes: [e.cause], turn: 0 },
+					};
 			}
 		},
 		reduce(s, e, world) {
@@ -144,7 +149,10 @@ const toyLane = defineLane(
 				case "effect":
 					return { state: { ...s, effect: true } };
 				case "claimed":
-					return { state: s, reply: String(world.runningEffect?.(effectKey("once"))) };
+					return {
+						state: s,
+						reply: String(world.runningEffect?.(effectKey("once"))),
+					};
 				case "publish":
 					return {
 						state: { ...s, publications: s.publications + 1, turn: 0 },

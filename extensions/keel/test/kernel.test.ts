@@ -391,8 +391,15 @@ test("a refused follow-up to a fact rolls back the chain and reports the undeliv
 		async (tx) => tx.scanEntries({ conversationId: await eventLog(tx) }, 100),
 		ctx,
 	);
-	assert.ok(log.items.some((e) => e.kind === "keel.event" &&
-		["effect_done", "outside", "not allowed"].every((part) => JSON.stringify(e.data).includes(part))));
+	assert.ok(
+		log.items.some(
+			(e) =>
+				e.kind === "keel.event" &&
+				["effect_done", "outside", "not allowed"].every((part) =>
+					JSON.stringify(e.data).includes(part),
+				),
+		),
+	);
 });
 
 test("a tool or routed request with a kernel fact's name cannot impersonate that fact", async (t) => {
@@ -500,8 +507,13 @@ test("an effect runs once per key and records its result even after cancellation
 	x.harness.resume();
 	await entered.promise;
 	assert.deepEqual(await x.send("claimed"), { reply: "true" });
-	const other = await x.harness.createConversation({ ownership: { kind: "ownerless" } }, ctx);
-	assert.deepEqual(await x.deliver("toy", other.id, { kind: "claimed" }), { reply: "false" });
+	const other = await x.harness.createConversation(
+		{ ownership: { kind: "ownerless" } },
+		ctx,
+	);
+	assert.deepEqual(await x.deliver("toy", other.id, { kind: "claimed" }), {
+		reply: "false",
+	});
 	await x.send("cancel");
 	release.resolve();
 	await x.finish("keel.effect");

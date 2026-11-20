@@ -9,8 +9,8 @@ import {
 	defineLane,
 	defineLaneTool,
 	type Lane,
-	type World,
 	prose,
+	type World,
 } from "../src/kernel/lane.ts";
 import { BindingState, ProjectState } from "../src/kernel/records.ts";
 import { defineState, stateDoc } from "../src/kernel/state.ts";
@@ -372,7 +372,10 @@ test("registration requires a fixture at the state version", () => {
 		type Contract = typeof lane;
 		// @ts-expect-error facts are delivered, never refused
 		const reject: Contract["onFact"] = () => ({ reject: "not now" });
-		const needsViews = (_: ReturnType<typeof plan.initial>, w: World): never => {
+		const needsViews = (
+			_: ReturnType<typeof plan.initial>,
+			w: World,
+		): never => {
 			throw Error(String(w.view("other")));
 		};
 		// @ts-expect-error declarations cannot require views or a clock
