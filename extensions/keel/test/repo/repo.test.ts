@@ -16,6 +16,7 @@ import {
 	layout,
 	nodeExec,
 	prepareLanding,
+	readPublishable,
 	readRepo,
 	type Sha,
 } from "../../src/repo/index.ts";
@@ -421,6 +422,28 @@ test("publish rejects dirt, detachment, and unrelated history; reports both ends
 	);
 	git(f.worker.path, "reset", "--hard", unrelated);
 	assert.equal((await f.publish()).kind, "not_descendant");
+});
+test("publish reports a worker's protected deletion, not the Encode change it merged from build", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	const encode = { ...f.worker, key: "encode", branch: layout.itemBranch("42", "encode", 1), path: layout.worktree(f.repo, "42", "encode") };
+	is(await f.run(encode), "worktree");
+	await mkdir(join(encode.path, "tests"));
+	await writeFile(join(encode.path, "tests/check.sh"), "check");
+	git(encode.path, "add", "tests");
+	git(encode.path, "commit", "-m", "Encode adds a check");
+	const pub = await readPublishable(nodeExec, f.repo, encode);
+	assert.equal(pub.kind, "ok");
+	const merged = await f.run({ ...item, item: pub.sha });
+	is(merged, "merged");
+	git(f.worker.path, "merge", "--no-edit", f.branch);
+	const unchanged = await f.publish(["tests/**"]);
+	assert.equal(unchanged.kind, "ok");
+	git(f.worker.path, "rm", "tests/check.sh");
+	git(f.worker.path, "commit", "-m", "remove the check");
+	const deleted = await f.publish(["tests/**"]);
+	assert.equal(deleted.kind, "ok");
+	assert.deepEqual([unchanged.touched, deleted.touched], [[], ["tests/check.sh"]]);
 });
 test("git ignores inherited redirection/config, replacement refs and a graft at publish", async (t) => {
 	const f = await fixture(t);
