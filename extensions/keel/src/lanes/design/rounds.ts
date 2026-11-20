@@ -1,14 +1,7 @@
 import { subject } from "../../kernel/ids.ts";
 import { type Ask, type KernelEvent, prose } from "../../kernel/lane.ts";
-import {
-	type Audit,
-	type Draft,
-	type Reply,
-	draftError,
-	nodes,
-	paths,
-} from "./draft.ts";
-import type { Mandate } from "./public.ts";
+import { type Audit, type Draft, draftError, nodes, paths } from "./draft.ts";
+import { type Mandate, type Reply, repliesCover } from "./public.ts";
 
 type Fact = Extract<KernelEvent, { kind: "answered" }>;
 type Answer = {
@@ -77,15 +70,7 @@ export function openRound(
 	if (error) return { reject: error };
 	const prev = history.at(-1);
 	const debt = prev ? owed(prev) : [];
-	if (
-		replies.length !== debt.length ||
-		!debt.every((a) => replies.some((r) => r.n === a.n)) ||
-		replies.some(
-			(r) =>
-				!["acted_on", "considered", "dismissed"].includes(r.status) ||
-				!r.reason.trim(),
-		)
-	)
+	if (!repliesCover(debt.length, replies))
 		return {
 			reject:
 				"Reply to every owed number exactly once: acted_on, considered or dismissed, with a reason.",

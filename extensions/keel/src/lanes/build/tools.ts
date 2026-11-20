@@ -1,6 +1,7 @@
 import { arr, int, obj, oneOf, opt, str } from "tau/schema";
 import { defineLaneTool } from "../../kernel/lane.ts";
 import { nodeExec, readPublishable } from "../../repo/index.ts";
+import { repliesSchema } from "../design/public.ts";
 import type { buildView } from "./state.ts";
 
 const text = str({ minLength: 1 });
@@ -26,15 +27,7 @@ export const buildTools = [
 					deps: texts,
 				}),
 			),
-			replies: opt(
-				arr(
-					obj({
-						n: int({ minimum: 1 }),
-						status: oneOf(["acted_on", "considered", "dismissed"]),
-						reason: text,
-					}),
-				),
-			),
+			replies: opt(repliesSchema),
 		}),
 		event: ({ items, replies }) => ({
 			kind: "plan",

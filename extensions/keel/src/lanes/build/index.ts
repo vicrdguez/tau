@@ -18,14 +18,13 @@ import {
 	type RepoResult,
 	type Sha,
 } from "../../repo/index.ts";
-import { mandateLabels } from "../design/public.ts";
+import { mandateLabels, type Reply } from "../design/public.ts";
 import { fileHolding, type Resume, resumption } from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
-	type ApprovalReply,
 	type Brief,
 	type Build,
 	buildDoc,
@@ -44,7 +43,7 @@ export { buildTools } from "./tools.ts";
 type Event =
 	| BuildUpdate
 	| Resume
-	| { kind: "plan"; items: Goal[]; replies?: ApprovalReply[] }
+	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
 	| ({ kind: "brief"; item: string } & Brief)
 	| { kind: "handoff"; summary: string; risk: string }
 	| { kind: "ruling"; agent: string; ruling: Ruling }

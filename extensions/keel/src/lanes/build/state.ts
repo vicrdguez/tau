@@ -6,14 +6,9 @@ import type {
 	Sha,
 	Worker,
 } from "../../repo/index.ts";
-import type { Mandate } from "../design/public.ts";
+import { type Mandate, type Reply, repliesCover } from "../design/public.ts";
 import type { Ruling } from "./public.ts";
 
-export type ApprovalReply = {
-	n: number;
-	status: "acted_on" | "considered" | "dismissed";
-	reason: string;
-};
 export type Goal = {
 	id: string;
 	kind: "build" | "encode";
@@ -65,7 +60,7 @@ export type Build = {
 		| "closed"
 		| "cancelled";
 	mandate: Mandate | null;
-	approvalReplies: ApprovalReply[];
+	approvalReplies: Reply[];
 	repo: RepoInfo | null;
 	branches: { base: string; trunk: string } | null;
 	base: Sha | null;
@@ -167,23 +162,12 @@ export function buildView(s: Build) {
 export function validatePlan(
 	s: Build,
 	goals: Goal[],
-	replies: ApprovalReply[],
+	replies: Reply[],
 ): string | null {
 	const existing = s.items;
 	const firstPlan = !existing.length;
 	const notes = firstPlan ? s.mandate!.approvalNotes : [];
-	if (
-		replies.length !== notes.length ||
-		new Set(replies.map((r) => r.n)).size !== replies.length ||
-		replies.some(
-			(r) =>
-				!Number.isSafeInteger(r.n) ||
-				r.n < 1 ||
-				r.n > notes.length ||
-				!["acted_on", "considered", "dismissed"].includes(r.status) ||
-				!r.reason.trim(),
-		)
-	)
+	if (!repliesCover(notes.length, replies))
 		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
 	const first = existing[0] ?? goals[0];
 	if (

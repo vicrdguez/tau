@@ -50,13 +50,6 @@ export const reviewedDraft = obj({
 	),
 	references: arr(obj({ label: text, source: text })),
 });
-export const repliesSchema = arr(
-	obj({
-		n: int({ minimum: 1 }),
-		status: oneOf(["acted_on", "considered", "dismissed"]),
-		reason: text,
-	}),
-);
 export type Observation = { label: string; text: string };
 export type Audit = {
 	exists: string;
@@ -81,11 +74,6 @@ export type Draft = Pick<Mandate, "intent" | "checks" | "protectedPaths"> & {
 	settlements: { label: string; ruling: string }[];
 	riders: (Observation & { origin: "evidence" | "incidental" | "seeded" })[];
 	references: { label: string; source: string }[];
-};
-export type Reply = {
-	n: number;
-	status: "acted_on" | "considered" | "dismissed";
-	reason: string;
 };
 const dir = import.meta.dirname + "/../../prose/documents";
 const seamText = prose(dir, "seam.md", [
