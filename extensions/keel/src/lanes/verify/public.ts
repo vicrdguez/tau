@@ -22,6 +22,7 @@ export type Publication = BuildSnapshot &
 				trunk: Sha | null;
 				addresses: string[];
 				brief: string;
+				paths: string[];
 		  }
 		| { kind: "handoff"; base: Sha; summary: string; risk: string }
 	);

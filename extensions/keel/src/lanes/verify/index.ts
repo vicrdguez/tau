@@ -460,6 +460,7 @@ function transition(prev: State, world: World) {
 					base: e.base,
 					sha: full ? e.head : e.sha,
 					brief: full ? e.summary : e.brief,
+					paths: full ? [] : e.paths,
 					rulings: e.rulings,
 					addresses,
 					direction: full

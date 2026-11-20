@@ -18,6 +18,7 @@ export type Review = {
 	sha: Sha;
 	base: Sha;
 	brief: string;
+	paths: string[];
 	rulings: Ruling[];
 	addresses: string[];
 	phase:

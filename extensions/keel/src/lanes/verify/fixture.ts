@@ -97,6 +97,7 @@ type V1 = {
 		sha: Sha;
 		base: Sha;
 		brief: string;
+		paths: string[];
 		rulings: RulingV1[];
 		addresses: string[];
 		phase:
