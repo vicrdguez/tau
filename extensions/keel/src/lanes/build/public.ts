@@ -27,4 +27,5 @@ export type Ruling = {
 	cost: string;
 	rank: number;
 	follows: string;
+	principles: string[];
 };

@@ -104,6 +104,7 @@ type V1 = {
 			cost: string;
 			rank: number;
 			follows: string;
+			principles: string[];
 		}[];
 		publication: {
 			sha: Sha;

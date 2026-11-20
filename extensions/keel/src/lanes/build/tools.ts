@@ -66,17 +66,23 @@ export const buildTools = [
 		...worker,
 		name: "record_ruling",
 		description:
-			"Record what you decided, why, the cost if wrong and the reference you followed. Rank higher costs with higher integers.",
+			"Record your decision, reason, cost if wrong and reference. Rank higher costs with higher integers. Cite principles by their delivered names.",
 		parameters: obj({
 			what: text,
 			why: text,
 			cost: text,
 			rank: int({ minimum: 0 }),
 			follows: text,
+			principles: opt(texts),
 		}),
+		citations: ({ principles }) => principles ?? [],
 		gate: "standing",
 		terminate: false,
-		event: (ruling, _, self) => ({ kind: "ruling", agent: self.agent, ruling }),
+		event: ({ principles, ...ruling }, _, self) => ({
+			kind: "ruling",
+			agent: self.agent,
+			ruling: { ...ruling, principles: principles ?? [] },
+		}),
 	}),
 	defineLaneTool({
 		...worker,

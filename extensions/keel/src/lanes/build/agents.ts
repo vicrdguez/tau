@@ -247,6 +247,15 @@ export function agents(s: Build): AgentDecl[] {
 							{
 								token: token("publish", i.seq),
 								tools: ["publish_build"],
+								paths: i
+									.brief!.fences.split("\n")
+									.map((p) => p.trim())
+									.filter(Boolean),
+								situation:
+									i.input === "rework" &&
+									i.threads.some((id) => i.publication?.addresses.includes(id))
+										? "survived_fix"
+										: i.input,
 								input: () => workerInput(s, i),
 							},
 						]
