@@ -11,6 +11,7 @@ type RepoV1 = {
 };
 type ProofV1 = { id: string; argv: string[]; timeoutMs: number };
 type MandateV1 = {
+	reviewed: boolean;
 	intent: string;
 	nodes: { label: string; rule: string; probe: string }[];
 	checks: ProofV1[];
@@ -30,6 +31,12 @@ type PlanV1 = {
 	expectedTrunk: Sha;
 	message: string;
 };
+type ChangeV1 = {
+	path: string;
+	kind: "added" | "modified" | "deleted" | "renamed";
+	before: string;
+	after: string;
+};
 type OpV1 =
 	| CheckoutV1
 	| {
@@ -39,6 +46,13 @@ type OpV1 =
 	  }
 	| {
 			kind: "merge_item";
+			protectedGlobs: string[];
+			protection: {
+				reviewedEncode: boolean;
+				allowedChanges: ChangeV1[];
+				allowedCandidate: Sha | null;
+				trunk: Sha | null;
+			};
 			key: string;
 			integration: string;
 			into: BranchName;
@@ -64,6 +78,9 @@ type BlockV1 = { thread: string; ground: string; evidence: string };
 type V1 = {
 	seq: number;
 	cancelled: boolean;
+	kept: string[];
+	directions: string[];
+	diagnoses: string[];
 	repo: RepoV1 | null;
 	mandate: MandateV1 | null;
 	head: Sha | null;
@@ -88,6 +105,10 @@ type V1 = {
 		turn: number;
 		checkout: CheckoutV1 | null;
 		direction: string;
+		protectedChanges: ChangeV1[];
+		allowed: boolean;
+		reviewedEncode: boolean;
+		trunk: Sha | null;
 		playbook: string | null;
 	}[];
 	jobs: { item: string; key: string; op: OpV1 }[];
@@ -95,6 +116,7 @@ type V1 = {
 		item: string;
 		cause: string;
 		job: string | null;
+		candidate: Sha | null;
 		evidence: string;
 	}[];
 	verdicts: {
@@ -135,6 +157,9 @@ export const verifyFixture = {
 	sample: (): V1 => ({
 		seq: 0,
 		cancelled: false,
+		kept: [],
+		directions: [],
+		diagnoses: [],
 		repo: null,
 		mandate: null,
 		head: null,

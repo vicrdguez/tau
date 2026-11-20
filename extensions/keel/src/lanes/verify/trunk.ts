@@ -20,6 +20,7 @@ export const trunkLane = defineLane(
 			version: 1,
 			initial: (): TrunkState => ({ holder: null, waiting: [] }),
 		}),
+		onFact: (state) => ({ state }),
 		reduce(state, event) {
 			const work = event.work as WorkId;
 			if (event.kind === "take_slot") {

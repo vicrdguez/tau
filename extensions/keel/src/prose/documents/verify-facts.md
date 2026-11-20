@@ -15,7 +15,7 @@ Project verification playbook:
 Earlier verdicts:
 {{history}}
 
-Owner direction from earlier item reviews:
-{{directions}}
+Protected changes and owner authorization:
+{{protected}}
 
 Threads this build claims to address: {{addresses}}

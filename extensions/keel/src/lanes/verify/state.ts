@@ -2,8 +2,8 @@ import { defineState } from "../../kernel/state.ts";
 import type {
 	BranchName,
 	Checkout,
-	Integrate,
 	Landing,
+	ProtectedChange,
 	RepoInfo,
 	Sha,
 } from "../../repo/index.ts";
@@ -33,6 +33,10 @@ export type Review = {
 	turn: number;
 	checkout: Checkout | null;
 	direction: string;
+	protectedChanges: ProtectedChange[];
+	allowed: boolean;
+	reviewedEncode: boolean;
+	trunk: Sha | null;
 	playbook: string | null;
 };
 export type Verdict = {
@@ -46,16 +50,31 @@ export type Verdict = {
 	notes: string[];
 	addresses: string[];
 };
-type Integration<T extends Integrate["kind"]> = Omit<
-	Extract<Integrate, { kind: T }>,
-	"checks"
-> & { checks: Mandate["checks"] };
+type Integration = {
+	key: string;
+	integration: string;
+	expected: Sha;
+	checks: Mandate["checks"];
+};
+type Merge = Integration & {
+	kind: "merge_item";
+	into: BranchName;
+	item: Sha;
+	message: string;
+	protectedGlobs: string[];
+	protection: {
+		reviewedEncode: boolean;
+		allowedChanges: ProtectedChange[];
+		allowedCandidate: Sha | null;
+		trunk: Sha | null;
+	};
+};
 export type Target = Checkout | Omit<Checkout, "sha">;
 export type Op =
 	| Checkout
 	| { kind: "remove"; key: string; target: Target }
-	| Integration<"merge_item">
-	| Integration<"take_trunk">
+	| Merge
+	| (Integration & { kind: "take_trunk"; build: BranchName; trunk: Sha })
 	| { kind: "read_repo"; key: string; base: BranchName; trunk: BranchName }
 	| { kind: "prepare_landing"; key: string; landing: Landing }
 	| ({ kind: "land"; target: Sha } & Landing);
@@ -63,6 +82,9 @@ export type Job = { item: string; op: Op; key: string };
 export type State = {
 	seq: number;
 	cancelled: boolean;
+	kept: string[];
+	directions: string[];
+	diagnoses: string[];
 	repo: RepoInfo | null;
 	mandate: Mandate | null;
 	head: Sha | null;
@@ -72,6 +94,7 @@ export type State = {
 		item: string;
 		cause: string;
 		job: string | null;
+		candidate: Sha | null;
 		evidence: string;
 	}[];
 	verdicts: Verdict[];
@@ -113,6 +136,9 @@ export const VerifyDoc = defineState<State>({
 	initial: () => ({
 		seq: 0,
 		cancelled: false,
+		kept: [],
+		directions: [],
+		diagnoses: [],
 		repo: null,
 		mandate: null,
 		head: null,

@@ -25,14 +25,20 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"playbook",
 	"history",
 	"addresses",
-	"directions",
+	"protected",
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", [
 	"facts",
 	"principle",
 	"threads",
 ]);
-const principle = prose(dir, "principles/attack-the-premise.md", [])({});
+const principle = prose(
+	dir,
+	"principles/attack-the-premise.md",
+	[],
+)({})
+	.replace(/^---\n[\s\S]*?\n---\n+/, "")
+	.replace(/\[([^\]]+)\]\([^)]+\.md\)/g, "$1");
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
 const handover = prose(dir, "documents/handover.md", [
 	"trunk",
@@ -44,6 +50,7 @@ const handover = prose(dir, "documents/handover.md", [
 	"rulings",
 	"notes",
 	"risk",
+	"diagnoses",
 	"directions",
 	"base",
 ]);
@@ -65,11 +72,6 @@ export function agentFor(c: Review) {
 		? agentKey(`diagnose/${c.checkout!.key}`)
 		: agentKey(`verify/${c.item}`);
 }
-const directions = (checks: Review[]) =>
-	checks
-		.filter((c) => c.direction)
-		.map((c) => `${c.item}: ${c.direction}`)
-		.join("\n") || "None.";
 function input(s: State, c: Review) {
 	const history = s.verdicts.filter((v) => v.item === c.item);
 	const facts = form({
@@ -77,9 +79,14 @@ function input(s: State, c: Review) {
 		base: c.base,
 		path: c.checkout!.path,
 		brief: c.brief,
-		directions: directions(
-			c.scope === "item" ? [] : s.checks.filter((other) => other !== c),
-		),
+		protected: c.protectedChanges.length
+			? c.protectedChanges
+					.map(
+						(change) =>
+							`${change.kind}: ${change.path} (${c.allowed ? "owner allowed" : "no owner waiver"})`,
+					)
+					.join("\n")
+			: "None.",
 		mandate: JSON.stringify(s.mandate, null, 2),
 		rulings: rulings(c.rulings),
 		playbook: c.playbook ?? "None.",
@@ -141,9 +148,11 @@ export function effects(s: State): EffectDecl[] {
 	return s.jobs
 		.filter(
 			(j) =>
-				(!s.cancelled || j.op.kind === "land" || j.op.kind === "remove") &&
-				!s.holds.some((h) => h.job === j.key) &&
-				(j.op.kind === "remove" || !cleaning(s, j.item)),
+				s.cancelled ||
+				(!s.holds.some((h) => h.job === j.key) &&
+					(j.op.kind !== "merge_item" ||
+						s.checks.some((c) => c.item === j.item && c.phase === "merging")) &&
+					(j.op.kind === "remove" || !cleaning(s, j.item))),
 		)
 		.map(({ key, op }) => ({
 			key: effectKey(key),
@@ -180,7 +189,8 @@ export function asks(s: State): Ask[] {
 						.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
 						.join("\n") || "None.",
 				risk: info.risk,
-				directions: directions(s.checks),
+				directions: s.directions.join("\n") || "None.",
+				diagnoses: s.diagnoses.join("\n") || "None.",
 			}),
 		},
 	];

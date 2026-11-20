@@ -1,4 +1,4 @@
-The owner resumed this work.
+Finding and owner response for this turn:
 
 {{direction}}
 

@@ -12,7 +12,10 @@ Rulings, highest cost if wrong first:
 Verifier notes:
 {{notes}}
 
-Direction from resumed findings:
+Non-convergence and diagnosis:
+{{diagnoses}}
+
+Direction the owner gave on findings:
 {{directions}}
 
 Residual risk: {{risk}}

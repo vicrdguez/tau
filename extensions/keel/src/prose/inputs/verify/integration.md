@@ -1,5 +1,5 @@
-The worker published a correction after integration. The earlier verdict passed on a different commit.
+The earlier verdict passed on a different commit. This commit corrects an integration failure or is a merge candidate with an owner-authorized protected change. The failed integration was not a verdict.
 
 {{facts}}
 
-Verify the correction against the current build and call `publish_verdict`.
+Review the changed commit against its supplied diff base and call `publish_verdict`.
