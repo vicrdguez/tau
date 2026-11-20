@@ -78,7 +78,7 @@ export const queueLane = defineLane(
 				return cancel(state, event.work as WorkId);
 			return { reject: `Unknown queue event: ${event.kind}` };
 		},
-		onFact(state, answer) {
+		onFact(state, answer): Accepted<QueueState> {
 			if (answer.kind !== "answered") return { state };
 			const finding = state.findings.find(
 				(f) => f.status === "open" && address(f) === answer.subject,
