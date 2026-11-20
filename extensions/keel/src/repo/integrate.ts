@@ -44,7 +44,7 @@ async function check(
 	published: boolean,
 	before: ProofChanges | undefined,
 	verifyCheckout: () => Promise<ProofChanges | undefined>,
-): Promise<{ report?: CheckReport; changes?: ProofChanges }> {
+): Promise<{ report?: CheckReport; changes: ProofChanges | undefined }> {
 	const { id, argv, timeoutMs } = spec;
 	if (
 		!argv[0] ||
