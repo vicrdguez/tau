@@ -57,12 +57,25 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 		{
 			lane: "build",
 			work,
-			event: { kind: "bound", mandate: { ...mandate, reviewed: false, encodeRequired:false, approvalNotes:[] } },
+			event: {
+				kind: "bound",
+				mandate: {
+					...mandate,
+					reviewed: false,
+					encodeRequired: false,
+					approvalNotes: [],
+				},
+			},
 		},
 	]);
 	assert.deepEqual(design.asks(state, world), []);
 	assert.equal(state.reference, bound.reference);
-	assert.deepEqual(state.mandate, { ...mandate, reviewed:false, encodeRequired:false, approvalNotes:[] });
+	assert.deepEqual(state.mandate, {
+		...mandate,
+		reviewed: false,
+		encodeRequired: false,
+		approvalNotes: [],
+	});
 	assert.deepEqual(
 		design.agents(state, world).map((a) => [a.key, a.role, a.expects]),
 		[["designer", "designer", []]],
@@ -85,7 +98,12 @@ test("Ground under prompt authority never grants a self-declared Mandate review"
 		...bound,
 		mandate: { ...mandate, reviewed: true },
 	});
-	assert.deepEqual(state.mandate, { ...mandate, reviewed:false, encodeRequired:false, approvalNotes:[] });
+	assert.deepEqual(state.mandate, {
+		...mandate,
+		reviewed: false,
+		encodeRequired: false,
+		approvalNotes: [],
+	});
 });
 
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
@@ -319,8 +337,8 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 	assert.equal(design.state.scope, "conversation");
 	assert.deepEqual(design.state.initial(), {
 		phase: "entry",
-		audit:null,
-		rounds:[],
+		audit: null,
+		rounds: [],
 		reference: "",
 		mandate: null,
 		readings: [],
