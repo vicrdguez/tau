@@ -54,11 +54,15 @@ function advance(event: LaneEvent, state = design.state.initial()) {
 test("a precedent-following Mandate binds once under the prompt without an owner ask", () => {
 	const { state, send } = advance(bound);
 	assert.deepEqual(send, [
-		{ lane: "build", work, event: { kind: "bound", mandate } },
+		{
+			lane: "build",
+			work,
+			event: { kind: "bound", mandate: { ...mandate, reviewed: false } },
+		},
 	]);
 	assert.deepEqual(design.asks(state, world), []);
 	assert.equal(state.reference, bound.reference);
-	assert.deepEqual(state.mandate, mandate);
+	assert.deepEqual(state.mandate, { ...mandate, reviewed: false });
 	assert.deepEqual(
 		design.agents(state, world).map((a) => [a.key, a.role, a.expects]),
 		[["designer", "designer", []]],
@@ -81,7 +85,7 @@ test("Ground under prompt authority never grants a self-declared Mandate review"
 		...bound,
 		mandate: { ...mandate, reviewed: true },
 	});
-	assert.deepEqual(state.mandate, mandate);
+	assert.deepEqual(state.mandate, { ...mandate, reviewed: false });
 });
 
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
