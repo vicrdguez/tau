@@ -19,7 +19,7 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { mandateLabels } from "../design/public.ts";
-import { fileHolding, type Resume } from "../queue/public.ts";
+import { fileHolding, type Resume, resumption } from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
@@ -172,18 +172,27 @@ function hold(
 	const stage = s.items.find((i) => i.id === item)?.stage;
 	const resume =
 		s.phase === "discover"
-			? "Read the repository again using the current branch options."
+			? resumption.discovery
 			: stage === "preparing" && obstruction === "moved"
-				? "Retry the same pinned worker preparation unless the reported move now matches a recorded build merge. In that case, prepare a fresh checkout from the recorded head."
+				? resumption.moved
 				: stage === "preparing" && obstruction === "occupied"
-					? "Prepare a new worker checkout at a fresh path."
+					? resumption.occupied
 					: s.phase === "start" || stage === "preparing" || stage === "cleaning"
-						? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
+						? resumption
+								.pinned({
+									operation:
+										s.phase === "start"
+											? "start_build"
+											: stage === "preparing"
+												? "worktree"
+												: "remove",
+								})
+								.trim()
 						: obstruction === "protected" || obstruction === "policy"
 							? "Return to the worker to revise and republish; this does not allow the protected change."
 							: item
-								? "Return to the worker in the same checkout to continue and republish."
-								: "Return to the coordinator to continue the requested turn.";
+								? resumption.worker
+								: resumption.coordinator;
 	const cause = `build/${++s.seq}`;
 	s.holds.push({ cause, item, obstruction, evidence, actual });
 	return {

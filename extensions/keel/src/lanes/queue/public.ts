@@ -1,5 +1,21 @@
 import type { WorkId } from "../../kernel/ids.ts";
-import type { Message } from "../../kernel/lane.ts";
+import { type Message, prose } from "../../kernel/lane.ts";
+
+const dir = `${import.meta.dirname}/../../prose/documents/resume`;
+const action = (name: string) => prose(dir, `${name}.md`, [])({}).trim();
+/** Render the action at filing time so a durable finding describes its particular hold. */
+export const resumption = {
+	discovery: action("discovery"),
+	moved: action("moved"),
+	occupied: action("occupied"),
+	protected: action("protected"),
+	worker: action("worker"),
+	coordinator: action("coordinator"),
+	trunk: action("trunk"),
+	diagnosis: action("diagnosis"),
+	pinned: prose(dir, "pinned.md", ["operation"]),
+	stalled: prose(dir, "stalled.md", ["agent"]),
+};
 
 export type Holding = {
 	goal: string;

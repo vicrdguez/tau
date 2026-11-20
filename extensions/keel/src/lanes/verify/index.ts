@@ -18,7 +18,7 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { toBuild } from "../build/public.ts";
-import { fileHolding, type Resume } from "../queue/public.ts";
+import { fileHolding, type Resume, resumption } from "../queue/public.ts";
 import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
 import type { Publication } from "./public.ts";
@@ -237,7 +237,7 @@ function transition(prev: State, world: World) {
 						hold(
 							c.item,
 							`${e.agent}: ${e.cause}. ${e.lastWords}`,
-							"Give the stalled agent a fresh turn with your direction.",
+							resumption.stalled({ agent: e.agent }).trim(),
 						);
 					}
 					break;
@@ -298,7 +298,7 @@ function transition(prev: State, world: World) {
 			hold(
 				j.item,
 				`${op.kind}: ${JSON.stringify(op)}\n${JSON.stringify(r ?? e)}`,
-				`Retry the same pinned ${op.kind} operation; it cannot adopt a different ref or checkout.`,
+				resumption.pinned({ operation: op.kind }).trim(),
 				j.key,
 			);
 		} else if (r.kind === "protected" && op.kind === "merge_item") {
@@ -307,7 +307,7 @@ function transition(prev: State, world: World) {
 			hold(
 				j.item,
 				`Protected changes in the merge candidate ${r.sha}: ${c.protectedChanges.map((p) => p.kind + ": " + p.path).join(", ")}`,
-				"Return the change to the worker with your direction; do not merge this candidate.",
+				resumption.protected,
 				j.key,
 				r.sha,
 				!c.protectedChanges.some((p) => isPolicyPath(p.path)),
@@ -373,7 +373,7 @@ function transition(prev: State, world: World) {
 						hold(
 							"full",
 							"The pinned trunk branch is absent.",
-							"Read the same pinned trunk branch again.",
+							resumption.trunk,
 							j.key,
 						);
 						break;
@@ -587,11 +587,7 @@ function transition(prev: State, world: World) {
 				c.direction = "";
 				const diagnosis = `Two claimed fixes failed on ${v.diagnose.join(", ")}. ${JSON.stringify(v.blocks)}\nPremise: ${e.premise}\nTest: ${e.test}\nResult: ${e.result}`;
 				s.diagnoses.push(`${c.item} @ ${c.sha}: ${diagnosis}`);
-				hold(
-					c.item,
-					diagnosis,
-					"Return the diagnosis and your direction for the next fix.",
-				);
+				hold(c.item, diagnosis, resumption.diagnosis);
 				break;
 			}
 			case "slot_granted":

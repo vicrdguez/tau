@@ -9,7 +9,7 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
-import { fileHolding } from "../queue/public.ts";
+import { fileHolding, resumption } from "../queue/public.ts";
 import { type Mandate, mandateLabels } from "./public.ts";
 import { designV1 } from "./v1.ts";
 
@@ -349,7 +349,7 @@ export const design: Lane<State> = {
 						cause,
 						goal: goal(s),
 						evidence: [e.cause, e.lastWords].join(": "),
-						resume: "Give the designer a new Ground turn with your direction.",
+						resume: resumption.stalled({ agent: "the designer" }).trim(),
 					}),
 				],
 			};
