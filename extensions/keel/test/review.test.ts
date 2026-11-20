@@ -268,7 +268,16 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 		);
 	x.publish(revised, [reply(2), reply(1)]);
 	assert.equal(x.state().rounds.length, 2);
-	assert.deepEqual(x.state().rounds[0]!.answer?.annotations, annotations);
+	assert.deepEqual(
+		x
+			.state()
+			.rounds[0]!.answer?.annotations.map(({ n, text, range }) => ({
+				n,
+				text,
+				range,
+			})),
+		annotations,
+	);
 	assert.deepEqual(x.state().rounds[0]!.draft, draft);
 	const basis = x.asks()[0]!.basis;
 	for (const n of annotations) assert.ok(basis.includes(n.text));
@@ -282,9 +291,18 @@ test("a redesigned rider and changed node need approval again; unchanged nodes a
 	x.answer("mandate/1", "approve", [note(1, "Old approval note.")]);
 	x.answer("rider/1/A", "accept");
 	x.answer("rider/1/B", "leave_open");
-	x.answer("rider/1/C", "design", [note(1, "Separate close from seal.")]);
+	const riderBasis = x.asks().find((a) => a.subject === "rider/1/C")!.basis;
+	const from = riderBasis.indexOf("Seal regions.");
+	x.answer("rider/1/C", "design", [
+		{
+			n: 1,
+			text: "Separate close from seal.",
+			range: { start: from, end: from + 4 },
+		},
+	]);
 	assert.ok(x.input().includes("Separate close from seal."));
 	assert.ok(x.input().includes("Seal regions."));
+	assert.match(x.input(), /> Seal\n/);
 	assert.ok(
 		"reject" in
 			x.reduce({
@@ -308,6 +326,7 @@ test("a redesigned rider and changed node need approval again; unchanged nodes a
 	assert.ok(x.asks()[0]!.basis.includes("Native IR"));
 	assert.match(x.asks()[0]!.basis, /A \(evidence; accept\)/);
 	assert.match(x.asks()[0]!.basis, /B \(incidental; leave_open\)/);
+	assert.match(x.asks()[0]!.basis, /> Seal\n/);
 	x.answer("mandate/2", "approve", [note(1, "New approval note.")]);
 	assert.deepEqual(x.state().mandate!.approvalNotes, [
 		"Old approval note.\n> ppr",
