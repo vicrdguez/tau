@@ -8,4 +8,6 @@
 - A verifier sees only role-bound project principles instead of every project description.
 - A ruling silently cites an unknown or index-only principle, or a body delivered to another conversation. A worker cannot cite a body actually delivered or pulled.
 - An obsolete delivery task gives citation credit despite never submitting its input. Replaying a pull counts it twice or returns different text.
+- A malformed project file blocks reconciliation, hides the remaining catalog, or grants citation credit. Repair is invisible until restart.
+- The verifier and owner receive a ruling stripped of the principles it cites.
 - An unbound, paused or retired agent pulls a body (existing kernel author test).

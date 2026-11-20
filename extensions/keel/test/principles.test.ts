@@ -48,6 +48,21 @@ test("role and path bindings deliver bodies, while the verifier sees all project
 	assert.match(verify, /coordinate: Plan sizes/);
 	assert.doesNotMatch(verify, /Apply the cent rule|Estimate costs/);
 });
+test("a malformed project principle is reported without hiding healthy policy or blocking inputs, and repair takes effect immediately", async(t)=>{
+	const {cwd,put}=await checkout(t);
+	await put("broken","Read it.",'paths: [bad\n',"Malformed body");
+	await put("healthy","Valid statement.","roles: [worker]\n","Good body");
+	const index=()=>indexFor(cwd,[{name:"principle"}])!;
+	const input=()=>principleInputs.render({cwd,role:"worker"},"Act.").text;
+	assert.match(index(),/unavailable[^\n]*broken/i);
+	assert.match(index(),/healthy: Valid statement/);
+	assert.match(input(),/unavailable[^\n]*broken/i);
+	assert.match(input(),/Good body/);
+	assert.doesNotMatch(input(),/Malformed body/);
+	await put("broken","Recovered.","roles: [worker]\n","Repaired body");
+	assert.doesNotMatch(index(),/unavailable/i);
+	assert.match(input(),/Repaired body/);
+});
 test("shape binds domain modeling and only a survived fix triggers a worker's premise check", async(t)=>{
 	const {cwd}=await checkout(t);
 	const input=(role:"designer"|"worker",situation:string)=>principleInputs.render({role,cwd,situation}, "task").text;

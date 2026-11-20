@@ -49,7 +49,7 @@ const rulings = [
 	},
 	{
 		what: "high ruling",
-		principles: [],
+		principles: ["explain-the-number"],
 		why: "hard",
 		rank: 5,
 		cost: "large",
@@ -232,6 +232,7 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 		"repair the balance",
 		"No account loses a cent.",
 		"high ruling",
+		"explain-the-number",
 		"compare totals",
 		"totals",
 	])
@@ -970,6 +971,7 @@ for (const choice of ["reject", "accept"])
 			"monitor latency",
 			"low volume only",
 			"high ruling",
+			"explain-the-number",
 			"small",
 			"large",
 		])
