@@ -37,8 +37,7 @@ import {
  * a command or before its receipt is durable requires replay: checks cannot be
  * non-idempotent transactions against external systems. */
 async function check(
-	g: Git,
-	admin: string,
+	{ wt: g, admin }: { wt: Git; admin: string },
 	candidate: string,
 	index: number,
 	spec: Check,
@@ -182,23 +181,21 @@ export async function integrate(
 			? { paths: [...new Set(paths)].sort(), headChanged }
 			: undefined;
 	}
-	let current = await changesIn(owned);
+	const before = await changesIn(owned);
 	const verifyCheckout = async () => {
 		const still = await inspect(g, repo, target);
 		if (!still) occupied(op.integration);
-		current = await changesIn(still);
-		return current;
+		return changesIn(still);
 	};
 	const reports: CheckReport[] = [];
 	for (const [index, spec] of op.checks.entries()) {
 		const r = await check(
-			owned.wt,
-			owned.admin,
+			owned,
 			candidate,
 			index,
 			spec,
 			published,
-			current,
+			before,
 			verifyCheckout,
 		);
 		if (r.report) reports.push(r.report);
@@ -212,12 +209,12 @@ export async function integrate(
 		if (r.report?.code !== 0)
 			return { kind: "checks_failed", sha: candidate, checks: reports };
 	}
-	if (!published && current)
+	if (!published && before)
 		return {
 			kind: "checks_failed",
 			sha: candidate,
 			checks: reports,
-			changes: current,
+			changes: before,
 		};
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
