@@ -127,7 +127,7 @@ const confirmation = prose(
 const cleanupNote = prose(
 	import.meta.dirname,
 	"../../prose/documents/cancel-cleanup.md",
-	["goal", "kept"],
+	["goal", "kept", "work"],
 );
 const goal = (s: State) => s.mandate?.intent ?? s.reference;
 
@@ -183,6 +183,7 @@ export const design: Lane<State> = {
 						{
 							agent: null,
 							text: cleanupNote({
+								work: String(w.work),
 								goal: goal(s),
 								kept: kept.length ? kept.join("\n") : "Nothing kept.",
 							}),
