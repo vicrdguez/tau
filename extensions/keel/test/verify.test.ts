@@ -50,9 +50,11 @@ const block = (thread: string) => ({
 	evidence: "negative balance",
 });
 function flow() {
+	const running = new Set<string>();
+	const facts = { ...world, runningEffect: (key: string) => running.has(key) };
 	let state = verify.state.initial();
 	const apply = (event: LaneEvent) => {
-		const result = drive(verify, state, event, world);
+		const result = drive(verify, state, event, facts);
 		assert.ok("state" in result, JSON.stringify(result));
 		state = result.state;
 		return result;
@@ -81,6 +83,7 @@ function flow() {
 		addresses: string[] = [],
 		item = "bug",
 		head = "base",
+		extra: Record<string, LaneEvent[string]> = {},
 	) =>
 		apply({
 			kind: "published",
@@ -88,7 +91,13 @@ function flow() {
 			addresses,
 			item,
 			head,
+			base: "worker-base",
+			itemKind: "build",
+			protectedChanges: [],
+			allowed: false,
+			trunk: null,
 			mandate,
+			...extra,
 			repo,
 			rulings,
 			brief: "repair the balance\n\nWorker report:\nNo account loses a cent.",
@@ -164,6 +173,7 @@ function flow() {
 	};
 	const asks = () => verify.asks(state, world);
 	return {
+		running,
 		state: () => state,
 		agents,
 		agent,
@@ -205,6 +215,7 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 	const input = a.expects[0]!.input!();
 	for (const expected of [
 		"one",
+		"Diff base: worker-base",
 		"project oracle",
 		"repair the balance",
 		"No account loses a cent.",
@@ -271,9 +282,12 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	const stall = stalled.send?.[0]?.event;
 	assert.ok(stall);
 	x.apply({ kind: "reset_counts", item: "bug" });
-	x.apply(resume(stall));
+	x.apply({ ...resume(stall), direction: "Diagnoser only: inspect floats" });
 	const request = x.agent("diagnoser").expects[0]!.input!();
+	assert.match(request, /# Attack the Premise/);
+	assert.doesNotMatch(request, /description:|\]\([^)]+\.md\)/);
 	assert.match(request, /negative balance/);
+	assert.match(request, /Diagnoser only: inspect floats/);
 	assert.match(request, /Threads that survived two claimed fixes: totals/);
 	const r = x.call(
 		{
@@ -293,11 +307,28 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	const back = x.apply(resume(file));
 	assert.match(String(back.send?.[0]?.event.evidence), /test the premise/);
 	assert.match(String(back.send?.[0]?.event.evidence), /not exact/);
+	assert.doesNotMatch(String(back.send?.[0]?.event.evidence), /Diagnoser only/);
 	x.apply({ kind: "reset_counts", item: "bug" });
 	x.publish("fix3", ["totals"]);
 	x.clean();
 	x.checkout();
 	assert.equal(x.fail().send?.[0]?.event.kind, "rework");
+	x.publish("finally-fixed");
+	x.clean();
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+	x.clean();
+	x.handoff();
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.prepare();
+	x.done("prepare_landing", { kind: "unchanged", sha: "base" });
+	assert.match(x.asks()[0]!.basis, /Two claimed fixes failed on totals/);
+	assert.match(x.asks()[0]!.basis, /float is exact/);
+	assert.match(x.asks()[0]!.basis, /not exact/);
 });
 test("unaddressed reappearances and unrelated blocks never spend a fix; superseding a failed checkout removes its original target", () => {
 	const x = flow();
@@ -451,6 +482,8 @@ for (const failure of [
 			const r = x.done(phase, failure);
 			const event = r.send?.find((m) => m.lane === "build")?.event;
 			assert.equal(event?.kind, "integration");
+			if (phase === "take_trunk") assert.equal(event?.inheritedTrunk, "base");
+			assert.equal(x.state().verdicts.length, phase === "take_trunk" ? 2 : 1);
 			assert.match(String(event?.evidence), /balance.ts/);
 			assert.equal(
 				r.send?.some((m) => m.event.kind === "release_slot"),
@@ -576,6 +609,8 @@ test("exhausted CAS holds its exact plan for safe retry even if the write alread
 	const file = r.send?.find((m) => m.lane === "queue")?.event;
 	assert.ok(file);
 	assert.match(String(file.evidence), /lost git reply/);
+	assert.match(String(file.resume), /same pinned/i);
+	x.apply({ ...resume(file), kind: "finding_direction", lane: "verify" });
 	x.apply(resume(file));
 	const retry = x.effect("land");
 	assert.deepEqual(retry.op, plan.op);
@@ -620,6 +655,7 @@ test("cancel withdraws waiting slot and ignores a late grant; an already declare
 	const y = flow();
 	y.prepared();
 	const op = y.effect("land");
+	y.running.add(op.key);
 	assert.ok(
 		!y
 			.apply({ kind: "cancel" })
@@ -630,6 +666,224 @@ test("cancel withdraws waiting slot and ignores a late grant; an already declare
 	assert.match(JSON.stringify(r.notes), /prepared/);
 	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
 	assert.equal(y.asks().length, 0);
+});
+const change = (path: string) => ({
+	path,
+	kind: "modified",
+	before: "old",
+	after: "new",
+});
+const protectedResult = (path: string) => ({
+	kind: "protected",
+	sha: "candidate",
+	touched: [path],
+	protectedChanges: [change(path)],
+});
+function pendingMerge() {
+	const x = flow();
+	x.publish("worker", [], "bug", "intervening-merge", {
+		protectedChanges: [change("tests/balance")],
+		allowed: true,
+		trunk: "inherited",
+	});
+	x.checkout();
+	const input = x.agent().expects[0]!.input!();
+	assert.match(input, /tests\/balance/);
+	assert.match(input, /owner allowed/i);
+	x.pass();
+	x.clean();
+	return x;
+}
+test("guard the merge before proofs or ref advance; allowing a merge-only change reviews its pinned candidate before retry", () => {
+	const x = pendingMerge();
+	const merge = x.effect("merge_item");
+	assert.deepEqual(merge.op.protection, {
+		trunk: "inherited",
+		reviewedEncode: false,
+		allowedChanges: [change("tests/balance")],
+		allowedCandidate: null,
+	});
+	assert.deepEqual(merge.op.protectedGlobs, mandate.protectedPaths);
+	const file = x.done("merge_item", protectedResult("tests/other")).send?.[0]
+		?.event;
+	assert.ok(file);
+	assert.equal(file.allow, true);
+	assert.equal(file.goal, mandate.intent);
+	assert.deepEqual(x.effects(), []);
+	x.apply({ ...resume(file), kind: "allow" });
+	assert.equal(x.effect("checkout").op.sha, "candidate");
+	x.checkout();
+	assert.match(x.agent().expects[0]!.input!(), /tests\/other/);
+	assert.match(x.agent().expects[0]!.input!(), /owner allowed/i);
+	assert.ok(!x.effects().length);
+	x.pass();
+	x.clean();
+	const retry = x.effect("merge_item");
+	assert.notEqual(retry.key, merge.key);
+	assert.equal(retry.op.item, "worker");
+	assert.equal(retry.op.key, merge.op.key);
+	assert.equal(
+		(retry.op.protection as LaneEvent).allowedCandidate,
+		"candidate",
+	);
+});
+test("policy files cannot be waived at merge even for Encode; resume returns evidence to worker, not a CAS", () => {
+	const x = flow();
+	x.publish("encoded", [], "bug", "base", {
+		itemKind: "encode",
+		mandate: { ...mandate, reviewed: true },
+	});
+	x.checkout();
+	x.pass();
+	x.clean();
+	assert.equal(
+		(x.effect("merge_item").op.protection as LaneEvent).reviewedEncode,
+		true,
+	);
+	const f = x.done("merge_item", protectedResult(".keel/policy")).send?.[0]
+		?.event;
+	assert.ok(f && !f.allow);
+	const result = x.apply(resume(f));
+	const back = result.send?.find((m) => m.lane === "build")?.event;
+	assert.equal(back?.kind, "integration");
+	assert.match(String(back?.evidence), /\.keel\/policy/);
+	assert.match(String(back?.evidence), /test the premise/);
+	x.clean();
+	assert.deepEqual(x.effects(), []);
+});
+test("all finding directions survive handoff, including answers before the first publication", () => {
+	const x = flow();
+	for (const lane of ["design", "build", "verify"])
+		x.apply({
+			kind: "finding_direction",
+			lane,
+			item: null,
+			cause: lane + "/1",
+			evidence: "hold in " + lane,
+			direction: "follow " + lane,
+		});
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	for (const lane of ["design", "build", "verify"])
+		assert.ok(x.asks()[0]!.basis.includes("follow " + lane));
+});
+test("a stopped verifier has one finding, and neither its stale stop nor its fulfilled token reopens it", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	const a = x.agent(),
+		stop = {
+			kind: "agent_stalled",
+			agent: a.key,
+			tokens: [a.expects[0]!.token],
+			cause: "stopped",
+			lastWords: "checking",
+		};
+	const f = x.apply(stop).send?.[0]?.event;
+	assert.ok(f);
+	assert.ok(!x.apply(stop).send?.length);
+	x.apply(resume(f));
+	assert.ok(!x.apply(stop).send?.length);
+	const active = x.agent();
+	x.pass();
+	assert.ok(
+		!x.apply({ ...stop, tokens: [active.expects[0]!.token] }).send?.length,
+	);
+});
+test("cancel withdraws an unclaimed CAS without landing; all cleanup replies exactly once", () => {
+	const x = flow();
+	x.prepared();
+	const r = x.apply({ kind: "cancel" });
+	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
+	assert.deepEqual(x.effects(), []);
+	assert.deepEqual(r.send?.find((m) => m.lane === "design")?.event, {
+		kind: "cleanup_finished",
+		lane: "verify",
+		kept: [],
+	});
+	assert.ok(!x.apply({ kind: "cancel" }).send?.length);
+});
+for (const mode of ["running", "held", "unclaimed"]) {
+	test(
+		"cancel at " +
+			mode +
+			" integration orders disposal after the last possible writer and reports kept paths",
+		() => {
+			const x = flow();
+			x.publish();
+			x.checkout();
+			x.pass();
+			x.clean();
+			const merge = x.effect("merge_item");
+			if (mode === "held")
+				x.apply({
+					kind: "effect_failed",
+					key: merge.key,
+					error: "interrupted proof",
+				});
+			if (mode === "running") x.running.add(merge.key);
+			const r = x.apply({ kind: "cancel" });
+			if (mode === "running") {
+				assert.ok(
+					!x.effects().some((d) => (d.spec.op as LaneEvent).kind === "remove"),
+				);
+				assert.ok(!r.send?.some((m) => m.event.kind === "cleanup_finished"));
+				x.apply({
+					kind: "effect_failed",
+					key: merge.key,
+					error: "interrupted proof",
+				});
+			}
+			if (mode === "unclaimed") {
+				assert.ok(
+					!x
+						.effects()
+						.some((d) => (d.spec.op as LaneEvent).kind === "merge_item"),
+				);
+			}
+			const removal = x.effect("remove");
+			assert.equal((removal.op.target as LaneEvent).path, merge.op.integration);
+			const cleaned = x.apply({
+				kind: "effect_failed",
+				key: removal.key,
+				error: "cannot prove ownership",
+			});
+			const report = cleaned.send?.find(
+				(m) => m.event.kind === "cleanup_finished",
+			)?.event;
+			assert.ok(report);
+			assert.ok(
+				JSON.stringify(report.kept).includes(String(merge.op.integration)),
+			);
+			assert.ok(JSON.stringify(report.kept).includes("cannot prove ownership"));
+			assert.equal(x.effects().length, 0);
+		},
+	);
+}
+test("a cleanup already held on cancel is retried; a running checkout settles before removal even after failure", () => {
+	const x = flow();
+	x.publish();
+	const make = x.effect("checkout");
+	x.running.add(make.key);
+	x.apply({ kind: "cancel" });
+	assert.ok(
+		!x.effects().some((d) => (d.spec.op as LaneEvent).kind === "remove"),
+	);
+	x.apply({
+		kind: "effect_failed",
+		key: make.key,
+		error: "partial registration",
+	});
+	assert.deepEqual(x.effect("remove").op.target, make.op);
+	const y = flow();
+	y.publish();
+	y.checkout();
+	y.pass();
+	const old = y.effect("remove");
+	y.done("remove", { kind: "occupied", path: "obstruction" });
+	y.apply({ kind: "cancel" });
+	assert.notEqual(y.effect("remove").key, old.key);
+	assert.deepEqual(y.effect("remove").op.target, old.op.target);
 });
 for (const choice of ["reject", "accept"])
 	test(`hand-over releases slot and lists all evidence in cost order; ${choice} closes without reverting trunk`, () => {
