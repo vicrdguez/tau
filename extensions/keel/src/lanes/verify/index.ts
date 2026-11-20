@@ -131,7 +131,7 @@ function transition(prev: State, world: World) {
 	}
 	function back(
 		c: Review,
-		kind: "rework" | "integration",
+		kind: "rework" | "integration" | "protected_candidate",
 		evidence: string,
 		threads: string[],
 		inheritedTrunk?: Sha,
@@ -140,7 +140,9 @@ function transition(prev: State, world: World) {
 		if (c.scope !== "item") release();
 		send.push(
 			toBuild(work, {
-				kind,
+				...(kind === "protected_candidate"
+					? ({ kind: "integration", protectedCandidate: true } as const)
+					: { kind }),
 				item: c.item,
 				evidence,
 				...(c.direction && { direction: c.direction }),
@@ -634,7 +636,7 @@ function transition(prev: State, world: World) {
 						} else {
 							discard(j);
 							clearIntegration(j);
-							back(c, "integration", h.evidence, []);
+							back(c, "protected_candidate", h.evidence, []);
 							break;
 						}
 					}

@@ -108,6 +108,11 @@ const integrate = prose(dir, "../../prose/inputs/build/integration.md", [
 	"direction",
 	"branch",
 ]);
+const reviseCandidate = prose(
+	dir,
+	"../../prose/inputs/build/protected-candidate.md",
+	["evidence", "brief", "direction"],
+);
 export const ownerDirection = prose(
 	dir,
 	"../../prose/documents/build-direction.md",
@@ -226,6 +231,8 @@ function workerInput(s: Build, i: Item) {
 			});
 		case "rework":
 			return rework(common);
+		case "protected_candidate":
+			return reviseCandidate(common);
 		case "integration":
 			return integrate({ ...common, branch: w.from });
 	}

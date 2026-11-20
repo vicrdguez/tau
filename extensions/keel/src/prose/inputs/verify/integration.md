@@ -1,4 +1,4 @@
-The earlier verdict passed on a different commit. This commit corrects an integration failure or is a merge candidate with an owner-authorized protected change. The failed integration was not a verdict.
+The worker revised the item after its previous publication passed review. You are reviewing the new publication.
 
 {{facts}}
 

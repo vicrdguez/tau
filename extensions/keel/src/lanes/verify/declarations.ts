@@ -10,10 +10,14 @@ import { cleaning, type Review, type State } from "./state.ts";
 
 const dir = `${import.meta.dirname}/../../prose`;
 const inputs = Object.fromEntries(
-	["item", "rework", "integration", "full", "landing"].map((name) => [
-		name,
-		prose(dir, `inputs/verify/${name}.md`, ["facts"]),
-	]),
+	[
+		"item",
+		"rework",
+		"integration",
+		"protected-candidate",
+		"full",
+		"landing",
+	].map((name) => [name, prose(dir, `inputs/verify/${name}.md`, ["facts"])]),
 );
 const form = prose(dir, "documents/verify-facts.md", [
 	"sha",
@@ -99,21 +103,27 @@ function input(s: State, c: Review) {
 				.join("\n") || "None.",
 		addresses: c.addresses.join(", ") || "None.",
 	});
-	const situation =
-		c.scope !== "item"
-			? c.scope
-			: !history.length
-				? "item"
-				: history.at(-1)?.outcome === "pass"
-					? "integration"
-					: "rework";
+	function situation() {
+		if (c.scope !== "item") return c.scope;
+		if (
+			s.jobs.some(
+				({ item, op }) =>
+					item === c.item &&
+					op.kind === "merge_item" &&
+					op.protection.allowedCandidate === c.sha,
+			)
+		)
+			return "protected-candidate";
+		if (!history.length) return "item";
+		return history.at(-1)?.outcome === "pass" ? "integration" : "rework";
+	}
 	const task =
 		c.phase === "diagnose"
 			? diagnose({
 					facts,
 					threads: history.at(-1)!.diagnose.join(", "),
 				})
-			: inputs[situation]!({ facts });
+			: inputs[situation()]!({ facts });
 	return c.direction ? resume({ direction: c.direction, task }) : task;
 }
 export function agents(s: State): AgentDecl[] {

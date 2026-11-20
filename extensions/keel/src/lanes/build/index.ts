@@ -492,7 +492,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
 			i.direction = e.direction ?? "";
-			i.input = e.kind;
+			i.input = e.protectedCandidate ? "protected_candidate" : e.kind;
 			i.stage = "building";
 			i.evidence = e.evidence;
 			i.threads = e.threads;

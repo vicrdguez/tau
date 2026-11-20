@@ -99,7 +99,12 @@ type V1 = {
 		seq: number;
 		retry: number;
 		mergedHead: Sha | null;
-		input: "resume" | "brief" | "rework" | "integration";
+		input:
+			| "resume"
+			| "brief"
+			| "rework"
+			| "integration"
+			| "protected_candidate";
 		evidence: string;
 		threads: string[];
 		direction: string;
