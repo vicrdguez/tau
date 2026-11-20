@@ -5,6 +5,7 @@ import {
 	type EffectDecl,
 	prose,
 } from "../../kernel/lane.ts";
+import { protectedViolations } from "../../repo/index.ts";
 import type { Ruling } from "../build/public.ts";
 import { cleaning, type Review, type State } from "./state.ts";
 
@@ -74,7 +75,12 @@ function protectedFiles(c: Review) {
 				w.before === change.before &&
 				w.after === change.after,
 		);
-		return `${c.item}: ${change.kind}: ${change.path} (${allowed ? "owner allowed" : "no owner waiver"})`;
+		const status = allowed
+			? "owner allowed"
+			: protectedViolations([change], c.reviewedEncode).length
+				? "no owner waiver"
+				: "no waiver needed";
+		return `${c.item}: ${change.kind}: ${change.path} (${status})`;
 	});
 }
 function input(s: State, c: Review) {

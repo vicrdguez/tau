@@ -13,6 +13,7 @@ import {
 import {
 	isPolicyPath,
 	layout,
+	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 	type Sha,
@@ -39,6 +40,7 @@ export { verifyTools } from "./tools.ts";
 type Event =
 	| Publication
 	| Resume
+	| { kind: "ambiguity_answer"; direction: string }
 	| {
 			kind: "finding_direction";
 			lane: string;
@@ -84,6 +86,16 @@ function transition(prev: State, world: World) {
 		s.jobs.push({ item, op, key: op.key });
 	const cleanup = (item: string, target: Target) =>
 		enqueue(item, { kind: "remove", key: key("remove"), target });
+	function recordPermission(
+		c: Review,
+		scope: "publication" | "merge candidate",
+	) {
+		c.waivers = protectedViolations(c.protectedChanges, c.reviewedEncode);
+		for (const change of c.waivers)
+			s.directions.push(
+				`Owner allowed ${c.item} at ${scope} ${c.sha}: ${change.kind}: ${change.path}`,
+			);
+	}
 	function retire(c: Review) {
 		if (c.checkout) {
 			cleanup(c.item, c.checkout);
@@ -423,6 +435,9 @@ function transition(prev: State, world: World) {
 			case "cancel":
 				cancel();
 				break;
+			case "ambiguity_answer":
+				s.directions.push(`Ground reading: ${e.direction}`);
+				break;
 			case "finding_direction":
 				if (e.direction.trim())
 					s.directions.push(
@@ -472,7 +487,7 @@ function transition(prev: State, world: World) {
 								.join("\n")
 						: (e.direction ?? ""),
 					protectedChanges: full ? [] : e.protectedChanges,
-					waivers: !full && e.allowed ? e.protectedChanges : [],
+					waivers: [],
 					reviewedEncode:
 						!full && e.itemKind === "encode" && e.mandate.reviewed,
 					trunk: full ? null : e.trunk,
@@ -481,6 +496,7 @@ function transition(prev: State, world: World) {
 					checkout: null,
 					playbook: null,
 				};
+				if (!full && e.allowed) recordPermission(c, "publication");
 				if (full) for (const prior of s.checks) prior.direction = "";
 				s.checks = s.checks.filter((x) => x !== old);
 				s.checks.push(c);
@@ -631,7 +647,7 @@ function transition(prev: State, world: World) {
 							j.op.protection.allowedCandidate = h.candidate;
 							c.sha = h.candidate;
 							c.base = j.op.expected;
-							c.waivers = c.protectedChanges;
+							recordPermission(c, "merge candidate");
 							checkout(c);
 						} else {
 							discard(j);
