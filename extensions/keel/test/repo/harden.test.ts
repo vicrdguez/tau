@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { layout, nodeExec, readRepo } from "../../src/repo/index.ts";
@@ -138,3 +138,41 @@ test("git inside a proof reads ordinary owner config without keel's graft hint",
 	is(result, "merged");
 	assert.equal(result.checks[0]!.tail.trim(), "from owner");
 });
+
+for (const damage of ["delete", "break gitfile", "attach build"] as const) {
+	test(`proof damage: ${damage} fails with candidate and replays without deleting foreign files`, async (t) => {
+		const f = await fixture(t);
+		const merge = await f.item();
+		const script = damage === "delete" ? 'cd .. && rm -rf -- "$1"'
+			: damage === "break gitfile" ? "printf broken > .git" : 'git switch "$2"';
+		const plan = { ...merge, checks: [{
+			id: "damage", timeoutMs: 5000, argv: ["sh", "-ec", "echo proof-output; " + script, "proof", merge.integration, f.branch]
+		}] };
+		const result = await f.run(plan);
+		is(result, "checks_failed");
+		assert.equal(git(f.root, "rev-parse", result.sha + "^2"), merge.item);
+		assert.equal(git(f.root, "rev-parse", f.branch), merge.expected);
+		assert.equal(result.checks[0]!.code, 0);
+		assert.match(result.checks[0]!.tail, /proof-output/);
+		assert.deepEqual(await f.run(plan), result);
+		const target = {kind:"checkout", key:merge.key, path:merge.integration} as const;
+		const remove = {kind:"remove", key:"cleanup", target} as const;
+		if (damage === "break gitfile") {
+			await writeFile(join(target.path, "keep"), "foreign?");
+			is(await f.run(remove), "occupied");
+			assert.equal(await readFile(join(target.path, "keep"), "utf8"), "foreign?");
+			return;
+		}
+		if (damage === "delete") {
+			is(await f.run({...remove, target:{...target, key:"wrong"}}), "occupied");
+			await mkdir(target.path);
+			await writeFile(join(target.path, "keep"), "foreign");
+			is(await f.run(remove), "occupied");
+			assert.equal(await readFile(join(target.path, "keep"), "utf8"), "foreign");
+			await rm(target.path, {recursive:true});
+		}
+		is(await f.run(remove), "removed");
+		assert.ok(!git(f.root, "worktree", "list", "--porcelain").includes(target.path));
+		is(await f.run(remove), "removed");
+	});
+}
