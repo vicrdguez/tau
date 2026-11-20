@@ -260,7 +260,7 @@ export async function openReview(
 			[readSeam.callersLater, revisionNotes[0]!],
 			[conflict, revisionNotes[1]!],
 		]);
-	async function finish() {
+	async function disposeRiders() {
 		expectAll((await review("mandate/2")).text, [laterReader, settlement]);
 		await answer("rider/2/stdout", "accept");
 		await answer("rider/2/indentation", "leave_open");
@@ -289,16 +289,21 @@ export async function openReview(
 			"",
 			"no build before the review binds",
 		);
+	}
+	async function approveAndBuild() {
 		const encode = "Encode both shell seams and the protected contract check.";
 		const migrate = "Write the repaired book using the approved writer.";
 		const check = "! git symbolic-ref -q HEAD && sh book-check.sh";
-		const pass = (text: string) =>
+		const bytes = `${check} && printf 'repaired\\n' | cmp - book`;
+		const verify = (command: string, text: string) => [
+			turn("verifier", "bash", { command }, description),
 			turn("verifier", "publish_verdict", {
 				outcome: "pass",
 				text,
 				blocks: [],
 				notes: [],
-			});
+			}),
+		];
 		provider.setResponses([
 			turn(
 				"coordinator",
@@ -343,8 +348,7 @@ export async function openReview(
 				command: encodeCommand,
 			}),
 			turn("worker", "publish_build", { summary: encode, addresses: [] }),
-			turn("verifier", "bash", { command: check }, description),
-			pass("Shell contract passes on the Encode publication."),
+			...verify(check, "Shell contract passes on the Encode publication."),
 			turn("coordinator", "brief_item", {
 				item: "migrate",
 				goal: migrate,
@@ -357,24 +361,15 @@ export async function openReview(
 					". ./book.sh && write_book book repaired && git commit -am 'migrate book'",
 			}),
 			turn("worker", "publish_build", { summary: migrate, addresses: [] }),
-			turn(
-				"verifier",
-				"bash",
-				{ command: `${check} && printf 'repaired\\n' | cmp - book` },
-				description,
-			),
-			pass("Migrated bytes match."),
+			...verify(bytes, "Migrated bytes match."),
 			turn("coordinator", "handoff_build", {
 				summary: migrate,
 				risk: "Only shell callers exercised.",
 			}),
-			turn(
-				"verifier",
-				"bash",
-				{ command: `${check} && printf 'repaired\\n' | cmp - book` },
-				description,
+			...verify(
+				`${bytes} && test "$(git rev-parse HEAD)" = "$(cat "$(git rev-parse --git-common-dir)/merge-proof")"`,
+				"The integrated shell contract and migrated bytes match.",
 			),
-			pass("The integrated shell contract and migrated bytes match."),
 		]);
 		await answer("mandate/3", "approve", [[redesigned, approvalNote]]);
 		assert.equal(
@@ -401,6 +396,7 @@ export async function openReview(
 		rework,
 		scriptRevision,
 		settle,
-		finish,
+		disposeRiders,
+		approveAndBuild,
 	};
 }

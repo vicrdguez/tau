@@ -104,7 +104,7 @@ export async function openScriptedWorkflow(
 				if (typeof part === "string") {
 					if (!latest?.includes(part))
 						errors.push(
-							`${name}: latest input did not include ${part}: ${latest}`,
+							`${role}.${name}: latest input did not include ${part}`,
 						);
 				} else if (
 					last?.role !== "toolResult" ||
@@ -112,7 +112,7 @@ export async function openScriptedWorkflow(
 					!JSON.stringify(last.content).includes(part.text)
 				) {
 					errors.push(
-						`${name}: expected ${part.tool} to return ${part.text}; got ${JSON.stringify(last)}`,
+						`${name}: expected ${part.tool} to return ${part.text}; got ${JSON.stringify(last)?.slice(0, 300)}`,
 					);
 				}
 			}

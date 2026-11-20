@@ -87,7 +87,8 @@ test("reviewed Mandate: rework both annotated nodes, dispose each rider, redesig
 	await s.start();
 	s.scriptRevision();
 	await s.rework();
-	await s.finish();
+	await s.disposeRiders();
+	await s.approveAndBuild();
 	await assertLanded(root, base, `keel/${s.root.id}/build`, []);
 });
 
