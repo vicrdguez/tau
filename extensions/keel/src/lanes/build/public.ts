@@ -10,6 +10,8 @@ export type BuildUpdate =
 			kind: "integration" | "rework";
 			item: string;
 			head: Sha;
+			inheritedTrunk?: Sha;
+			direction?: string;
 			threads: string[];
 			evidence: string;
 	  }

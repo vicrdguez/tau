@@ -18,6 +18,7 @@ type WorkerV1 = {
 	base: Sha;
 };
 type MandateV1 = {
+	reviewed: boolean;
 	intent: string;
 	nodes: { label: string; rule: string; probe: string }[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
@@ -42,13 +43,20 @@ type V1 = {
 	setupRetry: number;
 	refreshTrunk: Sha | null;
 	abandoned: WorkerV1[];
-	cleanup: {worker:WorkerV1;mergedHead:Sha|null;wait:string|null;key:string}[];
+	cleanup: {
+		worker: WorkerV1;
+		mergedHead: Sha | null;
+		wait: string | null;
+		key: string;
+	}[];
 	kept: string[];
 	coordinator: {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
+		pendingDirection: string;
 		reason: {
+			inheritedTrunk: Sha | null;
 			kind: "integration" | "rework";
 			evidence: string;
 			threads: string[];
@@ -77,8 +85,8 @@ type V1 = {
 		attempt: number;
 		seq: number;
 		retry: number;
-	mergedHead: Sha | null;
-		input: "brief" | "rework" | "integration";
+		mergedHead: Sha | null;
+		input: "resume" | "brief" | "rework" | "integration";
 		evidence: string;
 		threads: string[];
 		direction: string;
@@ -89,7 +97,19 @@ type V1 = {
 			rank: number;
 			follows: string;
 		}[];
-		publication: { sha: Sha; summary: string; addresses: string[] } | null;
+		publication: {
+			sha: Sha;
+			summary: string;
+			addresses: string[];
+			base: Sha;
+			protectedChanges: {
+				kind: "added" | "modified" | "deleted" | "renamed";
+				path: string;
+				before: string;
+				after: string;
+			}[];
+			trunk: Sha | null;
+		} | null;
 	}[];
 	holds: {
 		cause: string;
@@ -110,15 +130,16 @@ export const buildV1 = {
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
-		refreshTrunk:null,
+		refreshTrunk: null,
 		abandoned: [],
 		cleanup: [],
-		kept: [], 
+		kept: [],
 		coordinator: {
 			tool: null,
 			item: null,
 			seq: 0,
 			reason: null,
+			pendingDirection: "",
 			direction: "",
 		},
 		items: [],

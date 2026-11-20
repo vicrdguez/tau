@@ -43,6 +43,15 @@ const initial = prose(dir, "../../prose/inputs/build/brief.md", [
 	"mandate",
 	"direction",
 ]);
+const resumed = prose(dir, "../../prose/inputs/build/resume.md", [
+	"brief",
+	"direction",
+	"evidence",
+	"threads",
+	"path",
+	"branch",
+	"mandate",
+]);
 const rework = prose(dir, "../../prose/inputs/build/rework.md", [
 	"evidence",
 	"threads",
@@ -69,7 +78,7 @@ const fullReview = prose(dir, "../../prose/documents/build-full-review.md", [
 const trunkFailure = prose(
 	dir,
 	"../../prose/documents/build-trunk-failure.md",
-	["evidence", "threads"],
+	["evidence", "threads", "trunk"],
 );
 const report = prose(dir, "../../prose/documents/build-report.md", [
 	"brief",
@@ -78,11 +87,16 @@ const report = prose(dir, "../../prose/documents/build-report.md", [
 function fullContext(s: Build) {
 	const reason = s.coordinator.reason;
 	if (!reason) return "";
-	const render = reason.kind === "rework" ? fullReview : trunkFailure;
-	return render({
+	const facts = {
 		evidence: reason.evidence,
-		threads: reason.threads.join(", "),
-	});
+		threads: reason.threads.join(", ") || "None.",
+	};
+	return reason.kind === "rework"
+		? fullReview(facts)
+		: trunkFailure({
+				...facts,
+				trunk: reason.inheritedTrunk ?? "the trunk commit named in the failure",
+			});
 }
 function renderBrief(s: Build, i: Item) {
 	if (!i.brief) throw Error("Missing worker brief");
@@ -139,12 +153,13 @@ function workerInput(s: Build, i: Item) {
 	const common = {
 		brief: renderBrief(s, i),
 		direction: i.direction,
-		threads: i.threads.join(", "),
+		threads: i.threads.join(", ") || "None.",
 		evidence: i.evidence,
 	};
 	switch (i.input) {
+		case "resume":
 		case "brief":
-			return initial({
+			return (i.input === "resume" ? resumed : initial)({
 				...common,
 				path: w.path,
 				branch: w.branch,

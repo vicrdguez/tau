@@ -1,7 +1,7 @@
 import { effectKey } from "../../kernel/ids.ts";
 import {
-	defineLane,
 	type Accepted,
+	defineLane,
 	type EffectDecl,
 	type KernelEvent,
 	type Lane,
@@ -12,14 +12,15 @@ import {
 import {
 	layout,
 	type PublishResult,
+	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 } from "../../repo/index.ts";
 import { mandateLabels } from "../design/public.ts";
 import { fileHolding, type Resume } from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
-import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
+import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
 	type Brief,
@@ -57,7 +58,10 @@ function coordinator(
 	tool: Build["coordinator"]["tool"],
 	item: string | null = null,
 ) {
-	Object.assign(s.coordinator, { tool, item, seq: ++s.seq });
+	const c = s.coordinator;
+	c.direction = tool ? c.pendingDirection : "";
+	if (tool) c.pendingDirection = "";
+	Object.assign(c, { tool, item, seq: ++s.seq });
 }
 function schedule(s: Build, w: World) {
 	if (s.coordinator.tool || held(s, null) || s.phase !== "active") return;
@@ -153,31 +157,46 @@ function plans(
 	});
 }
 function hold(
-		s: Build,
-		w: World,
-		item: string | null,
-		obstruction: string,
-		evidence: string,
-	): Accepted<Build> {
-		const stage = s.items.find(i => i.id === item)?.stage;
-		const resume = s.phase === "discover" ? "Read the repository again using the current branch options."
-			: stage === "preparing" && obstruction === "occupied" ? "Prepare a new worker checkout at a fresh path."
-			: s.phase === "start" || stage === "preparing" || stage === "cleaning" ? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
-			: obstruction === "protected" ? "Return to the worker to revise and republish; this does not allow the protected change."
-			: item ? "Return to the worker in the same checkout to continue and republish."
-			: "Return to the coordinator to continue the requested turn.";
-		const cause = `build/${++s.seq}`;
-		s.holds.push({ cause, item, obstruction, evidence });
-		return {
-			state:s,
-			send: [
-				fileHolding({ work: w.work!, lane: "build", goal: s.mandate!.intent, resume, item, cause, evidence }),
-			],
-		};
-	}
+	s: Build,
+	w: World,
+	item: string | null,
+	obstruction: string,
+	evidence: string,
+): Accepted<Build> {
+	const stage = s.items.find((i) => i.id === item)?.stage;
+	const resume =
+		s.phase === "discover"
+			? "Read the repository again using the current branch options."
+			: stage === "preparing" && obstruction === "occupied"
+				? "Prepare a new worker checkout at a fresh path."
+				: s.phase === "start" || stage === "preparing" || stage === "cleaning"
+					? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
+					: obstruction === "protected" || obstruction === "policy"
+						? "Return to the worker to revise and republish; this does not allow the protected change."
+						: item
+							? "Return to the worker in the same checkout to continue and republish."
+							: "Return to the coordinator to continue the requested turn.";
+	const cause = `build/${++s.seq}`;
+	s.holds.push({ cause, item, obstruction, evidence });
+	return {
+		state: s,
+		send: [
+			fileHolding({
+				work: w.work!,
+				lane: "build",
+				goal: s.mandate!.intent,
+				resume,
+				item,
+				cause,
+				evidence,
+				...(obstruction === "protected" ? { allow: true } : {}),
+			}),
+		],
+	};
+}
 function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 	const state = s;
-	if (s.phase === "cancelled") return settleCleanup(s,e,w);
+	if (s.phase === "cancelled") return settleCleanup(s, e, w);
 	if (s.phase === "closed") return { state };
 	switch (e.kind) {
 		case "effect_done":
@@ -186,30 +205,46 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 			if (!planned) return { state };
 			const id = planned.item;
 			if (e.kind === "effect_failed")
-				return hold(s,w,id, "failed", `${e.key}: ${e.error}`);
+				return hold(s, w, id, "failed", `${e.key}: ${e.error}`);
 			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
-			if (s.phase === "start" && result.kind === "moved" && result.keelMoved && result.actual) {
-				s.refreshTrunk=result.actual;
+			if (
+				s.phase === "start" &&
+				result.kind === "moved" &&
+				result.keelMoved &&
+				result.actual
+			) {
+				s.refreshTrunk = result.actual;
 				s.setupRetry++;
-				return {state};
+				return { state };
 			}
 			if (s.phase === "start" && s.refreshTrunk && result.kind === "repo") {
 				// Only the move repo attributed may replace our immutable start plan.
 				if (result.repo.trunkHead === s.refreshTrunk) {
-					s.repo=result.repo;
-					s.setupSeq=++s.seq;
-					s.setupRetry=0;
+					s.repo = result.repo;
+					s.setupSeq = ++s.seq;
+					s.setupRetry = 0;
 				}
-				s.refreshTrunk=null;
-				return {state};
+				s.refreshTrunk = null;
+				return { state };
 			}
 			const i = s.items.find((i) => i.id === id);
-			if (i?.stage === "preparing" && result.kind === "moved" && result.actual === s.head && i.worker!.base !== s.head) {
+			if (
+				i?.stage === "preparing" &&
+				result.kind === "moved" &&
+				result.actual === s.head &&
+				i.worker!.base !== s.head
+			) {
 				prepare(s, i, w);
 				break;
 			}
 			if (result.kind === "moved" || result.kind === "occupied")
-				return hold(s,w,id, result.kind, `${e.key}: ${JSON.stringify(result)}`);
+				return hold(
+					s,
+					w,
+					id,
+					result.kind,
+					`${e.key}: ${JSON.stringify(result)}`,
+				);
 			if (id === null && s.phase === "discover" && result.kind === "repo") {
 				s.repo = result.repo;
 				s.phase = "start";
@@ -261,18 +296,19 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				agent.role === "coordinator"
 					? null
 					: s.items.find((i) => workerKey(i) === agent.key)!.id;
-			return hold(s,w,id, "stall", `${agent.key} ${e.cause}: ${e.lastWords}`);
+			return hold(s, w, id, "stall", `${agent.key} ${e.cause}: ${e.lastWords}`);
 		}
 
-		case "answered": return {state};
+		case "answered":
+			return { state };
 	}
-	schedule(s,w);
-	return {state};
+	schedule(s, w);
+	return { state };
 }
 function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	const state = s;
 	if (s.phase === "cancelled" || s.phase === "closed") return { state };
-	if (e.kind === "cancel") return cancel(s,w,plans(s,w));
+	if (e.kind === "cancel") return cancel(s, w, plans(s, w));
 	if (e.kind === "closed") {
 		s.phase = "closed";
 		return { state };
@@ -280,12 +316,35 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	function verify(event: Publication): Reduction<Build> {
 		return { state, send: [{ lane: "verify", work: w.work, event }] };
 	}
+	function publish(i: Item, allowed: boolean, direction = "") {
+		const p = i.publication!;
+		i.stage = "published";
+		i.direction = "";
+		return verify({
+			kind: "published",
+			item: i.id,
+			itemKind: i.kind,
+			sha: p.sha,
+			base: p.base,
+			protectedChanges: p.protectedChanges,
+			trunk: p.trunk,
+			allowed,
+			addresses: p.addresses,
+			repo: s.repo!,
+			head: s.head!,
+			mandate: s.mandate!,
+			brief: [renderReport(s, i, p.summary), direction]
+				.filter(Boolean)
+				.join("\n"),
+			rulings: i.rulings,
+		});
+	}
 	switch (e.kind) {
 		case "bound":
 			if (s.phase !== "idle")
 				return { reject: "The Mandate is already bound." };
 			s.mandate = e.mandate;
-			discover(s,w);
+			discover(s, w);
 			return { state };
 		case "plan": {
 			if (s.coordinator.tool !== "publish_plan" || held(s, null))
@@ -357,13 +416,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					reject: "The worker commit must descend from its pinned base.",
 				};
 			if (f.kind === "occupied" || f.kind === "moved")
-				return hold(s,w,i.id, f.kind, JSON.stringify(f));
-			if (i.kind !== "encode" && f.touched.length)
-				return hold(
-					s,w,i.id,
-					"protected",
-					`Protected paths touched by ${i.id} at ${f.sha}: ${f.touched.join(", ")}`,
-				);
+				return hold(s, w, i.id, f.kind, JSON.stringify(f));
 			if (
 				new Set(e.addresses).size !== e.addresses.length ||
 				e.addresses.some(
@@ -377,28 +430,36 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				};
 			i.publication = {
 				sha: f.sha,
+				base: f.base,
+				trunk: f.trunk,
+				protectedChanges: [...f.changes],
 				summary: e.summary,
 				addresses: e.addresses,
 			};
-			i.stage = "published";
-			return verify({
-				kind: "published",
-				item: i.id,
-				sha: f.sha,
-				addresses: e.addresses,
-				repo: s.repo!,
-				head: s.head!,
-				mandate: s.mandate!,
-				brief: renderReport(s, i, e.summary),
-				rulings: i.rulings,
-			});
+			const violations = protectedViolations(
+				f.changes,
+				i.kind === "encode" && s.mandate!.reviewed,
+			);
+			if (violations.length)
+				return hold(
+					s,
+					w,
+					i.id,
+					violations.some((c) => c.path.startsWith(".keel/"))
+						? "policy"
+						: "protected",
+					`Protected changes in ${i.id} at ${f.sha}: ${violations.map((c) => `${c.kind}: ${c.path}`).join(", ")}`,
+				);
+			return publish(i, false);
 		}
 		case "integration":
 		case "rework": {
 			if (e.item === "full" && s.phase === "handed_off") {
 				s.phase = "active";
 				s.head = e.head ?? s.head;
+				s.coordinator.pendingDirection = e.direction ?? "";
 				s.coordinator.reason = {
+					inheritedTrunk: e.inheritedTrunk ?? null,
 					kind: e.kind,
 					evidence: e.evidence,
 					threads: e.threads,
@@ -409,6 +470,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			const i = s.items.find((i) => i.id === e.item);
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
+			i.direction = e.direction ?? "";
 			i.input = e.kind;
 			i.stage = "building";
 			i.evidence = e.evidence;
@@ -444,23 +506,42 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				summary: e.summary,
 				risk: e.risk,
 			});
+		case "allow":
 		case "resume": {
 			const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
 			if (!h) return { state };
+			const i = s.items.find((item) => item.id === e.item);
+			if (
+				e.kind === "allow" &&
+				(h.obstruction !== "protected" ||
+					i?.stage !== "building" ||
+					!i.publication)
+			)
+				return { reject: "This hold does not allow a waiver." };
 			s.holds = s.holds.filter((other) => other !== h);
 			const direction = ownerDirection({
 				direction: e.direction,
 				evidence: h.evidence,
 			});
-			const i = s.items.find((item) => item.id === e.item);
-			// Cleanup has no worker. Its finding accompanies the coordinator's next turn.
-			const recipient = i && i.stage !== "cleaning" ? i : s.coordinator;
-			recipient.direction = [recipient.direction, direction]
-				.filter(Boolean)
-				.join("\n");
+			if (e.kind === "allow")
+				return publish(i!, true, e.direction ? direction : "");
+			if (i?.stage === "building") {
+				i.input = "resume";
+				i.direction = direction;
+			} else if (i?.stage === "preparing") {
+				i.direction = [i.direction, direction].filter(Boolean).join("\n");
+			} else if (!i && s.coordinator.tool) {
+				s.coordinator.direction = direction;
+			} else {
+				// Setup and cleanup have no live worker. Deliver on the next new coordinator turn.
+				const c = s.coordinator;
+				c.pendingDirection = [c.pendingDirection, direction]
+					.filter(Boolean)
+					.join("\n");
+			}
 			if (!i) {
 				s.coordinator.seq = ++s.seq;
-				if (s.phase === "discover") discover(s,w);
+				if (s.phase === "discover") discover(s, w);
 				else if (s.phase === "start") s.setupRetry++;
 			} else if (!held(s, i.id)) {
 				if (i.stage === "preparing" && h.obstruction === "occupied")
@@ -480,10 +561,13 @@ const build: Lane<Build> = {
 	name: "build",
 	state: buildDoc,
 	reduce: (s, e, w) => reduce(structuredClone(s), e as Event, w),
-	onFact:(s,e,w)=>onFact(structuredClone(s),e,w),
+	onFact: (s, e, w) => onFact(structuredClone(s), e, w),
 	agents,
 	view: buildView,
 	asks: () => [],
-	effects: (s, w) => s.phase === "cancelled" ? cleanupEffects(s) : plans(s, w).map((p) => p.effect),
+	effects: (s, w) =>
+		s.phase === "cancelled"
+			? cleanupEffects(s)
+			: plans(s, w).map((p) => p.effect),
 };
 export const buildLane = defineLane(build, buildV1);

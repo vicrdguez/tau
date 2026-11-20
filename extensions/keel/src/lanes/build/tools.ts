@@ -74,10 +74,18 @@ export const buildTools = [
 		terminate: true,
 		observe: async (_, self, _ctx, view) => {
 			const build = view("build") as ReturnType<typeof buildView>;
-			const { repo, worker, protectedPaths } = build.publicationOf(self.agent);
-			const f = await readPublishable(nodeExec, repo, worker, protectedPaths);
+			const { repo, worker, protectedPaths, inheritedTrunk } =
+				build.publicationOf(self.agent);
+			const f = await readPublishable(
+				nodeExec,
+				repo,
+				worker,
+				protectedPaths,
+				inheritedTrunk,
+			);
 			if (f.kind === "dirty") return { ...f, files: [...f.files] };
-			if (f.kind === "ok") return { ...f, touched: [...f.touched] };
+			if (f.kind === "ok")
+				return { ...f, touched: [...f.touched], changes: [...f.changes] };
 			return f;
 		},
 		event: (args, facts, self) => ({

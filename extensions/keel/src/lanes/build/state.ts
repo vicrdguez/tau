@@ -1,5 +1,10 @@
 import { defineState } from "../../kernel/state.ts";
-import type { RepoInfo, Sha, Worker } from "../../repo/index.ts";
+import type {
+	ProtectedChange,
+	RepoInfo,
+	Sha,
+	Worker,
+} from "../../repo/index.ts";
 import type { Mandate } from "../design/public.ts";
 import type { Ruling } from "./public.ts";
 
@@ -29,12 +34,19 @@ export type Item = Goal & {
 	seq: number;
 	retry: number;
 	mergedHead: Sha | null;
-	input: "brief" | "integration" | "rework";
+	input: "resume" | "brief" | "integration" | "rework";
 	evidence: string;
 	threads: string[];
 	direction: string;
 	rulings: Ruling[];
-	publication: { sha: Sha; summary: string; addresses: string[] } | null;
+	publication: {
+		sha: Sha;
+		summary: string;
+		addresses: string[];
+		base: Sha;
+		protectedChanges: ProtectedChange[];
+		trunk: Sha | null;
+	} | null;
 };
 export type Build = {
 	phase:
@@ -55,13 +67,20 @@ export type Build = {
 	setupRetry: number;
 	refreshTrunk: Sha | null;
 	abandoned: Worker[];
-	cleanup: {worker:Worker;mergedHead:Sha|null;wait:string|null;key:string}[];
+	cleanup: {
+		worker: Worker;
+		mergedHead: Sha | null;
+		wait: string | null;
+		key: string;
+	}[];
 	kept: string[];
 	coordinator: {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
+		pendingDirection: string;
 		reason: {
+			inheritedTrunk: Sha | null;
 			kind: "integration" | "rework";
 			evidence: string;
 			threads: string[];
@@ -91,15 +110,16 @@ export const buildDoc = defineState({
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
-		refreshTrunk:null,
+		refreshTrunk: null,
 		abandoned: [],
 		cleanup: [],
-		kept: [], 
+		kept: [],
 		coordinator: {
 			tool: null,
 			item: null,
 			seq: 0,
 			reason: null,
+			pendingDirection: "",
 			direction: "",
 		},
 		items: [],
@@ -117,7 +137,12 @@ export function buildView(s: Build) {
 			const worker = s.items.find((i) => workerKey(i) === agent)?.worker;
 			if (!worker || !s.repo || !s.mandate)
 				throw Error("No current worker checkout");
-			return { repo: s.repo, worker, protectedPaths: s.mandate.protectedPaths };
+			return {
+				repo: s.repo,
+				worker,
+				inheritedTrunk: s.coordinator.reason?.inheritedTrunk ?? null,
+				protectedPaths: s.mandate.protectedPaths,
+			};
 		},
 	};
 }
