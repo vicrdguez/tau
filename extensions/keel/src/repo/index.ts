@@ -157,6 +157,7 @@ export function readPublishable(
 		const g = new Git(exec, repo.commonDir);
 		const owned = await inspect(g, repo, worker);
 		if (!owned) occupied(worker.path);
+		if (owned.head === null) moved(null);
 		const files = await dirt(owned.wt);
 		if (files.length) return { kind: "dirty", files };
 		if (!(await g.ancestor(worker.base, owned.head)))

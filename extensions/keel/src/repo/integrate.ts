@@ -18,15 +18,16 @@ import type {
 	CheckReport,
 	Integrate,
 	Landing,
+	ProofChanges,
 	RepoInfo,
 	RepoResult,
 } from "./types.ts";
 import {
 	advance,
 	dirt,
+	ensureWorktree,
 	freeBranch,
 	inspect,
-	materialize,
 	ownedBranch,
 	zlist,
 } from "./worktrees.ts";
@@ -42,8 +43,9 @@ async function check(
 	index: number,
 	spec: Check,
 	published: boolean,
-	verifyCheckout: () => Promise<void>,
-): Promise<CheckReport> {
+	before: ProofChanges | undefined,
+	verifyCheckout: () => Promise<ProofChanges | undefined>,
+): Promise<{ report?: CheckReport; changes?: ProofChanges }> {
 	const { id, argv } = spec,
 		timeoutMs = spec.timeoutMs ?? 120_000;
 	if (
@@ -64,19 +66,27 @@ async function check(
 			receipt.version !== 1 ||
 			receipt.id !== id ||
 			!Number.isInteger(receipt.code) ||
-			typeof receipt.tail !== "string"
+			typeof receipt.tail !== "string" ||
+			(receipt.changes !== undefined &&
+				(typeof receipt.changes?.headChanged !== "boolean" ||
+					!Array.isArray(receipt.changes.paths) ||
+					!receipt.changes.paths.every((p: unknown) => typeof p === "string")))
 		)
 			throw Error("invalid check receipt");
-		return { id, code: receipt.code, tail: receipt.tail };
+		return {
+			report: { id, code: receipt.code, tail: receipt.tail },
+			changes: receipt.changes,
+		};
 	} catch (error) {
 		if (!hasCode(error, "ENOENT")) throw error;
 		if (published) occupied(g.cwd);
 	}
+	if (before) return { changes: before };
 	const r = await g.exec(argv, g.cwd, { env: environment(), timeoutMs });
 	const result = { id, code: r.code, tail: (r.stdout + r.stderr).slice(-4096) };
-	await verifyCheckout();
+	const changes = await verifyCheckout();
 	const tmp = file + "-" + randomUUID();
-	await writeFile(tmp, JSON.stringify({ version: 1, ...result }), {
+	await writeFile(tmp, JSON.stringify({ version: 1, ...result, changes }), {
 		flag: "wx",
 	});
 	try {
@@ -84,7 +94,7 @@ async function check(
 	} finally {
 		await unlink(tmp);
 	}
-	return result;
+	return { report: result, changes };
 }
 
 export async function integrate(
@@ -145,10 +155,40 @@ export async function integrate(
 	} as const;
 	// Never recreate missing proof evidence on the strength of a branch update.
 	const published = at === candidate;
-	const owned = await materialize(g, repo, target, !published);
+	const owned = await ensureWorktree(g, repo, target, !published);
+	async function changesIn(
+		still: typeof owned,
+	): Promise<ProofChanges | undefined> {
+		const headChanged = !still.detached || still.head !== candidate;
+		const paths = await dirt(still.wt, "proof");
+		if (still.head !== candidate) {
+			paths.push(
+				...zlist(
+					await still.wt.output(
+						"diff",
+						"--name-only",
+						"--no-renames",
+						"--no-ext-diff",
+						"--no-textconv",
+						"--ignore-submodules=none",
+						"-z",
+						candidate,
+						still.head ?? "--cached",
+						"--",
+					),
+				),
+			);
+		}
+		return headChanged || paths.length
+			? { paths: [...new Set(paths)].sort(), headChanged }
+			: undefined;
+	}
+	let current = await changesIn(owned);
 	const verifyCheckout = async () => {
 		const still = await inspect(g, repo, target);
-		if (!still || (await dirt(still.wt)).length) occupied(op.integration);
+		if (!still) occupied(op.integration);
+		current = await changesIn(still);
+		return current;
 	};
 	const reports: CheckReport[] = [];
 	for (const [index, spec] of op.checks.entries()) {
@@ -159,12 +199,27 @@ export async function integrate(
 			index,
 			spec,
 			published,
+			current,
 			verifyCheckout,
 		);
-		reports.push(r);
-		if (r.code !== 0)
+		if (r.report) reports.push(r.report);
+		if (r.changes)
+			return {
+				kind: "checks_failed",
+				sha: candidate,
+				checks: reports,
+				changes: r.changes,
+			};
+		if (r.report?.code !== 0)
 			return { kind: "checks_failed", sha: candidate, checks: reports };
 	}
+	if (!published && current)
+		return {
+			kind: "checks_failed",
+			sha: candidate,
+			checks: reports,
+			changes: current,
+		};
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
 		? { kind: "combined", sha: candidate, trunk: other, checks: reports }

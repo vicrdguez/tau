@@ -191,15 +191,20 @@ export async function advance(
 	}
 }
 
-export async function dirt(g: Git, ignored = false) {
+export async function dirt(
+	g: Git,
+	mode: "publish" | "remove" | "proof" = "publish",
+) {
 	const out = await g.output(
 		"status",
 		"--porcelain=v1",
 		"-z",
 		"--no-renames",
-		"--untracked-files=all",
-		"--ignore-submodules=none",
-		...(ignored ? ["--ignored"] : []),
+		mode === "proof" ? "--untracked-files=no" : "--untracked-files=all",
+		mode === "proof"
+			? "--ignore-submodules=untracked"
+			: "--ignore-submodules=none",
+		...(mode === "remove" ? ["--ignored"] : []),
 	);
 	const files = zlist(out).map((line) => line.slice(3));
 	if (files.length) return files;
@@ -208,7 +213,9 @@ export async function dirt(g: Git, ignored = false) {
 	const index = await g.output("ls-files", "-v", "--stage", "-z");
 	return zlist(index)
 		.filter(
-			(row) => /^[a-zS]/.test(row) || (ignored && row.startsWith("H 160000 ")),
+			(row) =>
+				/^[a-zS]/.test(row) ||
+				(mode === "remove" && row.startsWith("H 160000 ")),
 		)
 		.map((row) => row.slice(row.indexOf("\t") + 1));
 }
@@ -264,21 +271,21 @@ export async function inspect(
 	)
 		occupied(path);
 	if (
-		target.kind === "checkout"
-			? !("detached" in entry)
-			: entry.branch !== "refs/heads/" + target.branch
+		target.kind === "worktree" &&
+		entry.branch !== "refs/heads/" + target.branch
 	)
 		occupied(path);
 	const wt = new Git(g.exec, path);
 	const head = await wt.checkoutHead();
-	if (head === null || head !== entry.HEAD) moved(head);
-	if (target.kind === "checkout" && head !== target.sha) moved(head);
-	if (target.kind === "worktree")
+	if (head !== null && head !== entry.HEAD) moved(head);
+	if (target.kind === "worktree") {
+		if (head === null) moved(null);
 		await ownedBranch(g, target.branch, target.key);
-	return { head, admin, wt };
+	}
+	return { head, admin, wt, detached: "detached" in entry };
 }
 
-export async function materialize(
+export async function ensureWorktree(
 	g: Git,
 	repo: RepoInfo,
 	target: Worker | Checkout,
@@ -320,7 +327,17 @@ export async function materialize(
 		owned = await inspect(g, repo, target);
 		if (!owned) occupied(target.path);
 	}
-	if (target.kind === "worktree" && owned.head !== target.base)
+	return owned;
+}
+
+export async function materialize(
+	g: Git,
+	repo: RepoInfo,
+	target: Worker | Checkout,
+) {
+	const owned = await ensureWorktree(g, repo, target);
+	if (target.kind === "checkout" && !owned.detached) occupied(target.path);
+	if (owned.head !== (target.kind === "checkout" ? target.sha : target.base))
 		moved(owned.head);
 	if ((await dirt(owned.wt)).length) occupied(target.path);
 	return owned;
@@ -334,7 +351,7 @@ export async function remove(
 	if (target.kind === "worktree") workerSpec(repo, target);
 	const owned = await inspect(g, repo, target);
 	if (owned) {
-		if (target.kind === "worktree" && (await dirt(owned.wt, true)).length)
+		if (target.kind === "worktree" && (await dirt(owned.wt, "remove")).length)
 			return {
 				kind: "kept",
 				reason: "worker has changes or files Git cannot certify are disposable",

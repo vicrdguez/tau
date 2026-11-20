@@ -20,6 +20,10 @@ export type Check = Readonly<{
 	timeoutMs?: number;
 }>;
 export type CheckReport = Readonly<{ id: string; code: number; tail: string }>;
+export type ProofChanges = Readonly<{
+	paths: readonly string[];
+	headChanged: boolean;
+}>;
 export type ProjectPrincipleFile = Readonly<{ name: string; body: string }>;
 
 export type Worker = Readonly<{
@@ -83,7 +87,12 @@ export type RepoResult =
 	| { kind: "merged"; sha: Sha; checks: readonly CheckReport[] }
 	| { kind: "combined"; sha: Sha; trunk: Sha; checks: readonly CheckReport[] }
 	| { kind: "conflict"; paths: readonly string[]; against: Sha }
-	| { kind: "checks_failed"; sha: Sha; checks: readonly CheckReport[] }
+	| {
+			kind: "checks_failed";
+			sha: Sha;
+			checks: readonly CheckReport[];
+			changes?: ProofChanges;
+	  }
 	| { kind: "landed"; sha: Sha };
 
 export type PublishResult =
