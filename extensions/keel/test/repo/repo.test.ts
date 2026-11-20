@@ -608,24 +608,37 @@ for (const [name, script] of [
 		},
 	);
 }
-test("a successful command that changes the checked source cannot publish a merge", async (t) => {
+for (const [name, script, paths, headChanged] of [
+	["tracked edit", "echo different > book", ["book"], false],
+	["moved HEAD", "echo different > book && git commit -am changed", ["book"], true],
+	["empty proof commit", "git commit --allow-empty -m moved", [], true],
+] as const) {
+	test(name + " fails proof with candidate and paths, on first run and replay", async (t) => {
+		const f = await fixture(t);
+		const op = await f.item();
+		const plan = { ...op, checks: [{ id: "mutates", argv: ["sh", "-c", script], timeoutMs: 5000 }] };
+		const result = await f.run(plan);
+		is(result, "checks_failed");
+		assert.deepEqual(result.changes, { paths, headChanged });
+		assert.equal(result.checks[0]!.code, 0);
+		assert.equal(git(f.root, "rev-parse", result.sha + "^2"), op.item);
+		assert.equal(git(f.root, "show", result.sha + ":book"), "new");
+		assert.deepEqual(await f.run(plan), result);
+		assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+		is(await f.run({ kind: "remove", key: "drop", target: { kind: "checkout", key: op.key, path: op.integration, sha: result.sha } }), "removed");
+		await assert.rejects(access(op.integration));
+	});
+}
+test("untracked proof output does not change the candidate or prevent replay and cleanup", async (t) => {
 	const f = await fixture(t);
 	const op = await f.item();
-	const result = await f.run({
-		...op,
-		checks: [
-			{
-				id: "mutates",
-				argv: [
-					process.execPath,
-					"-e",
-					"require('fs').writeFileSync('book','different')",
-				],
-			},
-		],
-	});
-	is(result, "occupied");
-	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+	const plan = { ...op, checks: [{ id: "build", argv: ["sh", "-c", "mkdir -p target && echo ok > target/out"], timeoutMs: 5000 }] };
+	const result = await f.run(plan);
+	is(result, "merged");
+	assert.deepEqual(await f.run(plan), result);
+	assert.equal(git(f.root, "rev-parse", f.branch), result.sha);
+	is(await f.run({ kind: "remove", key: "drop", target: { kind: "checkout", key: op.key, path: op.integration, sha: result.sha } }), "removed");
+	await assert.rejects(access(op.integration));
 });
 test("project principle and verifier playbook bytes come from the planned commit, not an external symlink", async (t) => {
 	const f = await fixture(t);
