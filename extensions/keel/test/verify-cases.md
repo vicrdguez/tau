@@ -23,4 +23,4 @@
 
 `publish_diagnosis({premise:string,test:string,result:string})`.
 
-Build needs to accept the most recently merged item for subsequent full-set rework/integration; a return includes `head` (a successful take-trunk may already have advanced the build branch).
+Full-set rework or integration uses `item:"full"` to request a new correction. Its `head` reflects any completed take-trunk on the build branch. Retrying an in-doubt repo operation assigns a new kernel delivery key and preserves its repo op/key.
