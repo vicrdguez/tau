@@ -7,7 +7,6 @@ import { test } from "node:test";
 // equals and relative imports without .ts. Check the Keel-specific rules here.
 function violations(file: string, source: string): string[] {
 	const [area, lane] = file.split("/");
-	if (area !== "lanes" && area !== "dispatch") return [];
 	const tokens = (
 		source.match(
 			/\/\/[^\n\r]*|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`|[\w$]+|[^\s]/g,
@@ -15,6 +14,9 @@ function violations(file: string, source: string): string[] {
 	).filter((t) => !t.startsWith("//") && !t.startsWith("/*"));
 	const errors = [];
 	for (const [i, token] of tokens.entries()) {
+		if (area !== "repo" && token === "as" && tokens[i + 1] === "Sha")
+			errors.push(`${file}: as Sha`);
+		if (area !== "repo" && area !== "lanes" && area !== "dispatch") continue;
 		if (token !== "from" && token !== "import") continue;
 		const literal = tokens[i + (tokens[i + 1] === "(" ? 2 : 1)];
 		if (!literal || !/^["']/.test(literal)) continue;
@@ -26,7 +28,10 @@ function violations(file: string, source: string): string[] {
 			forbidden =
 				spec === "tau-wf-keel" ||
 				spec.startsWith("tau-wf-keel/") ||
+				(area === "repo" && (spec === "tau" || spec.startsWith("tau/"))) ||
 				(area === "lanes" && (spec === "tau" || spec === "tau/durable"));
+		} else if (area === "repo") {
+			forbidden = targetArea !== "repo";
 		} else if (area === "dispatch") {
 			forbidden = targetArea !== "dispatch";
 		} else if (targetArea === "kernel") {
@@ -76,7 +81,7 @@ test("allowed and forbidden Keel imports are distinguished even before the first
 test("Keel lanes and dispatch stay within their import boundaries", async () => {
 	const src = new URL("../src/", import.meta.url);
 	const errors = [];
-	for await (const file of glob("{lanes,dispatch}/**/*.ts", { cwd: src })) {
+	for await (const file of glob("**/*.ts", { cwd: src })) {
 		errors.push(
 			...violations(file, await readFile(new URL(file, src), "utf8")),
 		);

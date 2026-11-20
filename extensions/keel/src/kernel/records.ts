@@ -1,6 +1,5 @@
 import type { DecisionId } from "tau";
 import type { ConversationId, TaskId } from "tau/durable";
-import type { RoleName } from "../roles/index.ts";
 import type { AgentKey, Token, WorkId } from "./ids.ts";
 import { defineState } from "./state.ts";
 
@@ -12,7 +11,9 @@ export type AskSlot = Address & {
 };
 export type AgentSlot = {
 	conversation: ConversationId;
-	role: RoleName;
+	role: string;
+	used: Token[];
+	stop: TaskId | null;
 	cwd: string | null;
 	status: "active" | "paused" | "retired";
 	open: { token: Token; tools: string[]; unsolicited: boolean }[];
@@ -35,7 +36,7 @@ export type ProjectState = {
 };
 export type WorkState = Ledger;
 export type BindingState = {
-	binding: (Address & { key: AgentKey; role: RoleName }) | null;
+	binding: (Address & { key: AgentKey; role: string }) | null;
 };
 export type ReceiptState = {
 	reply: string | null;
@@ -49,7 +50,13 @@ export const ProjectState = defineState<ProjectState>({
 	kind: "keel.project",
 	version: 1,
 	scope: "session",
-	initial: () => ({ root: null, anchor: null, works: [], asks: {}, ledger: emptyLedger() }),
+	initial: () => ({
+		root: null,
+		anchor: null,
+		works: [],
+		asks: {},
+		ledger: emptyLedger(),
+	}),
 });
 export const WorkState = defineState<WorkState>({
 	kind: "keel.work",

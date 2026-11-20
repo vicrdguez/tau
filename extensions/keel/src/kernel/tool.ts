@@ -10,7 +10,7 @@ import {
 	type ToolRegistration,
 	type Tx,
 } from "tau/durable";
-import type { RoleName } from "../roles/index.ts";
+import { type RoleName, storedRole } from "../roles/index.ts";
 import { type AgentKey, slotKey, type Token } from "./ids.ts";
 import type { Delivery, LaneEvent, Result } from "./lane.ts";
 import { type Address, BindingState, ReceiptState } from "./records.ts";
@@ -161,7 +161,7 @@ async function admit(
 	token: string | null | undefined,
 ): Promise<Self | Refusal> {
 	const { binding } = await tx.doc(stateDoc(BindingState), conversation);
-	if (!binding || !spec.roles.includes(binding.role))
+	if (!binding || !spec.roles.includes(storedRole(binding.role)))
 		return { reject: `This role cannot call ${spec.name}` };
 	const { lane, work, key: agent, role } = binding;
 	const slot = (await ledger(tx, work)).agents[slotKey(lane, agent)];
@@ -183,7 +183,7 @@ async function admit(
 		lane,
 		work,
 		agent,
-		role,
+		role: storedRole(role),
 		conversation,
 		cwd: slot.cwd,
 		token: match.token,

@@ -51,6 +51,12 @@ export const ROLES = {
 } as const;
 export type RoleName = keyof typeof ROLES;
 
+export function storedRole(name: string): RoleName {
+	if (!Object.hasOwn(ROLES, name))
+		throw new Error(`Unknown stored Keel role: ${name}`);
+	return name as RoleName;
+}
+
 const model = str({ format: "model" });
 const override = opt(model);
 // Object.fromEntries widens keys to string; these keys are exactly the role names.

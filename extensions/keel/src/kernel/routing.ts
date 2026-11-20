@@ -23,7 +23,11 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 	// for its own lane: a later routed rejection must discard the entire chain.
 	let state: S = JSON.parse(JSON.stringify(draft));
 	const notes: Note[] = [];
-	const facts = Object.freeze({ work: world.work, options: world.options, root: world.root });
+	const facts = Object.freeze({
+		work: world.work,
+		options: world.options,
+		root: world.root,
+	});
 	return {
 		lane: lane.name,
 		work: world.work,

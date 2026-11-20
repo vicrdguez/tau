@@ -45,12 +45,13 @@ export async function reconcile(
 	const prefix = slotKey(lane, "");
 	const active = new Set<string>();
 
-	const stop = (key: string, slot: AgentSlot) =>
-		tx.createTask(
+	const stop = async (key: string, slot: AgentSlot) => {
+		slot.stop = await tx.createTask(
 			tasks.stop,
 			{ ...address, key: agentKey(key), conversation: slot.conversation },
 			background(slot.conversation),
 		);
+	};
 
 	for (const agent of agents) {
 		const key = slotKey(lane, agent.key);
@@ -62,11 +63,14 @@ export async function reconcile(
 					? work
 					: (await tx.createConversation({ ownership: { kind: "ownerless" } }))
 							.id;
+			const binding = await tx.doc(stateDoc(BindingState), conversation);
+			if (binding.binding)
+				throw new Error(`Designer conversation ${conversation} already bound`);
 			await configure(tx, conversation, {
 				...settings(agent.role),
 				cwd: agent.cwd ?? p.root,
 			});
-			(await tx.doc(stateDoc(BindingState), conversation)).binding = {
+			binding.binding = {
 				...address,
 				key: agent.key,
 				role: agent.role,
@@ -77,6 +81,8 @@ export async function reconcile(
 				role: agent.role,
 				cwd: agent.cwd,
 				open: [],
+				used: [],
+				stop: null,
 				status: agent.paused ? "paused" : "active",
 			};
 		}
@@ -85,6 +91,7 @@ export async function reconcile(
 			throw new Error(`Role changed for stable agent ${key}`);
 		if (agent.paused && slot.status === "active") await stop(agent.key, slot);
 		slot.status = agent.paused ? "paused" : "active";
+		if (!agent.paused) slot.stop = null;
 		slot.cwd = agent.cwd ?? p.root;
 		const open: AgentSlot["open"] = [];
 		for (const exp of agent.paused ? [] : agent.expects) {
@@ -95,7 +102,11 @@ export async function reconcile(
 				tools: [...exp.tools],
 				unsolicited: exp.input === null,
 			});
-			if (exp.input && !slot.open.some((e) => e.token === exp.token)) {
+			if (!slot.open.some((e) => e.token === exp.token)) {
+				if (slot.used.includes(exp.token))
+					throw new Error(`Reused token ${exp.token} on ${key}`);
+				slot.used.push(exp.token);
+				if (!exp.input) continue;
 				await tx.createTask(
 					tasks.deliver,
 					{
@@ -168,7 +179,8 @@ export async function reconcile(
 	for (const effect of effects) {
 		const key = slotKey(lane, effect.key);
 		planned.add(key);
-		if (slots.effects[key] && slots.effects[key].status !== "cancelled") continue;
+		if (slots.effects[key] && slots.effects[key].status !== "cancelled")
+			continue;
 		const task = await tx.createTask(
 			tasks.effect,
 			{ ...address, ...effect },

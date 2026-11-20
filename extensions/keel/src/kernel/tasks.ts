@@ -1,18 +1,19 @@
-import { type DecisionInput, decision } from "tau";
+import { type DecisionInput, decision, emit } from "tau";
 import type { Context } from "tau/chord";
 import {
 	type AgentChange,
 	type ConversationId,
 	configure,
+	defineEntry,
 	defineTask,
 	type JsonObject,
 	LiveDoc,
 	type SubmissionDraft,
-	type TaskRuntime,
 	type TaskId,
+	type TaskRuntime,
 	type Tx,
 } from "tau/durable";
-import type { RoleName } from "../roles/index.ts";
+import { type RoleName, storedRole } from "../roles/index.ts";
 import {
 	type AgentKey,
 	type EffectKey,
@@ -21,7 +22,8 @@ import {
 	type Token,
 } from "./ids.ts";
 import type { Delivery, KernelEvent, Result } from "./lane.ts";
-import type { Address } from "./records.ts";
+import { type Address, ProjectState, WorkState } from "./records.ts";
+import { stateDoc } from "./state.ts";
 import { ledger, project } from "./storage.ts";
 
 export type EffectInput = Address & { key: EffectKey; spec: JsonObject };
@@ -84,7 +86,11 @@ function draft(input: DeliverInput, attempt: Attempt): SubmissionDraft {
 }
 
 export function makeTasks(hooks: Hooks) {
-	// Unlike an ordinary tool refusal, rejecting a kernel fact must roll back slot consumption.
+	const refusedFact = defineEntry<{
+		text: string;
+		at: number;
+		conversation?: ConversationId;
+	}>("keel.event");
 	async function apply(
 		tx: Tx,
 		{ lane, work }: Address,
@@ -93,7 +99,11 @@ export function makeTasks(hooks: Hooks) {
 	) {
 		const result = await hooks.transact(tx, { lane, work, event }, now);
 		if ("reject" in result)
-			throw new Error(`Keel refused ${event.kind}: ${result.reject}`);
+			await emit(tx, refusedFact, {
+				text: `Lane ${lane} rejected ${JSON.stringify(event)}: ${result.reject}`,
+				at: now,
+				...(work !== null && { conversation: work }),
+			});
 	}
 
 	const answer = defineTask<DecisionInput<string>, { phase: "apply" }, null>({
@@ -207,7 +217,7 @@ export function makeTasks(hooks: Hooks) {
 					const slot = await openAgent(tx, input);
 					if (!slot) return completed;
 					await configure(tx, input.conversation, {
-						...(await hooks.roleSettings(tx, slot.role)),
+						...(await hooks.roleSettings(tx, storedRole(slot.role))),
 						cwd: slot.cwd,
 					});
 					let { attempt } = state.checkpoint;
@@ -233,8 +243,15 @@ export function makeTasks(hooks: Hooks) {
 				while ((await submission.status(ctx)).status === "queued") {
 					let blocker: TaskId | undefined;
 					let stranded = false;
-					await runtime.commit(async tx => {
-						if ((await tx.submissionByRequest(input.conversation, draft(input, attempt).requestId!))?.status !== "queued")
+					await runtime.commit(async (tx) => {
+						if (
+							(
+								await tx.submissionByRequest(
+									input.conversation,
+									draft(input, attempt).requestId!,
+								)
+							)?.status !== "queued"
+						)
 							return;
 						blocker = (await tx.doc(LiveDoc, input.conversation)).run?.taskId;
 						if (blocker !== undefined) return;
@@ -242,9 +259,23 @@ export function makeTasks(hooks: Hooks) {
 						if (!(await openAgent(tx, input))) return completed;
 						if (attempt === "first") {
 							await handle.submit(tx, draft(input, "continue"));
-							return { status: "running", checkpoint: { phase: "watch", attempt: "continue" } };
+							return {
+								status: "running",
+								checkpoint: { phase: "watch", attempt: "continue" },
+							};
 						}
-						await apply(tx, input, { kind: "agent_stalled", agent: input.key, tokens: [input.token], cause: "failed", lastWords: "" }, runtime.now());
+						await apply(
+							tx,
+							input,
+							{
+								kind: "agent_stalled",
+								agent: input.key,
+								tokens: [input.token],
+								cause: "failed",
+								lastWords: "",
+							},
+							runtime.now(),
+						);
 						return completed;
 					}, ctx);
 					if (stranded) return;
@@ -252,8 +283,7 @@ export function makeTasks(hooks: Hooks) {
 				}
 				const settled = await submission.wait(ctx);
 				await runtime.commit(async (tx) => {
-					if (!(await openAgent(tx, input)))
-						return completed;
+					if (!(await openAgent(tx, input))) return completed;
 					if (attempt === "first" && settled.reason !== "aborted")
 						return {
 							status: "running",
@@ -284,7 +314,12 @@ export function makeTasks(hooks: Hooks) {
 							kind: "agent_stalled",
 							agent: input.key,
 							tokens: [input.token],
-							cause: settled.reason === "aborted" ? "stopped" : settled.status === "unanswered" ? "failed" : "unfulfilled",
+							cause:
+								settled.reason === "aborted"
+									? "stopped"
+									: settled.status === "unanswered"
+										? "failed"
+										: "unfulfilled",
 							lastWords,
 						},
 						runtime.now(),
@@ -301,16 +336,20 @@ export function makeTasks(hooks: Hooks) {
 		initial: () => ({ phase: "stop" }),
 		abort,
 		phases: {
-			stop: async ({ input }, runtime, ctx) => {
+			stop: async ({ input, id }, runtime, ctx) => {
 				const handle = await runtime.conversation(input.conversation, ctx);
-				let shouldStop = false;
-				await runtime.commit(async (tx) => {
-					const slot = await agentSlot(tx, input);
-					shouldStop = slot?.status === "paused" || slot?.status === "retired";
-					return shouldStop ? undefined : completed;
-				}, ctx);
-				if (!shouldStop) return;
-				await handle?.abort(ctx);
+				// The last read before abort checks this exact stop intent, not just inactivity.
+				const slots =
+					input.work === null
+						? (await runtime.snapshot(stateDoc(ProjectState), ctx))?.ledger
+						: await runtime.snapshot(stateDoc(WorkState), input.work, ctx);
+				const slot = slots?.agents[slotKey(input.lane, input.key)];
+				if (
+					slot?.stop === id &&
+					slot.status !== "active" &&
+					slot.conversation === input.conversation
+				)
+					await handle?.abort(ctx);
 				await runtime.commit(() => completed, ctx);
 			},
 		},
