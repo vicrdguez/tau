@@ -66,7 +66,11 @@ export async function fixture(t: TestContext) {
 	const publish = (globs?: readonly string[]) =>
 		readPublishable(nodeExec, repo, worker, globs);
 	async function prepare(plan: Landing) {
-		const result = await run({ kind: "prepare_landing", key: "prepare:" + plan.key, landing: plan });
+		const result = await run({
+			kind: "prepare_landing",
+			key: "prepare:" + plan.key,
+			landing: plan,
+		});
 		is(result, "prepared");
 		return result.sha;
 	}
