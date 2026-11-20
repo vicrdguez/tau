@@ -461,6 +461,36 @@ test("ordinary additions pass; only reviewed Encode can edit checks; policy chan
 	}
 });
 
+test("worker input passes the item's path fences and triggers a premise check only for a survived fix", () => {
+	const b = setup();
+	b.plan();
+	b.send({
+		kind: "brief",
+		...brief,
+		fences: "src/money/tick.ts\n\n tests/tie.ts ",
+	});
+	b.done({ kind: "worktree", base: repo.trunkHead });
+	const expectation = () => b.agent("worker").expects[0]!;
+	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
+	assert.notEqual(expectation().situation, "survived_fix");
+	b.pub();
+	const back = {
+		kind: "rework",
+		item: "fix",
+		evidence: "wrong at ties",
+		threads: ["tie"],
+	};
+	b.send(back);
+	assert.notEqual(expectation().situation, "survived_fix");
+	b.pub(undefined, ["tie"]);
+	b.send({ ...back, survivedFix: true });
+	assert.equal(expectation().situation, "survived_fix");
+	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
+	b.pub(undefined, ["tie"]);
+	b.send({ ...back, kind: "integration" });
+	assert.notEqual(expectation().situation, "survived_fix");
+});
+
 test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
@@ -481,11 +511,12 @@ test("rework and integration reach the original worker with fresh expectations; 
 	const b = setup();
 	b.working();
 	const worker = b.agent("worker");
-	b.send({ kind: "ruling", agent: worker.key, ruling });
+	const cited = { ...ruling, principles: ["prove-it-works"] };
+	b.send({ kind: "ruling", agent: worker.key, ruling: cited });
 	const first = b.pub().send![0]!;
 	assert.equal(first.lane, "verify");
 	assert.equal(first.event.kind, "published");
-	assert.deepEqual(first.event.rulings, [ruling]);
+	assert.deepEqual(first.event.rulings, [cited]);
 	assert.equal(first.event.sha, sha);
 	assert.equal(first.event.head, repo.trunkHead);
 	assert.match(String(first.event.brief), /works at ties/);
