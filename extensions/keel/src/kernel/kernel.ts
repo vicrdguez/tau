@@ -1,26 +1,40 @@
-import type { Context } from "tau/chord";
 import {
 	type AgentChange,
 	AgentDoc,
 	defineExtension,
 	type Extension,
-	type JsonObject,
+	type ToolRegistration,
 	type Tx,
 } from "tau/durable";
-import { options, type RoleName, settings } from "../roles/index.ts";
+import {
+	options,
+	type RoleName,
+	settings,
+	storedRole,
+} from "../roles/index.ts";
+import type { WorkId } from "./ids.ts";
 import type { Delivery, RegisteredLane, Result } from "./lane.ts";
 import { reconcile } from "./reconcile.ts";
 import * as records from "./records.ts";
-import { route } from "./routing.ts";
+import { readViews, route } from "./routing.ts";
+import { stateDoc } from "./state.ts";
 import { project } from "./storage.ts";
-import { type EffectInput, makeTasks } from "./tasks.ts";
+import { type EffectRunner, makeTasks } from "./tasks.ts";
 import { type LaneTool, wrapTool } from "./tool.ts";
 
 export function createKernel(config: {
 	lanes: readonly RegisteredLane[];
 	tools: readonly LaneTool[];
+	plainTools?: readonly {
+		roles: readonly RoleName[];
+		tool: ToolRegistration;
+	}[];
+	sections?: readonly {
+		roles: readonly RoleName[];
+		section: NonNullable<Extension["sections"]>[number];
+	}[];
 	/** Recovery may invoke this again with the same key. External operations must converge. */
-	runEffect(input: EffectInput, context: Context): Promise<JsonObject>;
+	runEffect: EffectRunner;
 }) {
 	const lanes = new Map(config.lanes.map((lane) => [lane.name, lane]));
 	if (lanes.size !== config.lanes.length)
@@ -41,7 +55,20 @@ export function createKernel(config: {
 		if (!lane) throw new Error(`Unknown Keel lane: ${name}`);
 		return lane.scope;
 	}
-	const tools = config.tools.map((tool) => wrapTool(tool, transact, scope));
+	const tools = [
+		...config.tools.map((tool) =>
+			wrapTool(
+				tool,
+				transact,
+				(tx, self) => readViews(tx, lanes, self.work),
+				scope,
+			),
+		),
+		...(config.plainTools ?? []),
+	];
+	const adopting = new Set(
+		config.tools.filter((t) => t.gate === "adopt").map((t) => t.name),
+	);
 	async function roleSettings(tx: Tx, role: RoleName): Promise<AgentChange> {
 		return settings(role, await options.read(tx), extension, tools);
 	}
@@ -54,12 +81,34 @@ export function createKernel(config: {
 		name: "keel",
 		tasks: Object.values(tasks),
 		tools: tools.map((t) => t.tool),
+		sections:
+			config.sections?.map(({ roles, section }) => ({
+				...section,
+				async render(input, ctx) {
+					const binding = (
+						await input.read.snapshot(
+							stateDoc(records.BindingState),
+							input.conversationId,
+							ctx,
+						)
+					)?.binding;
+					const role = binding
+						? storedRole(binding.role)
+						: input.agent.tools.some((t) => adopting.has(t.name))
+							? "designer"
+							: undefined;
+					return role && roles.includes(role)
+						? section.render(input, ctx)
+						: undefined;
+				},
+			})) ?? [],
 	});
 
 	async function transact(
 		tx: Tx,
 		delivery: Delivery,
 		now: number,
+		caller: WorkId | null = delivery.work,
 	): Promise<Result> {
 		const opts = Object.freeze(await options.read(tx));
 		const p = await project(tx);
@@ -68,7 +117,7 @@ export function createKernel(config: {
 			p.root = (await tx.doc(AgentDoc, delivery.work)).cwd ?? null;
 		if (!p.root)
 			throw new Error("No project working directory on the entry conversation");
-		const result = await route(tx, lanes, delivery, now, opts, p.root);
+		const result = await route(tx, lanes, delivery, now, opts, p.root, caller);
 		if ("reject" in result) return result;
 		for (const frame of result.frames) {
 			frame.save();

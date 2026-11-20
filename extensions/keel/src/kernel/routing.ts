@@ -1,24 +1,30 @@
 import type { JsonObject, Tx } from "tau/durable";
 import type { KeelOptions } from "../roles/index.ts";
-import type { WorkId } from "./ids.ts";
+import { type WorkId, workId } from "./ids.ts";
 import type {
 	Delivery,
 	Lane,
 	LaneEvent,
+	Message,
 	Note,
 	RegisteredLane,
 	World,
 } from "./lane.ts";
 import { stateDoc } from "./state.ts";
 
-async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
+async function draftFor<S extends JsonObject>(
+	tx: Tx,
+	lane: Lane<S>,
+	work: WorkId | null,
+) {
 	const def = lane.state;
-	const read = () => {
-		if (def.scope === "session") return tx.doc(stateDoc(def));
-		if (world.work === null) throw new Error(`Missing work for ${lane.name}`);
-		return tx.doc(stateDoc(def), world.work);
-	};
-	const draft = await read();
+	if (def.scope === "session") return tx.doc(stateDoc(def));
+	if (work === null) throw new Error(`Missing work for ${lane.name}`);
+	return tx.doc(stateDoc(def), work);
+}
+
+async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
+	const draft = await draftFor(tx, lane, world.work);
 	// A tau draft is a transaction-owned proxy. A reducer never gets one, even
 	// for its own lane: a later routed rejection must discard the entire chain.
 	let state: S = JSON.parse(JSON.stringify(draft));
@@ -31,8 +37,10 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 	return {
 		lane: lane.name,
 		work: world.work,
+		root: world.root,
 		notes,
-		view: () => structuredClone(lane.view(state)),
+		// Copy the data, not the projection: a view may expose query methods.
+		view: () => lane.view(structuredClone(state)),
 		reduce(event: LaneEvent) {
 			const result = lane.reduce(state, event, world);
 			if (!("reject" in result)) {
@@ -55,7 +63,27 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 }
 export type Frame = Awaited<ReturnType<typeof load>>;
 
-/** Read and reduce. Nothing is published until every causal branch accepts. */
+export async function readViews(
+	tx: Tx,
+	lanes: ReadonlyMap<string, RegisteredLane>,
+	work: WorkId | null,
+) {
+	const views = new Map<string, () => unknown>();
+	for (const entry of lanes.values()) {
+		if (entry.scope === "conversation" && work === null) continue;
+		await entry.use(async (lane) => {
+			const draft = await draftFor(tx, lane, work);
+			const state = JSON.stringify(draft);
+			views.set(lane.name, () => lane.view(JSON.parse(state)));
+		});
+	}
+	return (lane: string) => views.get(lane)?.() ?? null;
+}
+
+// Allocating an anchor is a table write: a later rejection must roll back the
+// transaction rather than commit an empty ownerless conversation.
+export class RejectedSeed extends Error {}
+
 export async function route(
 	tx: Tx,
 	lanes: ReadonlyMap<string, RegisteredLane>,
@@ -63,7 +91,8 @@ export async function route(
 	now: number,
 	options: KeelOptions,
 	root: string,
-): Promise<{ reject: string } | { frames: Frame[]; reply: string | null }> {
+	caller: WorkId | null,
+) {
 	const scopes = new Map<WorkId | null, Map<string, Frame>>();
 	async function loadScope(work: WorkId | null) {
 		if (scopes.has(work)) return;
@@ -74,7 +103,10 @@ export async function route(
 			now,
 			options,
 			root,
-			view(name, id = lanes.get(name)?.scope === "session" ? null : work) {
+			view(
+				name,
+				id = lanes.get(name)?.scope === "session" ? null : (work ?? caller),
+			) {
 				return scopes.get(id)?.get(name)?.view() ?? null;
 			},
 		};
@@ -84,25 +116,41 @@ export async function route(
 		}
 	}
 	await loadScope(null);
+	await loadScope(caller);
+	let allocated = false;
 	// Check causality, not a hop count or a global visited set: independent
 	// branches can send the same event, and a request may return a different reply.
-	const pending = [{ delivery: first, path: new Set<string>() }];
+	const pending: {
+		delivery: Message;
+		path: Set<string>;
+	}[] = [{ delivery: first, path: new Set() }];
 	const touched = new Set<Frame>();
 	let reply: string | null = null;
 	for (const { delivery, path } of pending) {
-		const { lane, work, event } = delivery;
+		const { lane, event } = delivery;
+		const step = JSON.stringify([delivery.work, lane, event.kind]);
+		if (path.has(step))
+			throw new Error(`Keel message cycle: ${[...path, step].join(" -> ")}`);
+		const work =
+			delivery.work === "new"
+				? workId(
+						(await tx.createConversation({ ownership: { kind: "ownerless" } }))
+							.id,
+					)
+				: delivery.work;
+		allocated ||= delivery.work === "new";
 		await loadScope(work);
 		const frame = scopes.get(work)?.get(lane);
 		if (!frame)
 			throw new Error(
 				`Unknown lane or wrong scope: ${lane} (${work ?? "project"})`,
 			);
-		const step = JSON.stringify([work, lane, event.kind]);
-		if (path.has(step))
-			throw new Error(`Keel message cycle: ${[...path, step].join(" -> ")}`);
 		touched.add(frame);
 		const result = frame.reduce(event);
-		if ("reject" in result) return { reject: result.reject };
+		if ("reject" in result) {
+			if (allocated) throw new RejectedSeed(result.reject);
+			return { reject: result.reject };
+		}
 		if (delivery === first) reply = result.reply ?? null;
 		if (result.send?.length) {
 			const nextPath = new Set(path).add(step);

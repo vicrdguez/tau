@@ -183,7 +183,7 @@ export async function reconcile(
 			continue;
 		const task = await tx.createTask(
 			tasks.effect,
-			{ ...address, ...effect },
+			{ ...address, ...effect, root: frame.root },
 			background(await anchor()),
 		);
 		slots.effects[key] = { task, status: "planned" };

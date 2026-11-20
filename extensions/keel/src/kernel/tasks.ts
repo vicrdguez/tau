@@ -23,20 +23,32 @@ import {
 } from "./ids.ts";
 import type { Delivery, KernelEvent, Result } from "./lane.ts";
 import { type Address, ProjectState, WorkState } from "./records.ts";
+import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
 import { ledger, project } from "./storage.ts";
 
-export type EffectInput = Address & { key: EffectKey; spec: JsonObject };
+export type EffectInput = Address & {
+	key: EffectKey;
+	spec: JsonObject;
+	root: string;
+};
 export type StopInput = Address & {
 	key: AgentKey;
 	conversation: ConversationId;
 };
 export type DeliverInput = StopInput & { token: Token; text: string };
 
+type EffectPhase = { phase: "claim" } | { phase: "run"; attempt: number };
+export type EffectRunner = (
+	input: EffectInput,
+	ctx: Context,
+	runtime: TaskRuntime<EffectInput, EffectPhase, null, object>,
+) => Promise<JsonObject>;
+
 type Hooks = {
 	transact(tx: Tx, delivery: Delivery, now: number): Promise<Result>;
 	roleSettings(tx: Tx, role: RoleName): Promise<AgentChange>;
-	runEffect(input: EffectInput, ctx: Context): Promise<JsonObject>;
+	runEffect: EffectRunner;
 };
 
 const completed = {
@@ -72,7 +84,10 @@ async function openAgent(tx: Tx, input: DeliverInput) {
 type Attempt = "first" | "repeat" | "continue";
 type Watch = { phase: "watch"; attempt: Attempt };
 type Send = { phase: "submit"; attempt: Attempt };
-function draft(input: DeliverInput, attempt: Attempt): SubmissionDraft {
+function draft(
+	input: DeliverInput,
+	attempt: Attempt,
+): SubmissionDraft & { requestId: string } {
 	// Tokens end in @sequence. The suffix keeps a nudge distinct from every first input.
 	const requestId = attempt === "first" ? input.token : `${input.token}:nudge`;
 	return attempt === "continue"
@@ -91,19 +106,52 @@ export function makeTasks(hooks: Hooks) {
 		at: number;
 		conversation?: ConversationId;
 	}>("keel.event");
-	async function apply(
+	async function refused(
 		tx: Tx,
 		{ lane, work }: Address,
 		event: KernelEvent,
 		now: number,
+		reason: string,
 	) {
-		const result = await hooks.transact(tx, { lane, work, event }, now);
+		await emit(tx, refusedFact, {
+			text: `Lane ${lane} rejected ${JSON.stringify(event)}: ${reason}`,
+			at: now,
+			...(work !== null && { conversation: work }),
+		});
+	}
+	async function recordFact(
+		tx: Tx,
+		address: Address,
+		event: KernelEvent,
+		now: number,
+	) {
+		const result = await hooks.transact(tx, { ...address, event }, now);
 		if ("reject" in result)
-			await emit(tx, refusedFact, {
-				text: `Lane ${lane} rejected ${JSON.stringify(event)}: ${result.reject}`,
-				at: now,
-				...(work !== null && { conversation: work }),
-			});
+			await refused(tx, address, event, now, result.reject);
+	}
+	// A rejected chain that allocated a conversation has to roll back. In a
+	// fresh commit check the original slot again and record the fact/refusal
+	// instead; never repeat the external effect or leave its slot running.
+	async function commitFact<I, S>(
+		runtime: TaskRuntime<I, S, null, object>,
+		change: (
+			tx: Tx,
+			apply: typeof recordFact,
+		) => ReturnType<Parameters<typeof runtime.commit>[0]>,
+		ctx: Context,
+	) {
+		try {
+			await runtime.commit((tx) => change(tx, recordFact), ctx);
+		} catch (error) {
+			if (!(error instanceof RejectedSeed)) throw error;
+			await runtime.commit(
+				(tx) =>
+					change(tx, (tx, address, event, now) =>
+						refused(tx, address, event, now, error.message),
+					),
+				ctx,
+			);
+		}
 	}
 
 	const answer = defineTask<DecisionInput<string>, { phase: "apply" }, null>({
@@ -113,44 +161,44 @@ export function makeTasks(hooks: Hooks) {
 		abort,
 		phases: {
 			apply: (task, runtime, ctx) =>
-				runtime.commit(async (tx) => {
-					const d = await decision(tx, task.input.decision);
-					if (
-						d?.status !== "answered" ||
-						d.choice !== task.input.choice ||
-						d.conversation !== runtime.conversationId
-					)
+				commitFact(
+					runtime,
+					async (tx, apply) => {
+						const d = await decision(tx, task.input.decision);
+						if (
+							d?.status !== "answered" ||
+							d.choice !== task.input.choice ||
+							d.conversation !== runtime.conversationId
+						)
+							return completed;
+						const { asks } = await project(tx);
+						const slot = asks[d.subject];
+						if (slot?.decision !== d.id) return completed;
+						const { lane, work, local } = slot;
+						delete asks[d.subject];
+						await apply(
+							tx,
+							{ lane, work },
+							{
+								kind: "answered",
+								subject: subject(local),
+								decision: d.id,
+								choice: d.choice,
+								annotations: d.annotations.map((note, i) => ({
+									...note,
+									n: i + 1,
+								})),
+							},
+							runtime.now(),
+						);
 						return completed;
-					const { asks } = await project(tx);
-					const slot = asks[d.subject];
-					if (slot?.decision !== d.id) return completed;
-					const { lane, work, local } = slot;
-					delete asks[d.subject];
-					await apply(
-						tx,
-						{ lane, work },
-						{
-							kind: "answered",
-							subject: subject(local),
-							decision: d.id,
-							choice: d.choice,
-							annotations: d.annotations.map((note, i) => ({
-								...note,
-								n: i + 1,
-							})),
-						},
-						runtime.now(),
-					);
-					return completed;
-				}, ctx),
+					},
+					ctx,
+				),
 		},
 	});
 
-	const effect = defineTask<
-		EffectInput,
-		{ phase: "claim" } | { phase: "run"; attempt: number },
-		null
-	>({
+	const effect = defineTask<EffectInput, EffectPhase, null>({
 		name: "keel.effect",
 		version: 1,
 		initial: () => ({ phase: "claim" }),
@@ -175,7 +223,7 @@ export function makeTasks(hooks: Hooks) {
 					event = {
 						kind: "effect_done",
 						key: input.key,
-						result: await hooks.runEffect(input, ctx),
+						result: await hooks.runEffect(input, ctx, runtime),
 					};
 				} catch (error) {
 					if (attempt < 3)
@@ -190,15 +238,20 @@ export function makeTasks(hooks: Hooks) {
 						error: error instanceof Error ? error.message : String(error),
 					};
 				}
-				await runtime.commit(async (tx) => {
-					const slot = (await ledger(tx, input.work)).effects[
-						slotKey(input.lane, input.key)
-					];
-					if (slot?.task !== id || slot.status !== "running") return completed;
-					slot.status = "done";
-					await apply(tx, input, event, runtime.now());
-					return completed;
-				}, ctx);
+				await commitFact(
+					runtime,
+					async (tx, apply) => {
+						const slot = (await ledger(tx, input.work)).effects[
+							slotKey(input.lane, input.key)
+						];
+						if (slot?.task !== id || slot.status !== "running")
+							return completed;
+						slot.status = "done";
+						await apply(tx, input, event, runtime.now());
+						return completed;
+					},
+					ctx,
+				);
 			},
 		},
 	});
@@ -243,27 +296,69 @@ export function makeTasks(hooks: Hooks) {
 				while ((await submission.status(ctx)).status === "queued") {
 					let blocker: TaskId | undefined;
 					let stranded = false;
-					await runtime.commit(async (tx) => {
-						if (
-							(
-								await tx.submissionByRequest(
-									input.conversation,
-									draft(input, attempt).requestId!,
-								)
-							)?.status !== "queued"
-						)
-							return;
-						blocker = (await tx.doc(LiveDoc, input.conversation)).run?.taskId;
-						if (blocker !== undefined) return;
-						stranded = true;
+					await commitFact(
+						runtime,
+						async (tx, apply) => {
+							if ((await tx.submission(submission.id))?.status !== "queued")
+								return;
+							blocker = (await tx.doc(LiveDoc, input.conversation)).run?.taskId;
+							if (blocker !== undefined) return;
+							stranded = true;
+							if (!(await openAgent(tx, input))) return completed;
+							if (attempt === "first") {
+								await handle.submit(tx, draft(input, "continue"));
+								return {
+									status: "running",
+									checkpoint: { phase: "watch", attempt: "continue" },
+								};
+							}
+							await apply(
+								tx,
+								input,
+								{
+									kind: "agent_stalled",
+									agent: input.key,
+									tokens: [input.token],
+									cause: "failed",
+									lastWords: "",
+								},
+								runtime.now(),
+							);
+							return completed;
+						},
+						ctx,
+					);
+					if (stranded) return;
+					if (blocker !== undefined) await runtime.waitForTask(blocker, ctx);
+				}
+				const settled = await submission.wait(ctx);
+				await commitFact(
+					runtime,
+					async (tx, apply) => {
 						if (!(await openAgent(tx, input))) return completed;
-						if (attempt === "first") {
-							await handle.submit(tx, draft(input, "continue"));
+						if (attempt === "first" && settled.reason !== "aborted")
 							return {
 								status: "running",
-								checkpoint: { phase: "watch", attempt: "continue" },
+								checkpoint: {
+									phase: "submit",
+									attempt:
+										settled.status === "unanswered" ? "continue" : "repeat",
+								},
 							};
-						}
+						const answer =
+							settled.answer === undefined
+								? undefined
+								: await tx.entry(settled.answer);
+						const lastWords =
+							answer?.model
+								?.flatMap((m) =>
+									m.role === "assistant"
+										? m.content.flatMap((part) =>
+												part.type === "text" ? [part.text] : [],
+											)
+										: [],
+								)
+								.join("\n") ?? "";
 						await apply(
 							tx,
 							input,
@@ -271,61 +366,20 @@ export function makeTasks(hooks: Hooks) {
 								kind: "agent_stalled",
 								agent: input.key,
 								tokens: [input.token],
-								cause: "failed",
-								lastWords: "",
+								cause:
+									settled.reason === "aborted"
+										? "stopped"
+										: settled.status === "unanswered"
+											? "failed"
+											: "unfulfilled",
+								lastWords,
 							},
 							runtime.now(),
 						);
 						return completed;
-					}, ctx);
-					if (stranded) return;
-					if (blocker !== undefined) await runtime.waitForTask(blocker, ctx);
-				}
-				const settled = await submission.wait(ctx);
-				await runtime.commit(async (tx) => {
-					if (!(await openAgent(tx, input))) return completed;
-					if (attempt === "first" && settled.reason !== "aborted")
-						return {
-							status: "running",
-							checkpoint: {
-								phase: "submit",
-								attempt:
-									settled.status === "unanswered" ? "continue" : "repeat",
-							},
-						};
-					const answer =
-						settled.answer === undefined
-							? undefined
-							: await tx.entry(settled.answer);
-					const lastWords =
-						answer?.model
-							?.flatMap((m) =>
-								m.role === "assistant"
-									? m.content.flatMap((part) =>
-											part.type === "text" ? [part.text] : [],
-										)
-									: [],
-							)
-							.join("\n") ?? "";
-					await apply(
-						tx,
-						input,
-						{
-							kind: "agent_stalled",
-							agent: input.key,
-							tokens: [input.token],
-							cause:
-								settled.reason === "aborted"
-									? "stopped"
-									: settled.status === "unanswered"
-										? "failed"
-										: "unfulfilled",
-							lastWords,
-						},
-						runtime.now(),
-					);
-					return completed;
-				}, ctx);
+					},
+					ctx,
+				);
 			},
 		},
 	});

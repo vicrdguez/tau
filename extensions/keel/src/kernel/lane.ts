@@ -10,6 +10,7 @@ import type {
 } from "./ids.ts";
 import type { StateDef } from "./state.ts";
 
+export { prose } from "tau";
 export { defineLaneTool } from "./tool.ts";
 
 /** Tools and messages use lane-defined kinds. These four facts come from the kernel. */
@@ -32,6 +33,7 @@ export type KernelEvent =
 	  };
 export type LaneEvent = JsonObject & { kind: string };
 export type Delivery = { lane: string; work: WorkId | null; event: LaneEvent };
+export type Message = Omit<Delivery, "work"> & { work: WorkId | null | "new" };
 export type Result = { reject: string } | { reply: string | null };
 export type Ask = {
 	subject: SubjectLocal;
@@ -43,7 +45,7 @@ export type Ask = {
 export type Expectation = {
 	token: Token;
 	tools: readonly string[];
-	/** Null when the input comes from the owner. The expectation is still required. */
+	/** Null: no delivery. Only the anchor designer may answer without preceding tagged input. */
 	input: (() => string) | null;
 };
 export type AgentDecl = {
@@ -60,7 +62,7 @@ export type Reduction<S> =
 	| { reject: string }
 	| {
 			state: S;
-			send?: readonly Delivery[];
+			send?: readonly Message[];
 			notes?: readonly Note[];
 			reply?: string;
 	  };
@@ -88,7 +90,19 @@ export interface Lane<S extends JsonObject> {
 }
 
 /** Keep each reducer paired with its own document type in a heterogeneous registry. */
-export function defineLane<S extends JsonObject>(lane: Lane<S>) {
+export function defineLane<S extends JsonObject, F extends JsonObject>(
+	lane: Lane<S>,
+	fixture: { version: number; sample: () => F } & ([S, F] extends [F, S]
+		? unknown
+		: never),
+) {
+	if (
+		fixture?.version !== lane.state.version ||
+		typeof fixture.sample !== "function"
+	)
+		throw new Error(
+			`Missing or outdated state fixture for ${lane.name} v${lane.state.version}`,
+		);
 	return {
 		name: lane.name,
 		scope: lane.state.scope,
