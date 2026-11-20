@@ -27,6 +27,7 @@
 - Each worker input uses the policy from its own confirmed checkout base, including after publication and rework. An unrelated checkout cannot supply that policy.
 - The worker and the verifier see whether the brief authorizes Encode or ordinary work, not just an ambiguous goal.
 - A worker input supplies its fences for project principles. Only a rework in which a claimed fix survived triggers the premise check.
+- Item publication hands Verify the same path fences for matching verifier and diagnoser principles. Full-set handoff supplies no invented fences.
 - A ruling preserves cited principle names through publication; a worker cannot cite an undelivered principle.
 
 The scripted real-repository scenarios cover the tool-to-git boundary, authenticated model roles, durable publication and recovery. Kernel and repo suites cover retry timing, stale decisions, lock evidence, and exact path matching. Lane tests exercise the decisions above without filesystem or model scheduling.

@@ -499,7 +499,10 @@ test("worker input passes the item's path fences and triggers a premise check on
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	assert.notEqual(expectation().situation, "survived_fix");
 	assert.deepEqual(expectation().projectPrinciples, policy);
-	b.pub();
+	assert.deepEqual(b.pub().send![0]!.event.paths, [
+		"src/money/tick.ts",
+		"tests/tie.ts",
+	]);
 	const back = {
 		kind: "rework",
 		item: "fix",
