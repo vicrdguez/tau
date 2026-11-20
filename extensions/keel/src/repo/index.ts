@@ -167,11 +167,11 @@ export function readPublishable(
 		const build = await g.head(worker.from);
 		if (build === null) moved(null);
 		await ownedBranch(g, worker.from);
-		const touched: string[] = [];
+		let touched: string[] = [];
 		if (protectedGlobs?.length !== 0) {
 			const bases = (await g.output("merge-base", "--all", build, owned.head)).trimEnd().split("\n");
 			for (const base of bases)
-				touched.push(...await touchedPaths(g, base, owned.head, protectedGlobs));
+				touched = touched.concat(await touchedPaths(g, base, owned.head, protectedGlobs));
 			if (bases.length > 1) touched.sort();
 		}
 		const at = await g.head(worker.branch);

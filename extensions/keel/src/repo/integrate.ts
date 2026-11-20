@@ -10,7 +10,6 @@ import {
 	moved,
 	occupied,
 	oid,
-	report,
 	success,
 } from "./git.ts";
 import type {
@@ -25,11 +24,9 @@ import type {
 import {
 	advance,
 	dirt,
-	ensureWorktree,
 	freeBranch,
-	inspect,
+	integrationCheckout,
 	ownedBranch,
-	registered,
 	touchedPaths,
 	zlist,
 } from "./worktrees.ts";
@@ -156,16 +153,8 @@ export async function integrate(
 	} as const;
 	// Never recreate missing proof evidence on the strength of a branch update.
 	const published = at === candidate;
-	const opened = await report(() => ensureWorktree(g, repo, target, !published));
-	if ("kind" in opened && (published || opened.kind !== "occupied" || opened.path !== target.path))
-		return opened;
-	const owned = "kind" in opened ? null : opened;
-	async function damagedAdmin() {
-		const registration = await registered(g, repo, target, true);
-		if (!registration || registration.linked) occupied(target.path);
-		return registration.admin;
-	}
-	const admin = owned?.admin ?? await damagedAdmin();
+	const {admin, owned} = await integrationCheckout(g, repo, target, !published);
+	if (!owned && published) occupied(target.path);
 	async function changesIn(
 		still: NonNullable<typeof owned>,
 	): Promise<ProofChanges | undefined> {
@@ -205,17 +194,16 @@ export async function integrate(
 		return owned.wt;
 	};
 	const verifyCheckout = async () => {
-		const still = await report(() => inspect(g, repo, target));
-		if (!still) occupied(target.path);
-		if ("kind" in still) {
-			if (still.kind === "moved") moved(still.actual);
-			if (await damagedAdmin() !== admin) occupied(target.path);
-			// The checkout no longer resolves a HEAD; do not run Git there.
-			return {paths:[".git"], headChanged:true};
-		}
-		return changesIn(still);
+		const still = await integrationCheckout(g, repo, target, false);
+		if (still.admin !== admin) occupied(target.path);
+		// A broken checkout no longer resolves a HEAD; do not run Git there.
+		return still.owned ? changesIn(still.owned) : {paths:[".git"], headChanged:true};
 	};
 	const reports: CheckReport[] = [];
+	const failed = (changes?: ProofChanges) => ({
+		kind: "checks_failed" as const, sha: candidate, checks: reports, ...paths,
+		...(changes ? {changes} : {}),
+	});
 	for (const [index, spec] of op.checks.entries()) {
 		const r = await check(
 			admin,
@@ -226,26 +214,10 @@ export async function integrate(
 			verifyCheckout,
 		);
 		reports.push(r.report);
-		if (r.changes)
-			return {
-				...paths,
-				kind: "checks_failed",
-				sha: candidate,
-				checks: reports,
-				changes: r.changes,
-			};
-		if (r.report.code !== 0)
-			return { ...paths, kind: "checks_failed", sha: candidate, checks: reports };
+		if (r.changes || r.report.code !== 0) return failed(r.changes);
 	}
 	if (!owned) occupied(target.path);
-	if (!published && before)
-		return {
-			...paths,
-			kind: "checks_failed",
-			sha: candidate,
-			checks: reports,
-			changes: before,
-		};
+	if (!published && before) return failed(before);
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
 		? { ...paths, kind: "combined", sha: candidate, trunk: other, checks: reports }

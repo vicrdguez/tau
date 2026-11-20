@@ -250,7 +250,7 @@ function lockReason(target: Remove["target"]) {
 
 /** Registration + lock + both directions of Git's private gitdir link.
  * A stale registration alone proves nothing about the directory now there. */
-export async function registered(g: Git, repo: RepoInfo, target: Remove["target"], allowDamaged = false) {
+async function registered(g: Git, repo: RepoInfo, target: Remove["target"], allowDamaged = false) {
 	const { path } = target;
 	const work = pathWork(repo, path);
 	for (const p of [join(repo.commonDir, "keel"), dirname(path), path]) {
@@ -301,7 +301,14 @@ export async function inspect(
 ) {
 	const owned = await registered(g, repo, target);
 	if (!owned) return null;
-	const { entry, admin } = owned;
+	return inspectLinked(g, target, owned);
+}
+
+async function inspectLinked(
+	g: Git,
+	target: Worker | Checkout,
+	{entry, admin}: NonNullable<Awaited<ReturnType<typeof registered>>>,
+) {
 	const wt = new Git(g.exec, target.path);
 	if (
 		target.kind === "worktree" &&
@@ -360,6 +367,18 @@ export async function ensureWorktree(
 		if (!owned) occupied(target.path);
 	}
 	return owned;
+}
+
+/** A damaged integration can supply receipts, but cannot host another command. */
+export async function integrationCheckout(g: Git, repo: RepoInfo, target: Checkout, createIfMissing: boolean) {
+	const registration = await registered(g, repo, target, true);
+	if (registration) return {
+		admin: registration.admin,
+		owned: registration.linked ? await inspectLinked(g, target, registration) : null,
+	};
+	if (!createIfMissing) occupied(target.path);
+	const owned = await ensureWorktree(g, repo, target);
+	return { admin: owned.admin, owned };
 }
 
 export async function materialize(
