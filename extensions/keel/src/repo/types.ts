@@ -46,7 +46,7 @@ export type Landing = Readonly<{
 	combined: Sha;
 	message: string;
 }>;
-export type Integrate = { readonly protectedGlobs?: readonly string[] } & (
+export type Integrate = { readonly protectedGlobs?: string[] } & (
 	| Readonly<{
 			kind: "merge_item";
 			key: string;
