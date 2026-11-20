@@ -76,6 +76,14 @@ test("the bound protected paths always include the project's verifier playbooks 
 	]);
 	assert.deepEqual(send?.[0]?.event.mandate, state.mandate);
 });
+test("Ground under prompt authority never grants a self-declared Mandate review", () => {
+	const { state } = advance({
+		...bound,
+		mandate: { ...mandate, reviewed: true },
+	});
+	assert.deepEqual(state.mandate, mandate);
+});
+
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
 	for (const e of [
 		{ ...bound, reference: " " },
@@ -168,9 +176,9 @@ test("declining an ambiguity closes the ask without a build", () => {
 	);
 	assert.deepEqual(result.send ?? [], []);
 	assert.deepEqual(design.asks(result.state, world), []);
-	assert.deepEqual(design.agents(result.state, world), []);
+	assertDesk(result.state);
 });
-test("a stopped Ground turn files a hold; resume carries the finding and direction under a new token; cancel retires it", () => {
+test("a stopped Ground turn files a hold; resume carries the finding and direction under a new token; cancel closes the turn without retiring the desk", () => {
 	const state = advance(ambiguous).state;
 	const active = advance(
 		{
@@ -196,7 +204,20 @@ test("a stopped Ground turn files a hold; resume carries the finding and directi
 	assert.equal(file?.lane, "queue");
 	assert.equal(file?.work, null);
 	assert.match(String(file?.event.evidence), /Still reading/);
-	assert.equal(design.agents(stopped.state, world)[0]?.paused, true);
+	assertDesk(stopped.state);
+	assert.deepEqual(
+		advance(
+			{
+				kind: "agent_stalled",
+				agent: "designer",
+				tokens: [turn.token],
+				cause: "stopped",
+				lastWords: "again",
+			},
+			stopped.state,
+		).send ?? [],
+		[],
+	);
 	const resumed = advance(
 		{
 			kind: "resume",
@@ -212,10 +233,96 @@ test("a stopped Ground turn files a hold; resume carries the finding and directi
 	assert.match(next.input?.() ?? "", /Check venue A/);
 	assert.match(next.input?.() ?? "", /Still reading/);
 	assert.deepEqual(
-		design.agents(advance({ kind: "cancel" }, resumed.state).state, world),
+		advance(
+			{
+				kind: "agent_stalled",
+				agent: "designer",
+				tokens: [turn.token],
+				cause: "stopped",
+				lastWords: "late",
+			},
+			resumed.state,
+		).state,
+		resumed.state,
+	);
+	assertDesk(advance({ kind: "cancel" }, resumed.state).state);
+});
+function assertDesk(state: ReturnType<typeof design.state.initial>) {
+	assert.deepEqual(
+		design.agents(state, world).map((a) => [a.key, a.paused, a.expects]),
+		[["designer", false, []]],
+	);
+}
+
+test("a standing desk request asks once without cancelling; only a current confirmation cancels", () => {
+	const boundState = advance(bound).state;
+	const requested = advance({ kind: "request_cancel" }, boundState);
+	assert.equal(requested.state.phase, "bound");
+	assert.deepEqual(requested.send ?? [], []);
+	const [ask] = design.asks(requested.state, world);
+	assert.ok(ask);
+	assert.ok(ask.basis.includes(mandate.intent));
+	assert.deepEqual(ask.choices, ["cancel", "continue"]);
+	assert.deepEqual(
+		design.asks(
+			advance({ kind: "request_cancel" }, requested.state).state,
+			world,
+		),
+		[ask],
+	);
+	const answer = {
+		kind: "answered",
+		subject: ask.subject,
+		choice: "continue",
+		annotations: [],
+	};
+	const kept = advance(answer, requested.state);
+	assert.equal(kept.state.phase, "bound");
+	assert.deepEqual(design.asks(kept.state, world), []);
+	assert.deepEqual(
+		advance({ ...answer, choice: "cancel" }, kept.state).send ?? [],
 		[],
 	);
+	assert.deepEqual(
+		advance({ ...answer, choice: "cancel" }, requested.state).send,
+		[{ lane: "queue", work: null, event: { kind: "cancel_work", work } }],
+	);
+	for (const kind of ["closed", "cancel"]) {
+		const terminal = advance({ kind }, requested.state).state;
+		assertDesk(terminal);
+		assert.deepEqual(design.asks(terminal, world), []);
+		assert.ok(
+			"reject" in design.reduce(terminal, { kind: "request_cancel" }, world),
+		);
+	}
 });
+
+test("cancel collects worker and verification cleanup exactly once in the work's final note", () => {
+	const state = advance({ kind: "cancel" }, advance(bound).state).state;
+	const report = {
+		kind: "cleanup_finished",
+		lane: "verify",
+		kept: ["/integration: registration occupied"],
+	};
+	const first = advance(report, state);
+	assert.deepEqual(first.notes ?? [], []);
+	const duplicate = advance(report, first.state);
+	assert.deepEqual(duplicate.notes ?? [], []);
+	const second = advance(
+		{ kind: "cleanup_finished", lane: "build", kept: ["/worker: local draft"] },
+		duplicate.state,
+	);
+	assert.equal(second.notes?.length, 1);
+	const text = second.notes[0]!.text;
+	for (const part of [
+		mandate.intent,
+		"/integration: registration occupied",
+		"/worker: local draft",
+	])
+		assert.ok(text.includes(part));
+	assert.deepEqual(advance(report, second.state).notes ?? [], []);
+});
+
 test("Design keeps its version-one identity and unadopted initial state", () => {
 	assert.equal(design.state.version, 1);
 	assert.equal(design.state.kind, "keel.design");
@@ -226,6 +333,8 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 		mandate: null,
 		readings: [],
 		direction: "",
+		cancelRequested: false,
+		cleanup: null,
 		cause: null,
 		seq: 0,
 	});

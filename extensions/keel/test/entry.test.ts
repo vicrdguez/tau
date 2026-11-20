@@ -16,6 +16,7 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 	const tools = extension.tools?.map((tool) => tool.name) ?? [];
 	for (const name of [
 		"ground",
+		"request_cancel",
 		"publish_plan",
 		"brief_item",
 		"record_ruling",
@@ -61,6 +62,7 @@ test("the public workflow entry starts a designer with its own model and coding 
 		"bash",
 		"ground",
 		"read",
+		"request_cancel",
 	]);
 	assert.deepEqual(
 		agent.extensions.map((ext) => ext.name).sort(),

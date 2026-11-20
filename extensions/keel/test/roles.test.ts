@@ -152,6 +152,12 @@ test("configured agents see their coding tools and only their assigned Keel tool
 		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
 		if (role === "designer") {
 			assert.match(agent.instructions ?? "", /## Proof/);
+			assert.match(
+				agent.instructions ?? "",
+				/reserved[^\n]*`intent`[^\n]*`protectedPaths`/i,
+			);
+			assert.match(agent.instructions ?? "", /share[^\n]*label/i);
+			assert.match(agent.instructions ?? "", /request_cancel/);
 			assert.doesNotMatch(agent.instructions ?? "", /\{\{form\}\}/);
 		}
 		assert.deepEqual(agent.tools.map((t) => t.name).sort(), expected, role);

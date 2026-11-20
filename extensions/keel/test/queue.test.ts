@@ -51,6 +51,8 @@ const file = (
 	lane,
 	cause,
 	item,
+	goal: `Correct the limit for market ${work}`,
+	resume: `Replay the same pinned operation after restoring the expected head.`,
 	evidence: `evidence ${work}/${lane}/${cause}`,
 });
 const answer = (subject: string, choice: string, texts: string[] = []) => ({
@@ -72,9 +74,11 @@ test("one decision per holding cause names its evidence, independent of other wo
 	for (const event of [...filings, filings[0]!]) q.send(event);
 	assert.equal(q.asks().length, 3);
 	assert.equal(new Set(q.asks().map((ask) => ask.subject)).size, 3);
-	for (const { evidence } of filings) {
+	for (const { evidence, goal, resume } of filings) {
 		const matches = q.asks().filter((ask) => ask.basis.includes(evidence));
 		assert.equal(matches.length, 1);
+		assert.ok(matches[0]!.title.includes(goal));
+		assert.ok(matches[0]!.basis.includes(resume));
 		assert.deepEqual(matches[0]!.choices, ["resume", "cancel"]);
 	}
 });
@@ -88,7 +92,22 @@ test("item resume carries the evidence and direction, resets only that item, and
 	const out = q.send(
 		answer(subject, "resume", ["Measure twice.", "Keep the fence."]),
 	);
-	assert.equal(out.length, 2);
+	assert.equal(out.length, 3);
+	assert.deepEqual(
+		out.find((m) => m.event.kind === "finding_direction"),
+		{
+			lane: "verify",
+			work: a,
+			event: {
+				kind: "finding_direction",
+				lane: "verify",
+				item: "i1",
+				cause: first.cause,
+				evidence: first.evidence,
+				direction: "1. Measure twice.\n2. Keep the fence.",
+			},
+		},
+	);
 	const resume = out.find((m) => m.event.kind === "resume");
 	assert.ok(resume);
 	assert.equal(resume.lane, "verify");
@@ -106,6 +125,61 @@ test("item resume carries the evidence and direction, resets only that item, and
 	);
 	assert.equal(q.asks().length, 1);
 	assert.ok(q.asks()[0]!.basis.includes(file(a).evidence));
+});
+
+test("only waivable protected changes offer allow; the answer authorizes that one finding, not all holds", () => {
+	const q = project(queueLane);
+	const f = { ...file(b, "build", "protected/1"), allow: true };
+	q.send(f);
+	q.send(file(b, "build", "worker_stalled"));
+	const [ask] = q.asks();
+	assert.ok(ask);
+	assert.deepEqual(ask.choices, ["allow", "resume", "cancel"]);
+	assert.match(ask.basis, /allow.*publication/i);
+	const messages = q.send(
+		answer(ask.subject, "allow", ["Existing proof checked."]),
+	);
+	assert.deepEqual(
+		messages.find((m) => m.event.kind === "allow"),
+		{
+			lane: "build",
+			work: b,
+			event: {
+				kind: "allow",
+				item: f.item,
+				cause: f.cause,
+				evidence: f.evidence,
+				direction: "1. Existing proof checked.",
+			},
+		},
+	);
+	assert.ok(
+		messages.some(
+			(m) => m.lane === "verify" && m.event.kind === "finding_direction",
+		),
+	);
+	assert.equal(q.asks().length, 1);
+	assert.deepEqual(q.send(answer(q.asks()[0]!.subject, "allow")), []);
+	assert.equal(q.asks().length, 1);
+});
+
+test("a designer-confirmed cancellation withdraws outstanding findings and notifies every work lane", () => {
+	const q = project(queueLane);
+	q.send(file(a));
+	q.send(file(b));
+	assert.deepEqual(
+		q
+			.send({ kind: "cancel_work", work: a })
+			.map((m) => [m.lane, m.work, m.event.kind])
+			.sort(),
+		[
+			["build", a, "cancel"],
+			["design", a, "cancel"],
+			["verify", a, "cancel"],
+		],
+	);
+	assert.equal(q.asks().length, 1);
+	assert.ok(q.asks()[0]!.title.includes(file(b).goal));
 });
 
 test("work-level resume reaches its filer without resetting any item", () => {
