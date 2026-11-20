@@ -33,6 +33,8 @@ export type KernelEvent =
 	  };
 export type LaneEvent = JsonObject & { kind: string };
 export type Delivery = { lane: string; work: WorkId | null; event: LaneEvent };
+/** Kept distinct from lane-authored events even when their kind strings coincide. */
+export type FactDelivery = Omit<Delivery, "event"> & { fact: KernelEvent };
 export type Message = Omit<Delivery, "work"> & { work: WorkId | null | "new" };
 export type Result = { reject: string } | { reply: string | null };
 export type Ask = {
@@ -58,14 +60,13 @@ export type AgentDecl = {
 /** A key names one immutable plan, including across retries. A new plan needs a new key. */
 export type EffectDecl = { key: EffectKey; spec: JsonObject };
 export type Note = { text: string; agent: AgentKey | null };
-export type Reduction<S> =
-	| { reject: string }
-	| {
-			state: S;
-			send?: readonly Message[];
-			notes?: readonly Note[];
-			reply?: string;
-	  };
+export type Accepted<S> = {
+	state: S;
+	send?: readonly Message[];
+	notes?: readonly Note[];
+	reply?: string;
+};
+export type Reduction<S> = { reject: string } | Accepted<S>;
 
 export interface StaticFacts {
 	readonly work: WorkId | null;
@@ -74,6 +75,8 @@ export interface StaticFacts {
 }
 export interface World extends StaticFacts {
 	readonly now: number;
+	/** A claimed operation can still report a result after cancellation. Scoped to this work and lane. */
+	runningEffect?(key: EffectKey): boolean;
 	/** Detached view; null for a work not in hand. Project lanes use null. */
 	view(lane: string, work?: WorkId | null): unknown;
 }
@@ -83,10 +86,11 @@ export interface Lane<S extends JsonObject> {
 	name: string;
 	state: Exclude<StateDef<S>, { scope: "task" }>;
 	reduce(state: S, event: LaneEvent, world: World): Reduction<S>;
+	onFact(state: S, fact: KernelEvent, world: World): Accepted<S>;
 	view(state: S): unknown;
-	asks(state: S, facts: StaticFacts): readonly Ask[];
-	agents(state: S, facts: StaticFacts): readonly AgentDecl[];
-	effects(state: S, facts: StaticFacts): readonly EffectDecl[];
+	asks: (state: S, facts: StaticFacts) => readonly Ask[];
+	agents: (state: S, facts: StaticFacts) => readonly AgentDecl[];
+	effects: (state: S, facts: StaticFacts) => readonly EffectDecl[];
 }
 
 /** Keep each reducer paired with its own document type in a heterogeneous registry. */

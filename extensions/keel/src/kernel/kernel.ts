@@ -13,14 +13,14 @@ import {
 	storedRole,
 } from "../roles/index.ts";
 import type { WorkId } from "./ids.ts";
-import type { Delivery, RegisteredLane, Result } from "./lane.ts";
+import type { Delivery, FactDelivery, RegisteredLane, Result } from "./lane.ts";
 import { reconcile } from "./reconcile.ts";
 import * as records from "./records.ts";
 import { readViews, route } from "./routing.ts";
 import { stateDoc } from "./state.ts";
 import { project } from "./storage.ts";
 import { type EffectRunner, makeTasks } from "./tasks.ts";
-import { type LaneTool, wrapTool } from "./tool.ts";
+import { type LaneTool, wrapPlainTool, wrapTool } from "./tool.ts";
 
 export function createKernel(config: {
 	lanes: readonly RegisteredLane[];
@@ -64,7 +64,7 @@ export function createKernel(config: {
 				scope,
 			),
 		),
-		...(config.plainTools ?? []),
+		...(config.plainTools ?? []).map(wrapPlainTool),
 	];
 	const adopting = new Set(
 		config.tools.filter((t) => t.gate === "adopt").map((t) => t.name),
@@ -106,7 +106,7 @@ export function createKernel(config: {
 
 	async function transact(
 		tx: Tx,
-		delivery: Delivery,
+		delivery: Delivery | FactDelivery,
 		now: number,
 		caller: WorkId | null = delivery.work,
 	): Promise<Result> {

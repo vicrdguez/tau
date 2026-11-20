@@ -1,16 +1,17 @@
 import type { JsonObject, Tx } from "tau/durable";
 import type { KeelOptions } from "../roles/index.ts";
-import { type WorkId, workId } from "./ids.ts";
+import { slotKey, type WorkId, workId } from "./ids.ts";
 import type {
 	Delivery,
+	FactDelivery,
 	Lane,
-	LaneEvent,
 	Message,
 	Note,
 	RegisteredLane,
 	World,
 } from "./lane.ts";
 import { stateDoc } from "./state.ts";
+import { ledger } from "./storage.ts";
 
 async function draftFor<S extends JsonObject>(
 	tx: Tx,
@@ -41,8 +42,11 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 		notes,
 		// Copy the data, not the projection: a view may expose query methods.
 		view: () => lane.view(structuredClone(state)),
-		reduce(event: LaneEvent) {
-			const result = lane.reduce(state, event, world);
+		reduce(delivery: Message | FactDelivery) {
+			const result =
+				"fact" in delivery
+					? lane.onFact(state, delivery.fact, world)
+					: lane.reduce(state, delivery.event, world);
 			if (!("reject" in result)) {
 				state = result.state;
 				notes.push(...(result.notes ?? []));
@@ -87,7 +91,7 @@ export class RejectedSeed extends Error {}
 export async function route(
 	tx: Tx,
 	lanes: ReadonlyMap<string, RegisteredLane>,
-	first: Delivery,
+	first: Delivery | FactDelivery,
 	now: number,
 	options: KeelOptions,
 	root: string,
@@ -110,9 +114,19 @@ export async function route(
 				return scopes.get(id)?.get(name)?.view() ?? null;
 			},
 		};
+		const { effects } = await ledger(tx, work);
 		for (const lane of lanes.values()) {
 			if ((lane.scope === "session") === (work === null))
-				frames.set(lane.name, await lane.use((l) => load(tx, l, world)));
+				frames.set(
+					lane.name,
+					await lane.use((l) =>
+						load(tx, l, {
+							...world,
+							runningEffect: (key) =>
+								effects[slotKey(lane.name, key)]?.status === "running",
+						}),
+					),
+				);
 		}
 	}
 	await loadScope(null);
@@ -121,13 +135,14 @@ export async function route(
 	// Check causality, not a hop count or a global visited set: independent
 	// branches can send the same event, and a request may return a different reply.
 	const pending: {
-		delivery: Message;
+		delivery: Message | FactDelivery;
 		path: Set<string>;
 	}[] = [{ delivery: first, path: new Set() }];
 	const touched = new Set<Frame>();
 	let reply: string | null = null;
 	for (const { delivery, path } of pending) {
-		const { lane, event } = delivery;
+		const { lane } = delivery;
+		const event = "fact" in delivery ? delivery.fact : delivery.event;
 		const step = JSON.stringify([delivery.work, lane, event.kind]);
 		if (path.has(step))
 			throw new Error(`Keel message cycle: ${[...path, step].join(" -> ")}`);
@@ -146,7 +161,7 @@ export async function route(
 				`Unknown lane or wrong scope: ${lane} (${work ?? "project"})`,
 			);
 		touched.add(frame);
-		const result = frame.reduce(event);
+		const result = frame.reduce(delivery);
 		if ("reject" in result) {
 			if (allocated) throw new RejectedSeed(result.reject);
 			return { reject: result.reject };

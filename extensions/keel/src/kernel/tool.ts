@@ -187,6 +187,56 @@ async function callToken(
 }
 
 type Refusal = { reject: string };
+async function activeBinding(
+	tx: Tx,
+	conversation: ConversationId,
+	binding: BindingState["binding"],
+	roles: readonly RoleName[],
+	name: string,
+) {
+	if (!binding || !roles.includes(storedRole(binding.role)))
+		return { reject: `This role cannot call ${name}` } as const;
+	const slot = (await ledger(tx, binding.work)).agents[
+		slotKey(binding.lane, binding.key)
+	];
+	if (
+		slot?.status !== "active" ||
+		slot.conversation !== conversation ||
+		slot.role !== binding.role
+	)
+		return {
+			reject: "This conversation is not the active bound agent",
+		} as const;
+	return { binding, slot } as const;
+}
+
+export function wrapPlainTool({
+	roles,
+	tool,
+}: {
+	roles: readonly RoleName[];
+	tool: ToolRegistration;
+}) {
+	const guarded: ToolRegistration = {
+		...tool,
+		async execute(args, api, context) {
+			const rejection = await api.commit(async (tx) => {
+				const { binding } = await tx.doc(
+					stateDoc(BindingState),
+					api.conversationId,
+				);
+				return (
+					await activeBinding(tx, api.conversationId, binding, roles, tool.name)
+				).reject;
+			}, context);
+			if (rejection)
+				return { isError: true, output: [{ type: "text", text: rejection }] };
+			return tool.execute(args, api, context);
+		},
+	};
+	return { roles, tool: guarded };
+}
+
 async function admit(
 	tx: Tx,
 	conversation: ConversationId,
@@ -218,16 +268,16 @@ async function admit(
 			token: null,
 		};
 	}
-	if (!binding || !spec.roles.includes(storedRole(binding.role)))
-		return { reject: `This role cannot call ${spec.name}` };
-	const { lane, work, key: agent, role } = binding;
-	const slot = (await ledger(tx, work)).agents[slotKey(lane, agent)];
-	if (
-		slot?.status !== "active" ||
-		slot.conversation !== conversation ||
-		slot.role !== role
-	)
-		return { reject: "This conversation is not the active bound agent" };
+	const active = await activeBinding(
+		tx,
+		conversation,
+		binding,
+		spec.roles,
+		spec.name,
+	);
+	if (active.reject) return { reject: active.reject };
+	const { slot } = active;
+	const { lane, work, key: agent, role } = active.binding;
 	let matched: Token | null = null;
 	if (spec.gate !== "standing") {
 		const eligible = slot.open.filter((e) => e.tools.includes(spec.name));

@@ -3,6 +3,7 @@ import type { Context } from "tau/chord";
 import {
 	type AgentChange,
 	type ConversationId,
+	type Cursor,
 	configure,
 	defineEntry,
 	defineTask,
@@ -21,7 +22,7 @@ import {
 	subject,
 	type Token,
 } from "./ids.ts";
-import type { Delivery, KernelEvent, Result } from "./lane.ts";
+import type { FactDelivery, KernelEvent, Result } from "./lane.ts";
 import { type Address, ProjectState, WorkState } from "./records.ts";
 import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
@@ -39,14 +40,22 @@ export type StopInput = Address & {
 export type DeliverInput = StopInput & { token: Token; text: string };
 
 type EffectPhase = { phase: "claim" } | { phase: "run"; attempt: number };
+/** Effect code can create and recover its owned conversations, but never advance the task. */
+type EffectOwner = {
+	scanChildren(
+		limit: number,
+		cursor?: Cursor,
+	): ReturnType<Tx["scanConversations"]>;
+	createChild(): Promise<ConversationId>;
+};
 export type EffectRunner = (
 	input: EffectInput,
 	ctx: Context,
-	runtime: TaskRuntime<EffectInput, EffectPhase, null, object>,
+	owner: EffectOwner,
 ) => Promise<JsonObject>;
 
 type Hooks = {
-	transact(tx: Tx, delivery: Delivery, now: number): Promise<Result>;
+	transact(tx: Tx, delivery: FactDelivery, now: number): Promise<Result>;
 	roleSettings(tx: Tx, role: RoleName): Promise<AgentChange>;
 	runEffect: EffectRunner;
 };
@@ -114,7 +123,7 @@ export function makeTasks(hooks: Hooks) {
 		reason: string,
 	) {
 		await emit(tx, refusedFact, {
-			text: `Lane ${lane} rejected ${JSON.stringify(event)}: ${reason}`,
+			text: `Could not route a follow-up to ${lane} fact ${JSON.stringify(event)}: ${reason}`,
 			at: now,
 			...(work !== null && { conversation: work }),
 		});
@@ -125,7 +134,7 @@ export function makeTasks(hooks: Hooks) {
 		event: KernelEvent,
 		now: number,
 	) {
-		const result = await hooks.transact(tx, { ...address, event }, now);
+		const result = await hooks.transact(tx, { ...address, fact: event }, now);
 		if ("reject" in result)
 			await refused(tx, address, event, now, result.reject);
 	}
@@ -218,12 +227,36 @@ export function makeTasks(hooks: Hooks) {
 				}, ctx),
 			run: async ({ input, id, state }, runtime, ctx) => {
 				const { attempt } = state.checkpoint;
+				async function readOrCreate<T>(
+					operation: (tx: Tx) => Promise<T>,
+				): Promise<T> {
+					let value!: T;
+					await runtime.commit(async (tx) => {
+						value = await operation(tx);
+						return undefined;
+					}, ctx);
+					return value;
+				}
 				let event: KernelEvent;
 				try {
 					event = {
 						kind: "effect_done",
 						key: input.key,
-						result: await hooks.runEffect(input, ctx, runtime),
+						result: await hooks.runEffect(input, ctx, {
+							scanChildren: (limit, cursor) =>
+								readOrCreate((tx) =>
+									tx.scanConversations({ ownerTaskId: id }, limit, cursor),
+								),
+							createChild: () =>
+								readOrCreate(
+									async (tx) =>
+										(
+											await tx.createConversation({
+												ownership: { kind: "task", taskId: id },
+											})
+										).id,
+								),
+						}),
 					};
 				} catch (error) {
 					if (attempt < 3)
