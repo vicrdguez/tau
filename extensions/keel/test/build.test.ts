@@ -7,6 +7,7 @@ import { buildLane, buildTools } from "../src/lanes/build/index.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const mandate = {
+	reviewed: false,
 	intent: "repair pricing",
 	nodes: [{ label: "price", rule: "round once", probe: "0.05" }],
 	protectedPaths: ["tests/**"],
@@ -39,8 +40,20 @@ const ruling = {
 	follows: "existing price model",
 };
 const item = { id: "fix", kind: "build", goal: "fix rounding", deps: [] };
-const clean = {kind:"ok",sha,base:repo.trunkHead,changes:[],touched:[],trunk:null};
-const changed = (path:string,kind:string) => ({path,kind,before:"old",after:"new"});
+const clean = {
+	kind: "ok",
+	sha,
+	base: repo.trunkHead,
+	changes: [],
+	touched: [],
+	trunk: null,
+};
+const changed = (path: string, kind: string) => ({
+	path,
+	kind,
+	before: "old",
+	after: "new",
+});
 function setup(max_workers = 1, reviewed = false) {
 	const world: World = {
 		work,
@@ -81,7 +94,10 @@ function setup(max_workers = 1, reviewed = false) {
 		const done = (result: JsonObject) =>
 			send({ kind: "effect_done", key: effect().key, result });
 		function start() {
-			send({ kind: "bound", mandate:reviewed?{...mandate,reviewed}:mandate });
+			send({
+				kind: "bound",
+				mandate: { ...mandate, reviewed },
+			});
 			assert.deepEqual(effect().spec, {
 				kind: "read_repo",
 				base: "main",
@@ -110,10 +126,7 @@ function setup(max_workers = 1, reviewed = false) {
 			prepare(kind);
 			done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 		}
-		const pub = (
-			facts: JsonObject = clean,
-			addresses: string[] = [],
-		) =>
+		const pub = (facts: JsonObject = clean, addresses: string[] = []) =>
 			send({
 				kind: "publish",
 				agent: agent("worker").key,
@@ -128,7 +141,7 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 		return {
 			world,
-			view:()=>lane.view(s),
+			view: () => lane.view(s),
 			start,
 			plan,
 			prepare,
@@ -253,7 +266,12 @@ test("dirty and unrelated work cannot publish, and the tool offers no SHA argume
 test("a protected path holds an ordinary item; direction reaches the worker but does not waive protection", () => {
 	const b = setup();
 	b.working();
-	const touched = { ...clean, base: merged, touched:["tests/round"],changes:[changed("tests/round","modified")] };
+	const touched = {
+		...clean,
+		base: merged,
+		touched: ["tests/round"],
+		changes: [changed("tests/round", "modified")],
+	};
 	const filed = b.pub(touched).send!;
 	assert.equal(filed.length, 1);
 	const f = filed[0]!;
@@ -262,8 +280,8 @@ test("a protected path holds an ordinary item; direction reaches the worker but 
 		["queue", null, "file", "fix", "build", work],
 	);
 	assert.match(String(f.event.evidence), /tests\/round/);
-	assert.equal(f.event.goal,mandate.intent);
-	assert.equal(f.event.allow,true);
+	assert.equal(f.event.goal, mandate.intent);
+	assert.equal(f.event.allow, true);
 	assert.equal(b.agent("worker").paused, true);
 	b.send({
 		kind: "resume",
@@ -281,63 +299,88 @@ test("a protected path holds an ordinary item; direction reaches the worker but 
 		evidence: f.event.evidence!,
 	});
 	assert.match(b.request("worker").text, /restore fixture/);
-	assert.doesNotMatch(b.request("worker").text,/Your worktree is ready/);
+	assert.doesNotMatch(b.request("worker").text, /Your worktree is ready/);
 	assert.match(b.request("worker").text, /tests\/round/);
 	const again = b.pub(touched).send![0]!;
 	assert.equal(again.lane, "queue");
 	assert.notEqual(again.event.cause, f.event.cause);
-	const approved=b.send({kind:"allow",item:"fix",cause:again.event.cause!,direction:"inspect edges",evidence:again.event.evidence!}).send![0]!;
-	assert.equal(approved.lane,"verify");
-	assert.equal(approved.event.allowed,true);
-	assert.equal(approved.event.itemKind,"build");
-	assert.equal(approved.event.base,merged);
-	assert.equal(approved.event.sha,sha);
-	assert.deepEqual(approved.event.protectedChanges,touched.changes);
-	assert.match(String(approved.event.brief),/inspect edges/);
-	assert.equal(b.agent("worker").expects.length,0);
-	b.send({kind:"rework",item:"fix",evidence:"rounding",threads:["edge"]});
-	assert.doesNotMatch(b.request("worker").text,/restore fixture|inspect edges/);
-	assert.equal(b.pub(touched).send![0]!.lane,"queue","approval is not sticky");
+	const approved = b.send({
+		kind: "allow",
+		item: "fix",
+		cause: again.event.cause!,
+		direction: "inspect edges",
+		evidence: again.event.evidence!,
+	}).send![0]!;
+	assert.equal(approved.lane, "verify");
+	assert.equal(approved.event.allowed, true);
+	assert.equal(approved.event.itemKind, "build");
+	assert.equal(approved.event.base, merged);
+	assert.equal(approved.event.sha, sha);
+	assert.deepEqual(approved.event.protectedChanges, touched.changes);
+	assert.match(String(approved.event.brief), /inspect edges/);
+	assert.equal(b.agent("worker").expects.length, 0);
+	b.send({
+		kind: "rework",
+		item: "fix",
+		evidence: "rounding",
+		threads: ["edge"],
+	});
+	assert.doesNotMatch(
+		b.request("worker").text,
+		/restore fixture|inspect edges/,
+	);
+	assert.equal(
+		b.pub(touched).send![0]!.lane,
+		"queue",
+		"approval is not sticky",
+	);
 });
 
 test("ordinary additions pass; only reviewed Encode can edit checks; policy changes cannot be waived", () => {
-	for(const [path,kind,itemKind,reviewed,expected] of [
-		["tests/new","added","build",false,"verify"],
-		["tests/old","deleted","encode",false,"queue"],
-		["tests/old","renamed","encode",true,"verify"],
-		[".keel/playbooks/verify.md","added","encode",true,"queue"],
-	] as const){
-		const b=setup(1,reviewed);
+	for (const [path, kind, itemKind, reviewed, expected] of [
+		["tests/new", "added", "build", false, "verify"],
+		["tests/old", "deleted", "encode", false, "queue"],
+		["tests/old", "renamed", "encode", true, "verify"],
+		[".keel/playbooks/verify.md", "added", "encode", true, "queue"],
+		[".keel", "added", "build", false, "queue"],
+	] as const) {
+		const b = setup(1, reviewed);
 		b.working(itemKind);
-		const changes=[changed(path,kind)];
-		const msg=b.pub({...clean,touched:[path],changes}).send![0]!;
-		assert.equal(msg.lane,expected);
-		if(expected==="verify") {
-			assert.equal(msg.event.allowed,false);
-			assert.deepEqual(msg.event.protectedChanges,changes);
-		} else if(path.startsWith(".keel/")) {
-			assert.notEqual(msg.event.allow,true);
-			const result=b.tryEvent({kind:"allow",cause:msg.event.cause!,item:"fix",direction:"",evidence:""});
+		const changes = [changed(path, kind)];
+		const msg = b.pub({ ...clean, touched: [path], changes }).send![0]!;
+		assert.equal(msg.lane, expected);
+		if (expected === "verify") {
+			assert.equal(msg.event.allowed, false);
+			assert.deepEqual(msg.event.protectedChanges, changes);
+		} else if (path === ".keel" || path.startsWith(".keel/")) {
+			assert.notEqual(msg.event.allow, true);
+			const result = b.tryEvent({
+				kind: "allow",
+				cause: msg.event.cause!,
+				item: "fix",
+				direction: "",
+				evidence: "",
+			});
 			assert.ok("reject" in result || !result.send?.length);
-			assert.equal(b.agent("worker").paused,true);
-		} else assert.equal(msg.event.allow,true);
+			assert.equal(b.agent("worker").paused, true);
+		} else assert.equal(msg.event.allow, true);
 	}
 });
 
 test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
-	const b=setup(2);
-	b.plan([item,{...item,id:"other"}]);
-	b.send({kind:"brief",...brief});
-	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
-	b.send({kind:"brief",...brief,item:"other"});
-	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	const b = setup(2);
+	b.plan([item, { ...item, id: "other" }]);
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.send({ kind: "brief", ...brief, item: "other" });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 	b.pub();
-	b.send({kind:"merged",item:"fix",head:merged});
-	const inherited="f".repeat(40);
-	const p=b.pub({...clean,base:inherited}).send![0]!.event;
-	assert.equal(p.head,merged);
-	assert.equal(p.base,inherited);
-	assert.equal(p.trunk,null);
+	b.send({ kind: "merged", item: "fix", head: merged });
+	const inherited = "f".repeat(40);
+	const p = b.pub({ ...clean, base: inherited }).send![0]!.event;
+	assert.equal(p.head, merged);
+	assert.equal(p.base, inherited);
+	assert.equal(p.trunk, null);
 });
 
 test("rework and integration reach the original worker with fresh expectations; only observed publications advance", () => {
@@ -406,8 +449,7 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 		if (outcome !== "occupied") {
 			assert.deepEqual(b.effect().spec, first.spec);
 			assert.match(String(file.resume), /same pinned/i);
-		}
-		else
+		} else
 			assert.notEqual(
 				(b.effect().spec.op as JsonObject).path,
 				(first.spec.op as JsonObject).path,
@@ -432,43 +474,85 @@ test("a worker racing a recorded merge is prepared from the new head without own
 	const original = b.effect();
 	b.pub();
 	b.send({ kind: "merged", item: "fix", head: merged });
-	const result = b.send({ kind: "effect_done", key: original.key, result: { kind: "moved", actual: merged } });
+	const result = b.send({
+		kind: "effect_done",
+		key: original.key,
+		result: { kind: "moved", actual: merged },
+	});
 	assert.equal(result.send?.length ?? 0, 0);
-	const next = b.effects().find(e => (e.spec.op as JsonObject).kind === "worktree")!;
+	const next = b
+		.effects()
+		.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
 	assert.notEqual(next.key, original.key);
-	assert.notEqual((next.spec.op as JsonObject).path, (original.spec.op as JsonObject).path);
+	assert.notEqual(
+		(next.spec.op as JsonObject).path,
+		(original.spec.op as JsonObject).path,
+	);
 	assert.equal((next.spec.op as JsonObject).base, merged);
+});
+
+test("resume recognizes a merge recorded after a worker first reported moved", () => {
+	const b = setup(2);
+	b.plan([item, { ...item, id: "other" }]);
+	b.send({ kind:"brief", ...brief });
+	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.send({kind:"brief", ...brief,item:"other"});
+	const first = b.effect();
+	b.pub();
+	const finding = b.done({kind:"moved",actual:merged}).send![0]!.event;
+	b.send({kind:"merged",item:"fix",head:merged});
+	b.send({kind:"resume",item:"other",cause:finding.cause!,direction:"continue",evidence:""});
+	const next=b.effects().find(e=>(e.spec.op as JsonObject).kind==="worktree")!;
+	assert.notEqual((next.spec.op as JsonObject).key,(first.spec.op as JsonObject).key);
+	assert.equal((next.spec.op as JsonObject).base,merged);
 });
 
 test("a discovery resumed after bad options reads the current base and trunk", () => {
 	const b = setup();
 	b.send({ kind: "bound", mandate });
-	const failure = b.send({kind:"effect_failed",key:b.effect().key,error:"missing base"}).send![0]!.event;
-	Object.assign(b.world.options, {base:"stable",trunk:"release"});
-	b.send({kind:"resume",item:null,cause:failure.cause!,direction:"retry",evidence:failure.evidence!});
-	assert.deepEqual(b.effect().spec,{kind:"read_repo",base:"stable",trunk:"release"});
+	const failure = b.send({
+		kind: "effect_failed",
+		key: b.effect().key,
+		error: "missing base",
+	}).send![0]!.event;
+	Object.assign(b.world.options, { base: "stable", trunk: "release" });
+	b.send({
+		kind: "resume",
+		item: null,
+		cause: failure.cause!,
+		direction: "retry",
+		evidence: failure.evidence!,
+	});
+	assert.deepEqual(b.effect().spec, {
+		kind: "read_repo",
+		base: "stable",
+		trunk: "release",
+	});
 });
 
 test("only an attributed trunk move refreshes a start plan, and the refreshed snapshot must still match", () => {
-	for (const race of [false,true]) {
-		const b=setup();
-		b.send({kind:"bound",mandate});
-		b.done({kind:"repo",repo});
-		const old=b.effect();
-		const refresh=b.done({kind:"moved",actual:merged,keelMoved:true});
-		assert.equal(refresh.send?.length ?? 0,0);
-		assert.equal(b.effect().spec.kind,"read_repo");
-		const snapshot={...repo,trunkHead:race?sha:merged};
-		b.done({kind:"repo",repo:snapshot});
+	for (const race of [false, true]) {
+		const b = setup();
+		b.send({ kind: "bound", mandate });
+		b.done({ kind: "repo", repo });
+		const old = b.effect();
+		const refresh = b.done({ kind: "moved", actual: merged, keelMoved: true });
+		assert.equal(refresh.send?.length ?? 0, 0);
+		assert.equal(b.effect().spec.kind, "read_repo");
+		const snapshot = { ...repo, trunkHead: race ? sha : merged };
+		b.done({ kind: "repo", repo: snapshot });
 		if (race) {
 			// Replay the original start so repo must attribute this second move too.
-			assert.deepEqual(b.effect().spec,old.spec);
-			const held=b.done({kind:"moved",actual:sha}).send![0]!.event;
-			assert.match(String(held.resume),/same pinned/i);
-			assert.deepEqual(b.effects(),[]);
+			assert.deepEqual(b.effect().spec, old.spec);
+			const held = b.done({ kind: "moved", actual: sha }).send![0]!.event;
+			assert.match(String(held.resume), /same pinned/i);
+			assert.deepEqual(b.effects(), []);
 		} else {
-			assert.notEqual((b.effect().spec.op as JsonObject).key,(old.spec.op as JsonObject).key);
-			assert.deepEqual(b.effect().spec.repo,snapshot);
+			assert.notEqual(
+				(b.effect().spec.op as JsonObject).key,
+				(old.spec.op as JsonObject).key,
+			);
+			assert.deepEqual(b.effect().spec.repo, snapshot);
 		}
 	}
 });
@@ -495,22 +579,39 @@ test("a start that failed after a possible CAS keeps its immutable git plan on e
 });
 
 test("a stopped token files only one finding and its direction is consumed by the resumed turn", () => {
-	const b=setup();
+	const b = setup();
 	b.start();
-	const old=b.request("coordinator");
-	const stop={kind:"agent_stalled",agent:b.agent("coordinator").key,tokens:[old.token],cause:"stopped",lastWords:""};
-	const file=b.send(stop).send![0]!.event;
-	assert.equal(b.send(stop).send?.length ?? 0,0);
-	b.send({kind:"resume",item:null,cause:file.cause!,direction:"one small item",evidence:""});
-	assert.equal(b.send(stop).send?.length ?? 0,0);
-	assert.match(b.request("coordinator").text,/one small item/);
-	b.send({kind:"plan",items:[item]});
-	assert.doesNotMatch(b.request("coordinator").text,/one small item/);
-	b.send({kind:"brief",...brief});
-	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	const old = b.request("coordinator");
+	const stop = {
+		kind: "agent_stalled",
+		agent: b.agent("coordinator").key,
+		tokens: [old.token],
+		cause: "stopped",
+		lastWords: "",
+	};
+	const file = b.send(stop).send![0]!.event;
+	assert.equal(b.send(stop).send?.length ?? 0, 0);
+	b.send({
+		kind: "resume",
+		item: null,
+		cause: file.cause!,
+		direction: "one small item",
+		evidence: "",
+	});
+	assert.equal(b.send(stop).send?.length ?? 0, 0);
+	assert.match(b.request("coordinator").text, /one small item/);
+	b.send({ kind: "plan", items: [item] });
+	assert.doesNotMatch(b.request("coordinator").text, /one small item/);
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 	b.pub();
-	b.send({kind:"integration",item:"fix",evidence:"merge conflict",threads:[]});
-	assert.doesNotMatch(b.request("worker").text,/Threads:\s*\n/i);
+	b.send({
+		kind: "integration",
+		item: "fix",
+		evidence: "merge conflict",
+		threads: [],
+	});
+	assert.doesNotMatch(b.request("worker").text, /Threads:\s*\n/i);
 });
 
 test("stop holds the current turn, resume redelivers direction, and cancellation retires both agents", () => {
@@ -545,7 +646,7 @@ test("stop holds the current turn, resume redelivers direction, and cancellation
 		assert.deepEqual(b.agents(), []);
 		if (role === "worker") {
 			assert.equal((b.effect().spec.op as JsonObject).kind, "remove");
-			b.done({kind:"removed"});
+			b.done({ kind: "removed" });
 		}
 		assert.deepEqual(b.effects(), []);
 		b.send({
@@ -559,66 +660,113 @@ test("stop holds the current turn, resume redelivers direction, and cancellation
 
 test("cancel gathers all worker cleanup outcomes into one completion, including held and in-flight attempts", () => {
 	const b = setup(2);
-	b.plan([item, { ...item,id:"second" }]);
-	b.send({kind:"brief", ...brief});
+	b.plan([item, { ...item, id: "second" }]);
+	b.send({ kind: "brief", ...brief });
 	const held = b.effect();
-	b.send({kind:"effect_failed",key:held.key,error:"interrupted after worktree add"});
-	b.send({kind:"brief", ...brief,item:"second"});
+	b.send({
+		kind: "effect_failed",
+		key: held.key,
+		error: "interrupted after worktree add",
+	});
+	b.send({ kind: "brief", ...brief, item: "second" });
 	const running = b.effect();
-	Object.assign(b.world, {runningEffect:(key:string)=>key===running.key});
-	assert.equal(b.send({kind:"cancel"}).send?.length ?? 0, 0);
-	assert.deepEqual(b.agents(),[]);
-	assert.equal(b.effects().length,1);
+	Object.assign(b.world, {
+		runningEffect: (key: string) => key === running.key,
+	});
+	assert.equal(b.send({ kind: "cancel" }).send?.length ?? 0, 0);
+	assert.deepEqual(b.agents(), []);
+	assert.equal(b.effects().length, 1);
 	const op = b.effect().spec.op as JsonObject;
-	assert.equal(op.kind,"remove");
-	assert.deepEqual(op.target,held.spec.op);
-	assert.notEqual(op.merged,true);
-	assert.equal(b.done({kind:"kept",reason:"private",files:["scratch"]}).send?.length ?? 0,0);
-	assert.deepEqual(b.effects(),[]);
-	b.send({kind:"effect_done",key:running.key,result:{kind:"worktree",base:repo.trunkHead,principles:[]}});
-	assert.deepEqual((b.effect().spec.op as JsonObject).target,running.spec.op);
-	const final = b.send({kind:"effect_failed",key:b.effect().key,error:"lost registration"}).send!;
-	assert.equal(final.length,1);
-	assert.equal(final[0]!.lane,"design");
-	assert.equal(final[0]!.event.kind,"cleanup_finished");
-	assert.equal(final[0]!.event.lane,"build");
+	assert.equal(op.kind, "remove");
+	assert.deepEqual(op.target, held.spec.op);
+	assert.notEqual(op.merged, true);
+	assert.equal(
+		b.done({ kind: "kept", reason: "private", files: ["scratch"] }).send
+			?.length ?? 0,
+		0,
+	);
+	assert.deepEqual(b.effects(), []);
+	b.send({
+		kind: "effect_done",
+		key: running.key,
+		result: { kind: "worktree", base: repo.trunkHead, principles: [] },
+	});
+	assert.deepEqual((b.effect().spec.op as JsonObject).target, running.spec.op);
+	const final = b.send({
+		kind: "effect_failed",
+		key: b.effect().key,
+		error: "lost registration",
+	}).send!;
+	assert.equal(final.length, 1);
+	assert.equal(final[0]!.lane, "design");
+	assert.equal(final[0]!.event.kind, "cleanup_finished");
+	assert.equal(final[0]!.event.lane, "build");
 	const kept = JSON.stringify(final[0]!.event.kept);
-	for(const evidence of ["worker-fix-1","scratch","worker-second-1","lost registration"]) assert.ok(kept.includes(evidence));
-	assert.deepEqual(b.effects(),[]);
-	assert.equal(b.send({kind:"cancel"}).send?.length ?? 0,0);
+	for (const evidence of [
+		"worker-fix-1",
+		"scratch",
+		"worker-second-1",
+		"lost registration",
+	])
+		assert.ok(kept.includes(evidence));
+	assert.deepEqual(b.effects(), []);
+	assert.equal(b.send({ kind: "cancel" }).send?.length ?? 0, 0);
 });
 
 test("cancel without a worker acknowledges completion; unclaimed worktree creation never starts", () => {
-	const empty=setup();
-	assert.deepEqual(empty.send({kind:"cancel"}).send,[{lane:"design",work,event:{kind:"cleanup_finished",lane:"build",kept:[]}}]);
-	const b=setup();
+	const empty = setup();
+	assert.deepEqual(empty.send({ kind: "cancel" }).send, [
+		{
+			lane: "design",
+			work,
+			event: { kind: "cleanup_finished", lane: "build", kept: [] },
+		},
+	]);
+	const b = setup();
 	b.prepare();
-	const pending=b.effect();
-	b.send({kind:"cancel"});
-	assert.ok(b.effects().every(e => e.key!==pending.key && (e.spec.op as JsonObject).kind==="remove"));
+	const pending = b.effect();
+	b.send({ kind: "cancel" });
+	assert.ok(
+		b
+			.effects()
+			.every(
+				(e) =>
+					e.key !== pending.key && (e.spec.op as JsonObject).kind === "remove",
+			),
+	);
 });
 
 test("cancel drains an existing removal exactly once and includes an earlier kept worker", () => {
 	const b = setup(2);
-	b.plan([item,{...item,id:"other"}]);
-	b.send({kind:"brief",...brief});
-	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.plan([item, { ...item, id: "other" }]);
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 	b.pub();
-	b.send({kind:"merged",item:"fix",head:merged});
-	b.done({kind:"kept",reason:"private",files:["before-cancel"]});
-	b.send({kind:"brief",...brief,item:"other"});
-	b.done({kind:"worktree",base:merged,principles:[]});
+	b.send({ kind: "merged", item: "fix", head: merged });
+	b.done({ kind: "kept", reason: "private", files: ["before-cancel"] });
+	b.send({ kind: "brief", ...brief, item: "other" });
+	b.done({ kind: "worktree", base: merged, principles: [] });
 	b.pub();
-	b.send({kind:"merged",item:"other",head:sha});
-	const active=b.effect();
-	Object.assign(b.world,{runningEffect:(key:string)=>key===active.key});
-	b.send({kind:"cancel"});
-	const retried = b.effects().find(e=>e.key!==active.key)!;
-	assert.equal((retried.spec.op as JsonObject).mergedHead,merged);
-	b.send({kind:"effect_done",key:retried.key,result:{kind:"kept",reason:"private",files:["before-cancel"]}});
-	const completion=b.send({kind:"effect_done",key:active.key,result:{kind:"removed"}}).send![0]!.event;
+	b.send({ kind: "merged", item: "other", head: sha });
+	const active = b.effect();
+	Object.assign(b.world, {
+		runningEffect: (key: string) => key === active.key,
+	});
+	b.send({ kind: "cancel" });
+	const retried = b.effects().find((e) => e.key !== active.key)!;
+	assert.equal((retried.spec.op as JsonObject).mergedHead, merged);
+	b.send({
+		kind: "effect_done",
+		key: retried.key,
+		result: { kind: "kept", reason: "private", files: ["before-cancel"] },
+	});
+	const completion = b.send({
+		kind: "effect_done",
+		key: active.key,
+		result: { kind: "removed" },
+	}).send![0]!.event;
 	assert.match(JSON.stringify(completion.kept), /before-cancel/);
-	assert.deepEqual(b.effects(),[]);
+	assert.deepEqual(b.effects(), []);
 });
 
 test("merge authorizes cleanup; kept private files are reported and the coordinator hands off the verified head", () => {
@@ -690,30 +838,38 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			kind,
 			item: "full",
 			head,
-			...(kind==="integration"?{inheritedTrunk:sha}:{}),
-			direction:"choose two small probes",
+			...(kind === "integration" ? { inheritedTrunk: sha } : {}),
+			direction: "choose two small probes",
 			threads: ["precision"],
 			evidence: "the tick grid changed",
 		});
 		const req = b.request("coordinator");
 		assert.deepEqual(req.tools, ["publish_plan"]);
 		assert.match(req.text, /the tick grid changed/);
-		assert.match(req.text,/publish_plan/);
-		assert.match(req.text,/choose two small probes/);
-		if(kind==="integration") assert.ok(req.text.includes(sha));
+		assert.match(req.text, /publish_plan/);
+		assert.match(req.text, /choose two small probes/);
+		if (kind === "integration") assert.ok(req.text.includes(sha));
 		assert.ok("reject" in b.tryEvent({ kind: "plan", items: [item] }));
 		b.send({
 			kind: "plan",
 			items: [{ ...item, id: "correction", deps: ["fix"] }],
 		});
 		assert.match(b.request("coordinator").text, /precision/);
-		assert.doesNotMatch(b.request("coordinator").text,/choose two small probes/);
+		assert.doesNotMatch(
+			b.request("coordinator").text,
+			/choose two small probes/,
+		);
 		b.send({ kind: "brief", ...brief, item: "correction" });
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
 		assert.match(b.request("worker").text, /precision/);
-		const view=b.view() as {publicationOf(key:string):{inheritedTrunk:string|null}};
-		assert.equal(view.publicationOf(b.agent("worker").key).inheritedTrunk,kind==="integration"?sha:null);
+		const view = b.view() as {
+			publicationOf(key: string): { inheritedTrunk: string | null };
+		};
+		assert.equal(
+			view.publicationOf(b.agent("worker").key).inheritedTrunk,
+			kind === "integration" ? sha : null,
+		);
 		assert.deepEqual(
 			b.pub(undefined, ["precision"]).send![0]!.event.addresses,
 			["precision"],
