@@ -18,6 +18,7 @@ export type Publication = BuildSnapshot &
 				itemKind: "build" | "encode";
 				protectedChanges: ProtectedChange[];
 				allowed: boolean;
+				direction?: string;
 				trunk: Sha | null;
 				addresses: string[];
 				brief: string;

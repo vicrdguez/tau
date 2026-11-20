@@ -11,8 +11,8 @@ import {
 	type World,
 } from "../../kernel/lane.ts";
 import {
+	isPolicyPath,
 	layout,
-	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 	type Sha,
@@ -310,7 +310,7 @@ function transition(prev: State, world: World) {
 				"Return the change to the worker with your direction; do not merge this candidate.",
 				j.key,
 				r.sha,
-				protectedViolations(c.protectedChanges, true).length === 0,
+				!c.protectedChanges.some((p) => isPolicyPath(p.path)),
 			);
 		} else {
 			discard(j);
@@ -467,7 +467,7 @@ function transition(prev: State, world: World) {
 								.map((other) => other.direction)
 								.filter(Boolean)
 								.join("\n")
-						: "",
+						: (e.direction ?? ""),
 					protectedChanges: full ? [] : e.protectedChanges,
 					waivers: !full && e.allowed ? e.protectedChanges : [],
 					reviewedEncode:
@@ -615,8 +615,7 @@ function transition(prev: State, world: World) {
 				const c = find(h.item)!;
 				if (
 					e.kind === "allow" &&
-					(!h.candidate ||
-						protectedViolations(c.protectedChanges, true).length !== 0)
+					(!h.candidate || c.protectedChanges.some((p) => isPolicyPath(p.path)))
 				)
 					break;
 				s.holds = s.holds.filter((x) => x !== h);
