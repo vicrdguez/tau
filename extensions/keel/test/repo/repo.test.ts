@@ -210,6 +210,23 @@ test("dirty verifier retained on creation replay; forced verifier cleanup conver
 	);
 	await assert.rejects(access(f.checkout.path));
 });
+test("verifier cleanup follows the locked registration even after switching branches", async (t) => {
+	const f = await fixture(t);
+	is(await f.run(f.checkout), "checkout");
+	git(f.checkout.path, "switch", "-c", "comparison");
+	git(f.checkout.path, "commit", "--allow-empty", "-m", "verifier notes");
+	const tip = git(f.checkout.path, "rev-parse", "HEAD");
+	is(await f.run({ kind: "remove", key: "drop", target: f.checkout }), "removed");
+	await assert.rejects(access(f.checkout.path));
+	assert.equal(git(f.root, "rev-parse", "comparison"), tip);
+});
+test("a worker lock is not a disposable verifier lock", async (t) => {
+	const f = await fixture(t);
+	await f.item();
+	await writeFile(join(f.worker.path, "notes"), "keep");
+	is(await f.run({ kind: "remove", key: "drop", target: { ...f.checkout, key: f.worker.key, path: f.worker.path } }), "occupied");
+	assert.equal(await readFile(join(f.worker.path, "notes"), "utf8"), "keep");
+});
 test("dirty worker (including ignored files) retained at removal; clean worker removal leaves its ref", async (t) => {
 	const f = await fixture(t);
 	const merge = await f.item();
@@ -217,14 +234,21 @@ test("dirty worker (including ignored files) retained at removal; clean worker r
 	await writeFile(join(f.repo.commonDir, "info/exclude"), "scratch\n");
 	await writeFile(join(f.worker.path, "scratch"), "work");
 	is(await f.run(remove), "kept");
-	await rm(join(f.worker.path, "scratch"));
+	is(await f.run(merge), "merged");
+	await writeFile(join(f.worker.path, "notes"), "keep");
+	const kept = await f.run({ ...remove, merged: true });
+	is(kept, "kept");
+	assert.deepEqual(kept.files, ["notes"]);
+	assert.equal(await readFile(join(f.worker.path, "notes"), "utf8"), "keep");
+	await rm(join(f.worker.path, "notes"));
 	is(
 		await interrupted(
-			(e) => f.run(remove, e),
+			(e) => f.run({ ...remove, merged: true }, e),
 			[["worktree", "remove", f.worker.path]],
 		),
 		"removed",
 	);
+	await assert.rejects(access(f.worker.path));
 	assert.equal(git(f.root, "rev-parse", f.worker.branch), merge.item);
 });
 test("a worker's index cannot hide local edits at publish or forced removal", async (t) => {
@@ -267,7 +291,9 @@ test("worker removal does not discard private files inside a checked-out submodu
 		"private\n",
 	);
 	await writeFile(join(dep, "private"), "keep");
-	is(await f.run({ kind: "remove", key: "drop", target: f.worker }), "kept");
+	const kept = await f.run({ kind: "remove", key: "drop", target: f.worker, merged: true });
+	is(kept, "kept");
+	assert.deepEqual(kept.files, ["dep"]);
 	assert.equal(await readFile(join(dep, "private"), "utf8"), "keep");
 });
 test("worker creation refuses a pre-existing item branch checked out elsewhere, even at the planned base", async (t) => {
@@ -581,6 +607,9 @@ test("conflict reports the path, and creates no conflict state on the build bran
 	assert.deepEqual(await f.run({ ...op, expected }), result);
 	is(result, "conflict");
 	assert.deepEqual(result.paths, ["book"]);
+	const target = { kind: "checkout", key: op.key, path: op.integration } as const;
+	is(await f.run({ kind: "remove", key: "drop", target }), "removed");
+	await assert.rejects(access(op.integration));
 	assert.equal(git(f.root, "rev-parse", f.branch), expected);
 });
 for (const [name, script] of [
