@@ -25,6 +25,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"playbook",
 	"history",
 	"addresses",
+	"directions",
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", [
 	"facts",
@@ -43,6 +44,7 @@ const handover = prose(dir, "documents/handover.md", [
 	"rulings",
 	"notes",
 	"risk",
+	"directions",
 	"base",
 ]);
 const title = prose(dir, "documents/handover-title.md", ["trunk", "sha"]);
@@ -63,6 +65,11 @@ export function agentFor(c: Review) {
 		? agentKey(`diagnose/${c.checkout!.key}`)
 		: agentKey(`verify/${c.item}`);
 }
+const directions = (checks: Review[]) =>
+	checks
+		.filter((c) => c.direction)
+		.map((c) => `${c.item}: ${c.direction}`)
+		.join("\n") || "None.";
 function input(s: State, c: Review) {
 	const history = s.verdicts.filter((v) => v.item === c.item);
 	const facts = form({
@@ -70,6 +77,9 @@ function input(s: State, c: Review) {
 		base: c.base,
 		path: c.checkout!.path,
 		brief: c.brief,
+		directions: directions(
+			c.scope === "item" ? [] : s.checks.filter((other) => other !== c),
+		),
 		mandate: JSON.stringify(s.mandate, null, 2),
 		rulings: rulings(c.rulings),
 		playbook: c.playbook ?? "None.",
@@ -170,6 +180,7 @@ export function asks(s: State): Ask[] {
 						.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
 						.join("\n") || "None.",
 				risk: info.risk,
+				directions: directions(s.checks),
 			}),
 		},
 	];

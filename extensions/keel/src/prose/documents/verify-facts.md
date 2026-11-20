@@ -15,4 +15,7 @@ Project verification playbook:
 Earlier verdicts:
 {{history}}
 
+Owner direction from earlier item reviews:
+{{directions}}
+
 Threads this build claims to address: {{addresses}}

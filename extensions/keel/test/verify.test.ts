@@ -531,14 +531,37 @@ for (const result of [
 		assert.match(x.agent().expects[0]!.input!(), /test the premise/);
 	});
 test("owner direction on a merge retry reaches the worker on conflict or the full verifier on success", () => {
- for(const conflict of [false,true]){
-  const x=flow();x.publish();x.checkout();x.pass();x.clean();
-  const filing=x.apply({kind:"effect_failed",key:x.effect("merge_item").key,error:"lost integration checkout"}).send?.[0]?.event; assert.ok(filing);x.apply(resume(filing));
-  let next:string;
-  if(conflict){const sent=x.done("merge_item",{kind:"conflict",paths:["book"],against:"previous"});next=String(sent.send?.find(m=>m.lane==="build")?.event.evidence);}
-  else{x.done("merge_item",{kind:"merged",sha:"merged",checks:[]});x.clean();x.handoff();x.checkout();next=x.agent().expects[0]!.input!();}
-  assert.match(next,/test the premise/);assert.match(next,/lost integration checkout/);
- }
+	for (const conflict of [false, true]) {
+		const x = flow();
+		x.publish();
+		x.checkout();
+		x.pass();
+		x.clean();
+		const filing = x.apply({
+			kind: "effect_failed",
+			key: x.effect("merge_item").key,
+			error: "lost integration checkout",
+		}).send?.[0]?.event;
+		assert.ok(filing);
+		x.apply(resume(filing));
+		let next: string;
+		if (conflict) {
+			const sent = x.done("merge_item", {
+				kind: "conflict",
+				paths: ["book"],
+				against: "previous",
+			});
+			next = String(sent.send?.find((m) => m.lane === "build")?.event.evidence);
+		} else {
+			x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+			x.clean();
+			x.handoff();
+			x.checkout();
+			next = x.agent().expects[0]!.input!();
+		}
+		assert.match(next, /test the premise/);
+		assert.match(next, /lost integration checkout/);
+	}
 });
 test("exhausted CAS holds its exact plan for safe retry even if the write already succeeded", () => {
 	const x = flow();
@@ -558,8 +581,8 @@ test("exhausted CAS holds its exact plan for safe retry even if the write alread
 	assert.notEqual(retry.key, plan.key);
 	x.done("land", { kind: "landed", sha: "prepared" });
 	assert.equal(x.asks().length, 1);
-	assert.match(x.asks()[0]!.basis,/lost git reply/);
-	assert.match(x.asks()[0]!.basis,/test the premise/);
+	assert.match(x.asks()[0]!.basis, /lost git reply/);
+	assert.match(x.asks()[0]!.basis, /test the premise/);
 });
 for (const cause of ["failed", "stopped", "unfulfilled"])
 	test(`${cause} verifier resumes only on a fresh token with owner direction`, () => {

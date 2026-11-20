@@ -115,7 +115,13 @@ export const verify: Lane<State> = {
 			c.phase = "returned";
 			if (c.scope !== "item") release();
 			send.push(
-				toBuild(work, { kind, item: c.item, evidence, threads, head: s.head! }),
+				toBuild(work, {
+					kind,
+					item: c.item,
+					evidence: [evidence, c.direction].filter(Boolean).join("\n"),
+					threads,
+					head: s.head!,
+				}),
 			);
 		}
 		function mergeReady() {
@@ -488,7 +494,7 @@ export const verify: Lane<State> = {
 						back(
 							c,
 							"rework",
-							c.direction,
+							"",
 							s.verdicts
 								.findLast((v) => v.item === c.item)!
 								.blocks.map((b) => b.thread),

@@ -12,6 +12,9 @@ Rulings, highest cost if wrong first:
 Verifier notes:
 {{notes}}
 
+Direction from resumed findings:
+{{directions}}
+
 Residual risk: {{risk}}
 
 Promotion to {{base}} is yours. From a clean checkout of {{base}}, run `git merge --ff-only {{sha}}` to promote it.
