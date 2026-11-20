@@ -8,6 +8,11 @@ import type {
 import type { Mandate } from "../design/public.ts";
 import type { Ruling } from "./public.ts";
 
+export type ApprovalReply = {
+	n: number;
+	status: "acted_on" | "considered" | "dismissed";
+	reason: string;
+};
 export type Goal = {
 	id: string;
 	kind: "build" | "encode";
@@ -58,6 +63,7 @@ export type Build = {
 		| "closed"
 		| "cancelled";
 	mandate: Mandate | null;
+	approvalReplies: ApprovalReply[];
 	repo: RepoInfo | null;
 	branches: { base: string; trunk: string } | null;
 	base: Sha | null;
@@ -105,6 +111,7 @@ export const buildDoc = defineState({
 	initial: (): Build => ({
 		phase: "idle",
 		mandate: null,
+		approvalReplies: [],
 		repo: null,
 		branches: null,
 		base: null,
@@ -150,7 +157,34 @@ export function buildView(s: Build) {
 	};
 }
 
-export function validatePlan(existing: Item[], goals: Goal[]): string | null {
+export function validatePlan(
+	s: Build,
+	goals: Goal[],
+	replies: ApprovalReply[],
+): string | null {
+	const existing = s.items;
+	const firstPlan = !existing.length;
+	const notes = firstPlan ? s.mandate!.approvalNotes : [];
+	if (
+		replies.length !== notes.length ||
+		new Set(replies.map((r) => r.n)).size !== replies.length ||
+		replies.some(
+			(r) =>
+				!Number.isSafeInteger(r.n) ||
+				r.n < 1 ||
+				r.n > notes.length ||
+				!["acted_on", "considered", "dismissed"].includes(r.status) ||
+				!r.reason.trim(),
+		)
+	)
+		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
+	const first = existing[0] ?? goals[0];
+	if (
+		s.mandate!.encodeRequired &&
+		(first?.kind !== "encode" ||
+			goals.some((g) => g !== first && !g.deps.includes(first.id)))
+	)
+		return "Begin with an Encode item and make every other item depend directly on it.";
 	if (!goals.length) return "Name at least one item.";
 	const ids = new Set(existing.map((i) => i.id));
 	for (const g of goals) {

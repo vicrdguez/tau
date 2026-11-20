@@ -1,4 +1,4 @@
-Item {{id}} is ready to start at build head {{head}}.
+Item {{id}} ({{kind}}) is ready to start at build head {{head}}.
 Goal: {{goal}}
 Dependencies: {{deps}}
 {{reason}}

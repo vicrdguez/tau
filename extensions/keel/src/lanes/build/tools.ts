@@ -1,4 +1,4 @@
-import { arr, int, obj, oneOf, str } from "tau/schema";
+import { arr, int, obj, oneOf, opt, str } from "tau/schema";
 import { defineLaneTool } from "../../kernel/lane.ts";
 import { nodeExec, readPublishable } from "../../repo/index.ts";
 import type { buildView } from "./state.ts";
@@ -26,8 +26,21 @@ export const buildTools = [
 					deps: texts,
 				}),
 			),
+			replies: opt(
+				arr(
+					obj({
+						n: int({ minimum: 1 }),
+						status: oneOf(["acted_on", "considered", "dismissed"]),
+						reason: text,
+					}),
+				),
+			),
 		}),
-		event: ({ items }) => ({ kind: "plan", items }),
+		event: ({ items, replies }) => ({
+			kind: "plan",
+			items,
+			replies: replies ?? [],
+		}),
 	}),
 	defineLaneTool({
 		...coord,

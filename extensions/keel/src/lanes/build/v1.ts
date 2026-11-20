@@ -19,6 +19,8 @@ type WorkerV1 = {
 };
 type MandateV1 = {
 	reviewed: boolean;
+	encodeRequired: boolean;
+	approvalNotes: string[];
 	intent: string;
 	nodes: { label: string; rule: string; probe: string }[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
@@ -34,6 +36,11 @@ type V1 = {
 		| "closed"
 		| "cancelled";
 	mandate: MandateV1 | null;
+	approvalReplies: {
+		n: number;
+		status: "acted_on" | "considered" | "dismissed";
+		reason: string;
+	}[];
 	repo: RepoV1 | null;
 	branches: { base: string; trunk: string } | null;
 	base: Sha | null;
@@ -125,6 +132,7 @@ export const buildV1 = {
 	sample: (): V1 => ({
 		phase: "idle",
 		mandate: null,
+		approvalReplies: [],
 		repo: null,
 		branches: null,
 		base: null,

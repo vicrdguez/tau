@@ -3,9 +3,35 @@ import { type AgentDecl, prose } from "../../kernel/lane.ts";
 import { type Build, held, type Item, workerKey } from "./state.ts";
 
 const dir = import.meta.dirname;
+function authority(s: Build, labels?: string[]) {
+	const m = s.mandate!;
+	const rows: [string, string][] = [
+		["intent", m.intent],
+		...m.nodes.map(({ label, rule, probe }): [string, string] => [
+			label,
+			[rule, probe].filter(Boolean).join("\n\n"),
+		]),
+		...m.checks.map(({ id, argv, timeoutMs }): [string, string] => [
+			id,
+			`${JSON.stringify(argv)} (${timeoutMs} ms)`,
+		]),
+		["protectedPaths", m.protectedPaths.join("\n")],
+	];
+	const nodes = rows
+		.filter(([label]) => !labels || labels.includes(label))
+		.map(([label, content]) => `### ${label}\n\n${content}`)
+		.join("\n\n");
+	return labels ? nodes : `Owner-reviewed: ${m.reviewed}\n\n${nodes}`;
+}
 const plan = prose(dir, "../../prose/inputs/build/plan.md", [
 	"mandate",
 	"direction",
+	"encode",
+	"annotations",
+]);
+const encode = prose(dir, "../../prose/documents/build-encode.md", []);
+const annotations = prose(dir, "../../prose/documents/build-annotations.md", [
+	"notes",
 ]);
 const correction = prose(dir, "../../prose/inputs/build/correction.md", [
 	"mandate",
@@ -15,6 +41,7 @@ const correction = prose(dir, "../../prose/inputs/build/correction.md", [
 ]);
 const askBrief = prose(dir, "../../prose/inputs/build/brief-request.md", [
 	"id",
+	"kind",
 	"goal",
 	"head",
 	"deps",
@@ -103,7 +130,7 @@ function renderBrief(s: Build, i: Item) {
 	return brief({
 		id: i.id,
 		...i.brief,
-		nodes: i.brief.nodes.join(", "),
+		nodes: authority(s, i.brief.nodes),
 		reason: fullContext(s),
 	});
 }
@@ -113,13 +140,15 @@ function coordInput(s: Build) {
 	const c = s.coordinator;
 	const facts = {
 		direction: c.direction,
-		mandate: JSON.stringify(s.mandate, null, 2),
+		mandate: authority(s),
 	};
 	const planRecord = () =>
 		JSON.stringify(
-			s.items.map(({ id, goal, publication, rulings }) => ({
+			s.items.map(({ id, kind, goal, deps, publication, rulings }) => ({
 				id,
+				kind,
 				goal,
+				deps,
 				publication,
 				rulings,
 			})),
@@ -130,7 +159,19 @@ function coordInput(s: Build) {
 		case "publish_plan":
 			return c.reason
 				? correction({ ...facts, plan: planRecord(), reason: fullContext(s) })
-				: plan(facts);
+				: plan({
+						...facts,
+						encode: s.mandate!.encodeRequired ? encode({}) : "",
+						annotations: s.mandate!.approvalNotes.length
+							? annotations({
+									notes: s
+										.mandate!.approvalNotes.map(
+											(note, n) => `${n + 1}. ${note}`,
+										)
+										.join("\n"),
+								})
+							: "",
+					});
 		case "brief_item": {
 			const i = s.items.find((i) => i.id === c.item)!;
 			return askBrief({
@@ -138,6 +179,7 @@ function coordInput(s: Build) {
 				id: i.id,
 				goal: i.goal,
 				deps: i.deps.join(", "),
+				kind: i.kind,
 				reason: fullContext(s),
 				head: s.head!,
 			});
@@ -163,7 +205,7 @@ function workerInput(s: Build, i: Item) {
 				...common,
 				path: w.path,
 				branch: w.branch,
-				mandate: JSON.stringify(s.mandate, null, 2),
+				mandate: authority(s),
 			});
 		case "rework":
 			return rework(common);

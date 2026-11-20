@@ -196,7 +196,13 @@ const reviewed = {
 	reviewed: true,
 	encodeRequired: true,
 	approvalNotes: ["Cover cash ties", "Keep the integer seam"],
-	nodes: [{ label: "cash-port", rule: "Price takes cents", probe: "fractional cents fail" }],
+	nodes: [
+		{
+			label: "cash-port",
+			rule: "Price takes cents",
+			probe: "fractional cents fail",
+		},
+	],
 };
 const encode = { ...item, kind: "encode", goal: "protect the cash port" };
 const replies = [
@@ -212,7 +218,11 @@ test("a reviewed seam requires Encode first and a direct dependency from every l
 		[item],
 		[later, encode],
 		[encode, later],
-		[encode, { ...later, deps: ["fix"] }, { ...item, id: "end", deps: ["later"] }],
+		[
+			encode,
+			{ ...later, deps: ["fix"] },
+			{ ...item, id: "end", deps: ["later"] },
+		],
 	]) {
 		const result = b.tryEvent({ kind: "plan", items });
 		assert.match("reject" in result ? result.reject : "", /encode/i);
@@ -229,7 +239,9 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.match(prompt, /2\. Keep the integer seam/);
 	assert.match(prompt, /Price takes cents/);
 	for (const bad of [
-		[], replies.slice(1), [replies[0]!, replies[0]!],
+		[],
+		replies.slice(1),
+		[replies[0]!, replies[0]!],
 		[replies[0]!, { ...replies[1]!, n: 3 }],
 		[replies[0]!, { ...replies[1]!, status: "ignored" }],
 		[replies[0]!, { ...replies[1]!, reason: "  " }],
@@ -248,8 +260,17 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	b.send({ kind: "merged", item: "fix", head: merged });
 	b.done({ kind: "removed" });
 	b.send({ kind: "handoff", summary: "port ready", risk: "none" });
-	b.send({ kind: "rework", item: "full", head: merged, threads: ["proof"], evidence: "tie proof failed" });
-	const correction = b.send({ kind: "plan", items: [{ ...item, id: "proof", deps: ["fix"] }] });
+	b.send({
+		kind: "rework",
+		item: "full",
+		head: merged,
+		threads: ["proof"],
+		evidence: "tie proof failed",
+	});
+	const correction = b.send({
+		kind: "plan",
+		items: [{ ...item, id: "proof", deps: ["fix"] }],
+	});
 	assert.deepEqual(correction.state.approvalReplies, replies);
 });
 

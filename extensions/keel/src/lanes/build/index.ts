@@ -25,6 +25,7 @@ import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
+	type ApprovalReply,
 	type Brief,
 	type Build,
 	buildDoc,
@@ -42,7 +43,7 @@ export { buildTools } from "./tools.ts";
 type Event =
 	| BuildUpdate
 	| Resume
-	| { kind: "plan"; items: Goal[] }
+	| { kind: "plan"; items: Goal[]; replies?: ApprovalReply[] }
 	| ({ kind: "brief"; item: string } & Brief)
 	| { kind: "handoff"; summary: string; risk: string }
 	| { kind: "ruling"; agent: string; ruling: Ruling }
@@ -365,8 +366,10 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		case "plan": {
 			if (s.coordinator.tool !== "publish_plan" || held(s, null))
 				return { reject: "No plan is due." };
-			const reject = validatePlan(s.items, e.items);
+			const replies = e.replies ?? [];
+			const reject = validatePlan(s, e.items, replies);
 			if (reject) return { reject };
+			if (!s.items.length) s.approvalReplies = replies;
 			for (const goal of e.items)
 				s.items.push({
 					...goal,
