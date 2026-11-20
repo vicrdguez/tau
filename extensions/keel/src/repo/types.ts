@@ -78,7 +78,7 @@ export type RepoOp =
 	| Checkout
 	| Remove
 	| Integrate
-	| (Landing & Readonly<{ kind: "prepare_landing" }>)
+	| Readonly<{ kind: "prepare_landing"; key: string; landing: Landing }>
 	| (Landing & Readonly<{ kind: "land"; target: Sha }>);
 
 export type Obstruction =

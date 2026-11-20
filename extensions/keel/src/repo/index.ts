@@ -123,8 +123,8 @@ export function converge(
 			case "take_trunk":
 				return integrate(g, repo, op);
 			case "prepare_landing": {
-				const sha = await landingCommit(g, op);
-				if (sha !== op.expectedTrunk) return { kind: "prepared", sha };
+				const sha = await landingCommit(g, op.landing);
+				if (sha !== op.landing.expectedTrunk) return { kind: "prepared", sha };
 				const at = await g.head(repo.trunk);
 				if (at !== sha) moved(at);
 				return { kind: "unchanged", sha };
