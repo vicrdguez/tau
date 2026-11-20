@@ -25,6 +25,7 @@ import {
 import { WorkState } from "../src/kernel/records.ts";
 import { defineState, stateDoc } from "../src/kernel/state.ts";
 import { options } from "../src/roles/index.ts";
+import { sharedFixture, toyFixture } from "./state/toy.ts";
 
 export type ToyState = {
 	ask: string | null;
@@ -62,18 +63,22 @@ export const Shared = defineState({
 	version: 1,
 	initial: () => ({ seen: [] as string[] }),
 });
-const shared = defineLane({
-	name: "shared",
-	state: Shared,
-	view: (s) => s,
-	asks: () => [],
-	agents: () => [],
-	effects: () => [],
-	reduce(s, e) {
-		if (e.kind === "forbidden") return { reject: "not allowed" };
-		return { state: { seen: [...s.seen, String(e.kind)] } };
+const shared = defineLane(
+	{
+		name: "shared",
+		state: Shared,
+		view: (s) => s,
+		asks: () => [],
+		agents: () => [],
+		effects: () => [],
+		reduce(s, e) {
+			if (e.kind === "forbidden") return { reject: "not allowed" };
+			if (e.kind === "changed") return { state: { seen: [] } };
+			return { state: { seen: [...s.seen, String(e.kind)] } };
+		},
 	},
-});
+	sharedFixture,
+);
 export function latch<T>() {
 	let resolve!: (v: T) => void;
 	const promise = new Promise<T>((yes) => {
@@ -81,145 +86,151 @@ export function latch<T>() {
 	});
 	return { resolve, promise };
 }
-const toyLane = defineLane({
-	name: "toy",
-	state: Toy,
-	view: (s) => s,
-	reduce(s, e, world) {
-		switch (e.kind) {
-			case "ask":
-				return { state: { ...s, ask: String(e.basis) } };
-			case "answered":
-				return {
-					state: {
-						...s,
-						answers: s.answers + 1,
-						ask: null,
-						notes: [JSON.stringify(e.annotations)],
-					},
-				};
-			case "all":
-				return {
-					state: { ...s, ask: "A", agents: 1, turn: 1, effect: true },
-					notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
-				};
-			case "agent":
-				return {
-					state: {
-						...s,
-						agents: Number(e.count ?? 1),
-						turn: s.turn + 1,
-						paused: false,
-					},
-					notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
-				};
-			case "manual":
-				return { state: { ...s, agents: 2, turn: -1 } };
-			case "quiet":
-				return { state: { ...s, turn: 0 } };
-			case "pause":
-				return { state: { ...s, paused: true } };
-			case "cancel":
-				return { state: { ...s, agents: 0, effect: false, ask: null } };
-			case "effect":
-				return { state: { ...s, effect: true } };
-			case "effect_done":
-				if (s.ask === "reject fact") return { reject: "unexpected result" };
-				return {
-					state: {
-						...s,
-						facts: [...s.facts, String((e.result as JsonObject).value)],
-					},
-				};
-			case "effect_failed":
-				return { state: { ...s, facts: [...s.facts, String(e.error)] } };
-			case "agent_stalled":
-				return {
-					state: {
-						...s,
-						stalls: s.stalls + 1,
-						notes: [String(e.cause)],
-						turn: 0,
-					},
-				};
-			case "publish":
-				return {
-					state: { ...s, publications: s.publications + 1, turn: 0 },
-					reply: "published once",
-				};
-			case "reject":
-				return { reject: "not allowed" };
-			case "bounce":
-				return {
-					state: { ...s, publications: s.publications + 1 },
-					send: [{ lane: "shared", work: null, event: { kind: "forbidden" } }],
-				};
-			case "forward":
-				return {
-					state: s,
-					send: [{ lane: "shared", work: null, event: { kind: "hello" } }],
-				};
-			case "tamper": {
-				const view = world.view("shared", null) as { seen: string[] };
-				view.seen.push("intruder");
-				return { state: s };
-			}
-			case "cycle":
-				return {
-					state: s,
-					send: [
-						{
-							lane: "toy",
-							work: world.work,
-							event: { kind: "cycle", n: Number(e.n ?? 0) + 1 },
+const toyLane = defineLane(
+	{
+		name: "toy",
+		state: Toy,
+		view: (s) => s,
+		reduce(s, e, world) {
+			switch (e.kind) {
+				case "ask":
+					return { state: { ...s, ask: String(e.basis) } };
+				case "answered":
+					return {
+						state: {
+							...s,
+							answers: s.answers + 1,
+							ask: null,
+							notes: [JSON.stringify(e.annotations)],
 						},
-					],
-				};
-			default:
-				return { state: s };
-		}
-	},
-	asks: (s, facts) =>
-		s.ask === null ||
-		(s.ask === "dependent" &&
-			// @ts-expect-error a declaration cannot depend on another lane
-			!facts.view?.("shared")?.seen.length)
-			? []
-			: Array.from({ length: s.ask === "A" ? 2 : 1 }, () => ({
-					subject: subject("review"),
-					basis: s.ask!,
-					title: "Review",
-					choices: ["accept"] as const,
-				})),
-	agents: (s) =>
-		Array.from({ length: s.agents }, (_, i) => ({
-			key: agentKey(`worker/${i}`),
-			role: s.ask === "designers" ? "designer" : "worker",
-			cwd: null,
-			paused: s.paused,
-			expects:
-				s.turn === 0
-					? []
-					: [
+					};
+				case "all":
+					return {
+						state: { ...s, ask: "A", agents: 1, turn: 1, effect: true },
+						notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
+					};
+				case "agent":
+					return {
+						state: {
+							...s,
+							agents: Number(e.count ?? 1),
+							turn: s.turn + 1,
+							paused: false,
+						},
+						notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
+					};
+				case "manual":
+					return { state: { ...s, agents: 2, turn: -1 } };
+				case "quiet":
+					return { state: { ...s, turn: 0 } };
+				case "pause":
+					return { state: { ...s, paused: true } };
+				case "cancel":
+					return { state: { ...s, agents: 0, effect: false, ask: null } };
+				case "effect":
+					return { state: { ...s, effect: true } };
+				case "effect_done":
+					if (s.ask === "reject fact") return { reject: "unexpected result" };
+					return {
+						state: {
+							...s,
+							facts: [...s.facts, String((e.result as JsonObject).value)],
+						},
+					};
+				case "effect_failed":
+					return { state: { ...s, facts: [...s.facts, String(e.error)] } };
+				case "agent_stalled":
+					return {
+						state: {
+							...s,
+							stalls: s.stalls + 1,
+							notes: [String(e.cause)],
+							turn: 0,
+						},
+					};
+				case "publish":
+					return {
+						state: { ...s, publications: s.publications + 1, turn: 0 },
+						reply: "published once",
+					};
+				case "reject":
+					return { reject: "not allowed" };
+				case "bounce":
+					return {
+						state: { ...s, publications: s.publications + 1 },
+						send: [
+							{ lane: "shared", work: null, event: { kind: "forbidden" } },
+						],
+					};
+				case "forward":
+					return {
+						state: s,
+						send: [{ lane: "shared", work: null, event: { kind: "hello" } }],
+					};
+				case "tamper": {
+					const view = world.view("shared", null) as { seen: string[] };
+					view.seen.push("intruder");
+					return { state: s };
+				}
+				case "cycle":
+					return {
+						state: s,
+						send: [
 							{
-								token: token(`worker/${i}`, Math.abs(s.turn)),
-								tools: ["publish"],
-								input: s.turn < 0 ? null : () => "work",
+								lane: "toy",
+								work: world.work,
+								event: { kind: "cycle", n: Number(e.n ?? 0) + 1 },
 							},
 						],
-		})),
-	effects: (s) =>
-		s.effect ? [{ key: effectKey("once"), spec: { value: "outside" } }] : [],
-});
+					};
+				default:
+					return { state: s };
+			}
+		},
+		asks: (s, facts) =>
+			s.ask === null ||
+			(s.ask === "dependent" &&
+				// @ts-expect-error a declaration cannot depend on another lane
+				!(facts.view?.("shared") as { seen: string[] } | undefined)?.seen
+					.length)
+				? []
+				: Array.from({ length: s.ask === "A" ? 2 : 1 }, () => ({
+						subject: subject("review"),
+						basis: s.ask!,
+						title: "Review",
+						choices: ["accept"] as const,
+					})),
+		agents: (s) =>
+			Array.from({ length: s.agents }, (_, i) => ({
+				key: agentKey(`worker/${i}`),
+				role: s.ask === "designers" ? "designer" : "worker",
+				cwd: null,
+				paused: s.paused,
+				expects:
+					s.turn === 0
+						? []
+						: [
+								{
+									token: token(`worker/${i}`, Math.abs(s.turn)),
+									tools: ["publish"],
+									input: s.turn < 0 ? null : () => "work",
+								},
+							],
+			})),
+		effects: (s) =>
+			s.effect ? [{ key: effectKey("once"), spec: { value: "outside" } }] : [],
+	},
+	toyFixture,
+);
 
 export async function toy({
 	storage = new MemoryStorage(),
 	observe = async () => {},
 	runEffect = async () => ({ value: "outside" }),
-}: {
+	...composition
+}: Partial<Parameters<typeof createKernel>[0]> & {
 	storage?: Storage;
 	observe?: () => Promise<void>;
-	runEffect?: () => Promise<JsonObject>;
 } = {}) {
 	const publish = defineLaneTool({
 		lane: "toy",
@@ -234,6 +245,7 @@ export async function toy({
 	const k = createKernel({
 		lanes: [toyLane, shared],
 		tools: [publish],
+		...composition,
 		runEffect,
 	});
 	const registry = createRegistry();
@@ -255,7 +267,10 @@ export async function toy({
 		ctx,
 	);
 	const root = await harness.root(ctx, {
-		agent: { cwd: "/projects/quant-engine" },
+		agent: {
+			...(await harness.commit(k.entry, ctx)),
+			cwd: "/projects/quant-engine",
+		},
 	});
 	const deliver = (lane: string, id: ConversationId | null, event: LaneEvent) =>
 		harness.commit(
