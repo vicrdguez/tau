@@ -317,7 +317,8 @@ test("a protected path holds an ordinary item; direction reaches the worker but 
 	assert.equal(approved.event.base, merged);
 	assert.equal(approved.event.sha, sha);
 	assert.deepEqual(approved.event.protectedChanges, touched.changes);
-	assert.match(String(approved.event.brief), /inspect edges/);
+	assert.doesNotMatch(String(approved.event.brief), /inspect edges/);
+	assert.match(String(approved.event.direction), /inspect edges/);
 	assert.equal(b.agent("worker").expects.length, 0);
 	b.send({
 		kind: "rework",
