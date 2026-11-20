@@ -229,6 +229,25 @@ test("approving with outstanding riders cannot bind; acceptance and delegation s
 	assert.ok(!labels.includes("B"));
 	assert.equal(x.answer("rider/1/C", "accept").send?.length ?? 0, 0);
 });
+test("accepting an incidental choice does not manufacture an Encode obligation without a seam or rule", () => {
+	const x = run();
+	x.act({
+		...start,
+		audit: { exists: "Reports use plain text.", gaps: [], contradictions: [] },
+	});
+	x.publish({
+		...draft,
+		seams: [],
+		nodes: [],
+		settlements: [],
+		riders: [draft.riders[1]!],
+	});
+	x.answer("rider/1/B", "accept");
+	x.answer("mandate/1", "approve");
+	const m = x.state().mandate!;
+	assert.ok(mandateLabels(m).includes("B"));
+	assert.equal(m.encodeRequired, false);
+});
 test("rework preserves ranges and refuses missing, duplicate, extra, invalid or empty replies; a removed rider's answer is stale", () => {
 	const x = review();
 	const annotations = [note(1, "Prefer native."), note(2, "Explain the cost.")];
