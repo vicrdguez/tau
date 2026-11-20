@@ -120,3 +120,21 @@ test("starts planned without trunk can share only keel's first trunk creation", 
 	const later = { ...f.start, key: "start:44", branch: layout.buildBranch("44") };
 	is(await f.run(later), "started");
 });
+
+test("git inside a proof reads ordinary owner config without keel's graft hint", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	const config = join(f.root, "owner.gitconfig");
+	git(f.root, "config", "--file", config, "keel.test", "from owner");
+	const previous = process.env.GIT_CONFIG_GLOBAL;
+	process.env.GIT_CONFIG_GLOBAL = config;
+	t.after(() => {
+		if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+		else process.env.GIT_CONFIG_GLOBAL = previous;
+	});
+	const result = await f.run({ ...op, checks: [{
+		id: "owner git", timeoutMs: 5000, argv: ["sh", "-ec", "git log -1 --format=; git config --get keel.test"]
+	}] });
+	is(result, "merged");
+	assert.equal(result.checks[0]!.tail.trim(), "from owner");
+});
