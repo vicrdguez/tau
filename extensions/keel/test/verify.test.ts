@@ -106,6 +106,7 @@ function flow() {
 			head,
 			base: "worker-base",
 			itemKind: "build",
+			paths: ["ledger/amounts.ts"],
 			protectedChanges: [],
 			allowed: false,
 			trunk: null,
@@ -354,6 +355,19 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	assert.match(x.asks()[0]!.basis, /Two claimed fixes failed on totals/);
 	assert.match(x.asks()[0]!.basis, /float is exact/);
 	assert.match(x.asks()[0]!.basis, /not exact/);
+});
+test("an item verifier binds policy for the published fences, without leaking them into full-set review", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	assert.deepEqual(x.agent().expects[0]!.paths, ["ledger/amounts.ts"]);
+	x.pass();
+	x.clean();
+	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+	x.clean();
+	x.handoff();
+	x.checkout();
+	assert.deepEqual(x.agent().expects[0]!.paths ?? [], []);
 });
 test("unaddressed reappearances and unrelated blocks never spend a fix; superseding a failed checkout removes its original target", () => {
 	const x = flow();
