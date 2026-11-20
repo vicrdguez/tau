@@ -73,3 +73,21 @@ test("integration reports a protected deletion hidden at publish by an unmerged 
 	assert.deepEqual(result.touched, ["check.sh"]);
 	assert.deepEqual(await f.run(plan), result);
 });
+
+test("criss-cross publish conservatively reports changes against every best base", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	git(f.root, "switch", f.branch);
+	await writeFile(join(f.root, "check"), "build");
+	git(f.root, "add", "check");
+	git(f.root, "commit", "-m", "add check");
+	const side = git(f.root, "rev-parse", "HEAD");
+	git(f.root, "merge", "--no-edit", item.item);
+	git(f.worker.path, "merge", "--no-edit", side);
+	const result = await f.publish();
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.touched, ["book", "check"]);
+	const filtered = await f.publish(["c*"]);
+	assert.equal(filtered.kind, "ok");
+	assert.deepEqual(filtered.touched, ["check"]);
+});
