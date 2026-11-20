@@ -459,11 +459,10 @@ test("publish rejects dirt, detachment, and unrelated history; reports both ends
 	git(f.worker.path, "add", "-A");
 	git(f.worker.path, "commit", "-m", "rename");
 	const result = await f.publish();
-	assert.deepEqual(result, {
-		kind: "ok",
-		sha: git(f.worker.path, "rev-parse", "HEAD"),
-		touched: ["book", "new book"],
-	});
+	assert.equal(result.kind, "ok");
+	assert.equal(result.sha, git(f.worker.path, "rev-parse", "HEAD"));
+	assert.deepEqual(result.touched, ["book", "new book"]);
+	assert.equal(result.base, f.base);
 	assert.deepEqual(await f.publish(), result);
 	const protectedOnly = await f.publish(["new *"]);
 	assert.equal(protectedOnly.kind, "ok");
@@ -541,11 +540,11 @@ test("git ignores inherited redirection/config, replacement refs and a graft at 
 	const before = { ...process.env };
 	try {
 		Object.assign(process.env, poison);
-		assert.deepEqual(await f.publish(["b*"]), {
-			kind: "ok",
-			sha: merge.item,
-			touched: ["book"],
-		});
+		const result = await f.publish(["b*"]);
+		assert.equal(result.kind, "ok");
+		assert.equal(result.sha, merge.item);
+		assert.deepEqual(result.touched, ["book"]);
+		assert.equal(result.base, f.base);
 		assert.equal(
 			(await readRepo(nodeExec, f.root)).commonDir,
 			f.repo.commonDir,
