@@ -1,9 +1,9 @@
 import { arr, int, obj, oneOf, opt, str } from "tau/schema";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
+	type Ask,
 	defineLane,
 	defineLaneTool,
-	type KernelEvent,
 	type Lane,
 	prose,
 } from "../../kernel/lane.ts";
@@ -28,6 +28,17 @@ const draft = obj({
 	protectedPaths: arr(text),
 });
 export const designTools = [
+	defineLaneTool({
+		lane: "design",
+		roles: ["designer"],
+		name: "request_cancel",
+		gate: "standing",
+		description:
+			"When the owner asks to cancel this work, open a confirmation decision. This call does not cancel it.",
+		parameters: obj({}),
+		terminate: true,
+		event: () => ({ kind: "request_cancel" }),
+	}),
 	defineLaneTool({
 		lane: "design",
 		roles: ["designer"],
@@ -63,6 +74,8 @@ type State = {
 		| "precedent"
 		| "closed"
 		| "cancelled";
+	cancelRequested: boolean;
+	cleanup: { build: string[] | null; verify: string[] | null } | null;
 	reference: string;
 	mandate: Mandate | null;
 	readings: string[];
@@ -76,6 +89,8 @@ const doc = defineState<State>({
 	version: 1,
 	initial: () => ({
 		phase: "entry",
+		cancelRequested: false,
+		cleanup: null,
 		reference: "",
 		mandate: null,
 		readings: [],
@@ -104,6 +119,18 @@ const resumed = prose(
 	"../../prose/inputs/design/resumed.md",
 	["direction"],
 );
+const confirmation = prose(
+	import.meta.dirname,
+	"../../prose/documents/cancel-work.md",
+	["goal"],
+);
+const cleanupNote = prose(
+	import.meta.dirname,
+	"../../prose/documents/cancel-cleanup.md",
+	["goal", "kept"],
+);
+const goal = (s: State) => s.mandate?.intent ?? s.reference;
+
 function invalid(m: Mandate) {
 	const labels = mandateLabels(m);
 	return (
@@ -131,6 +158,38 @@ export const design: Lane<State> = {
 	effects: () => [],
 	reduce(s, e, w) {
 		switch (e.kind) {
+			case "request_cancel":
+				if (
+					s.phase === "entry" ||
+					s.phase === "closed" ||
+					s.phase === "cancelled"
+				)
+					return { reject: "There is no open work to cancel." };
+				return { state: { ...s, cancelRequested: true } };
+			case "cleanup_finished": {
+				if (
+					!s.cleanup ||
+					(e.lane !== "build" && e.lane !== "verify") ||
+					s.cleanup[e.lane] !== null
+				)
+					return { state: s };
+				const cleanup = { ...s.cleanup, [e.lane]: e.kept as string[] };
+				if (!cleanup.build || !cleanup.verify)
+					return { state: { ...s, cleanup } };
+				const kept = [...cleanup.build, ...cleanup.verify];
+				return {
+					state: { ...s, cleanup: null },
+					notes: [
+						{
+							agent: null,
+							text: cleanupNote({
+								goal: goal(s),
+								kept: kept.length ? kept.join("\n") : "Nothing kept.",
+							}),
+						},
+					],
+				};
+			}
 			case "ground": {
 				if (!["entry", "directed", "resumed"].includes(s.phase))
 					return { reject: "Ground has no open turn." };
@@ -145,16 +204,24 @@ export const design: Lane<State> = {
 						if (!proposed || invalid(proposed) || e.readings)
 							return {
 								reject:
-									"Give a Mandate with distinct labels, a probe for each rule and timed proof commands.",
+									"Give distinct rule labels and check IDs; intent and protectedPaths are reserved. Each rule needs a probe and each proof a timed command.",
 							};
 						const mandate = {
-							...proposed,
+							intent: proposed.intent,
+							nodes: proposed.nodes,
+							checks: proposed.checks,
 							protectedPaths: [
 								...new Set([...proposed.protectedPaths, ".keel/**"]),
 							],
 						};
 						return {
-							state: { ...s, phase: "bound", mandate, reference },
+							state: {
+								...s,
+								phase: "bound",
+								mandate,
+								reference,
+								direction: "",
+							},
 							send: [toBuild(w.work!, { kind: "bound", mandate })],
 						};
 					}
@@ -196,38 +263,6 @@ export const design: Lane<State> = {
 						return { reject: "Unknown Ground route." };
 				}
 			}
-			case "answered": {
-				const a = e as Extract<KernelEvent, { kind: "answered" }>;
-				if (s.phase !== "ambiguous" || a.subject !== subject("ground/" + s.seq))
-					return { reject: "This ambiguity is no longer open." };
-				if (a.choice === "decline") return { state: { ...s, phase: "closed" } };
-				if (a.choice !== "first" && a.choice !== "second")
-					return { reject: "Unknown reading." };
-				const direction = [
-					s.readings[a.choice === "first" ? 0 : 1],
-					...a.annotations.map((n) => n.n + ". " + n.text),
-				].join("\n");
-				return {
-					state: { ...s, phase: "directed", direction, seq: s.seq + 1 },
-				};
-			}
-			case "agent_stalled": {
-				if (s.phase !== "directed" && s.phase !== "resumed")
-					return { state: s };
-				const cause = "ground/" + s.seq;
-				return {
-					state: { ...s, phase: "held", cause },
-					send: [
-						fileHolding({
-							work: w.work!,
-							lane: "design",
-							item: null,
-							cause,
-							evidence: [e.cause, e.lastWords].join(": "),
-						}),
-					],
-				};
-			}
 			case "resume": {
 				if (s.phase !== "held" || s.cause !== e.cause)
 					return { reject: "No such Ground hold." };
@@ -237,43 +272,123 @@ export const design: Lane<State> = {
 						phase: "resumed",
 						seq: s.seq + 1,
 						cause: null,
-						direction: [s.direction, e.evidence, e.direction].join("\n"),
+						direction: [e.evidence, e.direction].filter(Boolean).join("\n"),
 					},
 				};
 			}
 			case "cancel":
-				return { state: { ...s, phase: "cancelled", cause: null } };
+				return s.phase === "cancelled"
+					? { state: s }
+					: {
+							state: {
+								...s,
+								phase: "cancelled",
+								cause: null,
+								direction: "",
+								cancelRequested: false,
+								cleanup: { build: null, verify: null },
+							},
+						};
 			case "closed":
-				return { state: { ...s, phase: "closed" } };
+				return {
+					state: {
+						...s,
+						phase: "closed",
+						direction: "",
+						cancelRequested: false,
+					},
+				};
 			default:
 				return { reject: "Unknown Design event: " + e.kind };
 		}
 	},
+	onFact(s, e, w) {
+		if (e.kind === "answered") {
+			if (s.cancelRequested && e.subject === subject("cancel")) {
+				return {
+					state: { ...s, cancelRequested: false },
+					send:
+						e.choice === "cancel"
+							? [
+									{
+										lane: "queue",
+										work: null,
+										event: { kind: "cancel_work", work: w.work! },
+									},
+								]
+							: [],
+				};
+			}
+			if (s.phase !== "ambiguous" || e.subject !== subject("ground/" + s.seq))
+				return { state: s };
+			if (e.choice === "decline")
+				return { state: { ...s, phase: "closed", cancelRequested: false } };
+			if (e.choice !== "first" && e.choice !== "second") return { state: s };
+			const direction = [
+				s.readings[e.choice === "first" ? 0 : 1],
+				...e.annotations.map((n) => n.n + ". " + n.text),
+			].join("\n");
+			return { state: { ...s, phase: "directed", direction, seq: s.seq + 1 } };
+		}
+		if (
+			e.kind === "agent_stalled" &&
+			(s.phase === "directed" || s.phase === "resumed") &&
+			e.agent === agentKey("designer") &&
+			e.tokens.includes(token("ground", s.seq))
+		) {
+			const cause = "ground/" + s.seq;
+			return {
+				state: { ...s, phase: "held", direction: "", cause },
+				send: [
+					fileHolding({
+						work: w.work!,
+						lane: "design",
+						item: null,
+						cause,
+						goal: goal(s),
+						evidence: [e.cause, e.lastWords].join(": "),
+						resume: "Give the designer a new Ground turn with your direction.",
+					}),
+				],
+			};
+		}
+		return { state: s };
+	},
 	asks(s) {
-		if (s.phase !== "ambiguous") return [];
-		const basis = ground({
-			reference: s.reference,
-			first: s.readings[0]!,
-			second: s.readings[1]!,
-		});
-		return [
-			{
-				subject: subject(`ground/${s.seq}`),
+		const result: Ask[] = [];
+		if (s.phase === "ambiguous") {
+			const basis = ground({
+				reference: s.reference,
+				first: s.readings[0]!,
+				second: s.readings[1]!,
+			});
+			result.push({
+				subject: subject("ground/" + s.seq),
 				title: basis.split("\n", 1)[0]!,
 				basis,
 				choices: ["first", "second", "decline"],
-			},
-		];
+			});
+		}
+		if (s.cancelRequested) {
+			const basis = confirmation({ goal: goal(s) });
+			result.push({
+				subject: subject("cancel"),
+				title: basis.split("\n", 1)[0]!,
+				basis,
+				choices: ["cancel", "continue"],
+			});
+		}
+		return result;
 	},
 	agents: (s) =>
-		s.phase === "entry" || s.phase === "closed" || s.phase === "cancelled"
+		s.phase === "entry"
 			? []
 			: [
 					{
 						key: agentKey("designer"),
 						role: "designer",
 						cwd: null,
-						paused: s.phase === "held",
+						paused: false,
 						expects:
 							s.phase === "directed" || s.phase === "resumed"
 								? [

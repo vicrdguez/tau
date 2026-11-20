@@ -1,8 +1,8 @@
-Resume {{scope}} in work {{work}}, or cancel the work?
+Work on hold: {{goal}}
 
-Choose `resume` to release this hold. Add your direction as annotations. Keel sends them to {{scope}} with the evidence. Other holds stay in place.
-
-Choose `cancel` to stop work {{work}}. A landing already in progress finishes and reports its result.
-
-Evidence:
+{{scope}} reports:
 {{evidence}}
+
+`resume`: {{resume}} Add direction as annotations. Other holds stay in place.
+{{allow}}
+`cancel`: Stop this work and clean up its checkouts. A landing already running finishes and reports its result.

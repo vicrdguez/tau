@@ -1,7 +1,7 @@
 import { subject, type WorkId } from "../../kernel/ids.ts";
 import {
+	type Accepted,
 	defineLane,
-	type KernelEvent,
 	type Message,
 	prose,
 	type Reduction,
@@ -11,7 +11,7 @@ import { queueFixture } from "./fixture.ts";
 import type { Holding, Resume } from "./public.ts";
 
 type Finding = Holding & {
-	status: "open" | "resumed" | "cancelled";
+	status: "open" | "resumed" | "allowed" | "cancelled";
 };
 type FileFinding = { kind: "file" } & Holding;
 type QueueState = { findings: Finding[] };
@@ -19,8 +19,29 @@ type QueueState = { findings: Finding[] };
 const question = prose(
 	import.meta.dirname,
 	"../../prose/documents/holding-finding.md",
-	["work", "scope", "evidence"],
+	["goal", "scope", "evidence", "resume", "allow"],
 );
+const permission = prose(
+	import.meta.dirname,
+	"../../prose/documents/allow-publication.md",
+	[],
+)({});
+function cancel(state: QueueState, work: WorkId): Accepted<QueueState> {
+	return {
+		state: {
+			findings: state.findings.map((f) =>
+				f.work === work && f.status === "open"
+					? { ...f, status: "cancelled" }
+					: f,
+			),
+		},
+		send: ["design", "build", "verify"].map((lane) => ({
+			lane,
+			work,
+			event: { kind: "cancel" },
+		})),
+	};
+}
 const address = ({ work, lane, cause }: Omit<Finding, "status">) =>
 	subject(`finding/${work}/${lane}/${cause}`);
 
@@ -36,8 +57,7 @@ export const queueLane = defineLane(
 		}),
 		reduce(state, event): Reduction<QueueState> {
 			if (event.kind === "file") {
-				const { work, lane, cause, item, evidence } = event as FileFinding;
-				const filing = { work, lane, cause, item, evidence };
+				const { kind: _, ...filing } = event as FileFinding;
 				if (state.findings.some((f) => address(f) === address(filing)))
 					return { state };
 				return {
@@ -46,37 +66,41 @@ export const queueLane = defineLane(
 					},
 				};
 			}
-			if (event.kind !== "answered")
-				return { reject: `Unknown queue event: ${event.kind}` };
-			const answer = event as Extract<KernelEvent, { kind: "answered" }>;
+			if (event.kind === "cancel_work")
+				return cancel(state, event.work as WorkId);
+			return { reject: `Unknown queue event: ${event.kind}` };
+		},
+		onFact(state, answer) {
+			if (answer.kind !== "answered") return { state };
 			const finding = state.findings.find(
 				(f) => f.status === "open" && address(f) === answer.subject,
 			);
 			if (!finding) return { state };
 			const { work, lane, item, cause, evidence } = finding;
-			if (answer.choice === "cancel") {
-				return {
-					state: {
-						findings: state.findings.map((f) =>
-							f.work === work && f.status === "open"
-								? { ...f, status: "cancelled" }
-								: f,
-						),
-					},
-					send: ["design", "build", "verify"].map((lane) => ({
-						lane,
-						work,
-						event: { kind: "cancel" },
-					})),
-				};
-			}
-			if (answer.choice !== "resume")
-				return { reject: `Unknown finding choice: ${answer.choice}` };
+			if (answer.choice === "cancel") return cancel(state, work);
+			if (
+				answer.choice !== "resume" &&
+				!(answer.choice === "allow" && finding.allow)
+			)
+				return { state };
 			const direction = answer.annotations
 				.map((a) => `${a.n}. ${a.text}`)
 				.join("\n");
 			const send: Message[] = [];
-			if (item !== null)
+			if (direction)
+				send.push({
+					lane: "verify",
+					work,
+					event: {
+						kind: "finding_direction",
+						lane,
+						item,
+						cause,
+						evidence,
+						direction,
+					},
+				});
+			if (answer.choice === "resume" && item !== null)
 				send.push({
 					lane: "verify",
 					work,
@@ -86,7 +110,7 @@ export const queueLane = defineLane(
 				lane,
 				work,
 				event: {
-					kind: "resume",
+					kind: answer.choice,
 					cause,
 					item,
 					evidence,
@@ -96,7 +120,12 @@ export const queueLane = defineLane(
 			return {
 				state: {
 					findings: state.findings.map((f) =>
-						f === finding ? { ...f, status: "resumed" } : f,
+						f === finding
+							? {
+									...f,
+									status: answer.choice === "allow" ? "allowed" : "resumed",
+								}
+							: f,
 					),
 				},
 				send,
@@ -107,7 +136,9 @@ export const queueLane = defineLane(
 				.filter((f) => f.status === "open")
 				.map((f) => {
 					const basis = question({
-						work: String(f.work),
+						goal: f.goal,
+						resume: f.resume,
+						allow: f.allow ? permission : "",
 						scope: [f.lane, f.item].filter(Boolean).join("/"),
 						evidence: f.evidence,
 					});
@@ -115,7 +146,9 @@ export const queueLane = defineLane(
 						subject: address(f),
 						title: basis.split("\n", 1)[0] ?? basis,
 						basis,
-						choices: ["resume", "cancel"] as const,
+						choices: f.allow
+							? (["allow", "resume", "cancel"] as const)
+							: (["resume", "cancel"] as const),
 					};
 				}),
 		view: (state) => ({

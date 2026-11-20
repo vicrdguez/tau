@@ -8,7 +8,10 @@ type QueueV1 = {
 		item: string | null;
 		cause: string;
 		evidence: string;
-		status: "open" | "resumed" | "cancelled";
+		goal: string;
+		resume: string;
+		allow?: boolean;
+		status: "open" | "resumed" | "allowed" | "cancelled";
 	}[];
 };
 export const queueFixture = {
@@ -22,6 +25,8 @@ export const queueFixture = {
 				cause: "thread/1",
 				evidence: "The predicate still fails after two fixes.",
 				status: "open",
+				goal: "Check the predicate.",
+				resume: "Send the evidence to the worker for rework.",
 			},
 		],
 	}),

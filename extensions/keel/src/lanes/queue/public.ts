@@ -2,6 +2,9 @@ import type { WorkId } from "../../kernel/ids.ts";
 import type { Message } from "../../kernel/lane.ts";
 
 export type Holding = {
+	goal: string;
+	resume: string;
+	allow?: boolean;
 	work: WorkId;
 	lane: "design" | "build" | "verify";
 	item: string | null;
@@ -9,7 +12,7 @@ export type Holding = {
 	evidence: string;
 };
 export type Resume = {
-	kind: "resume";
+	kind: "resume" | "allow";
 	item: string | null;
 	cause: string;
 	evidence: string;

@@ -1,6 +1,6 @@
 ## Intent
 
-Give the owner's goal and a falsifiable done predicate. Use the label `intent` for this node.
+Give the owner's goal and a falsifiable done predicate. Keel supplies the reserved labels `intent` and `protectedPaths`; do not repeat either as a rule label or a check ID. Rule labels and check IDs share one label namespace.
 
 ## Rules
 
