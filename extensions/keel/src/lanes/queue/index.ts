@@ -10,7 +10,8 @@ import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
 import type { Holding, Resume } from "./public.ts";
 
-type Finding = Holding & {
+type Finding = Omit<Holding, "allow"> & {
+	allow: boolean;
 	status: "open" | "resumed" | "allowed" | "cancelled";
 };
 type FileFinding = { kind: "file" } & Holding;
@@ -42,7 +43,11 @@ function cancel(state: QueueState, work: WorkId): Accepted<QueueState> {
 		})),
 	};
 }
-const address = ({ work, lane, cause }: Omit<Finding, "status">) =>
+const address = ({
+	work,
+	lane,
+	cause,
+}: Pick<Holding, "work" | "lane" | "cause">) =>
 	subject(`finding/${work}/${lane}/${cause}`);
 
 export const queueTools = [] as const;
@@ -62,7 +67,10 @@ export const queueLane = defineLane(
 					return { state };
 				return {
 					state: {
-						findings: [...state.findings, { ...filing, status: "open" }],
+						findings: [
+							...state.findings,
+							{ ...filing, allow: filing.allow === true, status: "open" },
+						],
 					},
 				};
 			}

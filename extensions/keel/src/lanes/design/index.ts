@@ -207,6 +207,7 @@ export const design: Lane<State> = {
 									"Give distinct rule labels and check IDs; intent and protectedPaths are reserved. Each rule needs a probe and each proof a timed command.",
 							};
 						const mandate = {
+							reviewed: false,
 							intent: proposed.intent,
 							nodes: proposed.nodes,
 							checks: proposed.checks,

@@ -16,7 +16,7 @@ export const designV1 = {
 		cleanup: null as { build: string[] | null; verify: string[] | null } | null,
 		reference: "",
 		mandate: null as null | {
-			reviewed?: boolean;
+			reviewed: boolean;
 			intent: string;
 			nodes: { label: string; rule: string; probe: string }[];
 			checks: { id: string; argv: string[]; timeoutMs: number }[];
