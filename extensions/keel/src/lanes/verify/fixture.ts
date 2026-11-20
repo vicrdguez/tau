@@ -104,6 +104,7 @@ type V1 = {
 		outcome: "pass" | "fail";
 		text: string;
 		blocks: BlockV1[];
+		diagnose: string[];
 		notes: string[];
 		addresses: string[];
 	}[];
