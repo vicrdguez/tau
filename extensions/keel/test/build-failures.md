@@ -16,4 +16,14 @@
 - A full-set thread reaches the correction brief and worker. The worker can still claim that thread after an item-level rework, but cannot invent a claim.
 - The shipped Build document matches its independent version-1 fixture.
 
+## Reviewed Mandate and principles (slice 4)
+
+- A reviewed Mandate with seams or rules refuses a missing or misplaced Encode, and any later item without a direct dependency on the first Encode.
+- A reviewed Mandate without seams or rules can start with ordinary work.
+- The first plan must answer every approval annotation exactly once by number with a valid disposition and a nonblank reason. Fabricated numbers are refused.
+- Planning shows numbered approval notes and bound nodes. The accepted replies are kept, and the brief carries the cited node's label and content.
+- A correction adds work without reopening the first plan's approval replies or scheduling a second initial Encode.
+- A worker input supplies its fences for project principles. Only a rework in which a claimed fix survived triggers the premise check.
+- A ruling preserves cited principle names through publication; a worker cannot cite an undelivered principle.
+
 The scripted real-repository scenarios cover the tool-to-git boundary, authenticated model roles, durable publication and recovery. Kernel and repo suites cover retry timing, stale decisions, lock evidence, and exact path matching. Lane tests exercise the decisions above without filesystem or model scheduling.

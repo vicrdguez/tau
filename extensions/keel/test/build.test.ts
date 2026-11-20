@@ -8,6 +8,8 @@ import { drive } from "./fixtures/drive.ts";
 
 const mandate = {
 	reviewed: false,
+	encodeRequired: false,
+	approvalNotes: [] as string[],
 	intent: "repair pricing",
 	nodes: [{ label: "price", rule: "round once", probe: "0.05" }],
 	protectedPaths: ["tests/**"],
@@ -38,6 +40,7 @@ const ruling = {
 	cost: "migration",
 	rank: 2,
 	follows: "existing price model",
+	principles: [],
 };
 const item = { id: "fix", kind: "build", goal: "fix rounding", deps: [] };
 const clean = {
@@ -93,10 +96,10 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 		const done = (result: JsonObject) =>
 			send({ kind: "effect_done", key: effect().key, result });
-		function start() {
+		function start(bound = { ...mandate, reviewed }) {
 			send({
 				kind: "bound",
-				mandate: { ...mandate, reviewed },
+				mandate: bound,
 			});
 			assert.deepEqual(effect().spec, {
 				kind: "read_repo",
@@ -186,6 +189,75 @@ test("plans refuse unsafe or duplicate IDs, empty plans, missing dependencies an
 	])
 		assert.ok("reject" in b.tryEvent({ kind: "plan", items }));
 	assert.deepEqual(b.effects(), []);
+});
+
+const reviewed = {
+	...mandate,
+	reviewed: true,
+	encodeRequired: true,
+	approvalNotes: ["Cover cash ties", "Keep the integer seam"],
+	nodes: [{ label: "cash-port", rule: "Price takes cents", probe: "fractional cents fail" }],
+};
+const encode = { ...item, kind: "encode", goal: "protect the cash port" };
+const replies = [
+	{ n: 2, status: "considered", reason: "the seam already takes integers" },
+	{ n: 1, status: "acted_on", reason: "pin the tie predicate in the scaffold" },
+];
+
+test("a reviewed seam requires Encode first and a direct dependency from every later item", () => {
+	const b = setup();
+	b.start({ ...reviewed, approvalNotes: [] });
+	const later = { ...item, id: "later" };
+	for (const items of [
+		[item],
+		[later, encode],
+		[encode, later],
+		[encode, { ...later, deps: ["fix"] }, { ...item, id: "end", deps: ["later"] }],
+	]) {
+		const result = b.tryEvent({ kind: "plan", items });
+		assert.match("reject" in result ? result.reject : "", /encode/i);
+	}
+	b.send({ kind: "plan", items: [encode, { ...later, deps: ["fix"] }] });
+	assert.match(b.request("coordinator").text, /protect the cash port/);
+});
+
+test("approval notes require a numbered reply each; the first plan and its cited nodes survive briefing and correction", () => {
+	const b = setup();
+	b.start(reviewed);
+	const prompt = b.request("coordinator").text;
+	assert.match(prompt, /1\. Cover cash ties/);
+	assert.match(prompt, /2\. Keep the integer seam/);
+	assert.match(prompt, /Price takes cents/);
+	for (const bad of [
+		[], replies.slice(1), [replies[0]!, replies[0]!],
+		[replies[0]!, { ...replies[1]!, n: 3 }],
+		[replies[0]!, { ...replies[1]!, status: "ignored" }],
+		[replies[0]!, { ...replies[1]!, reason: "  " }],
+	]) {
+		const r = b.tryEvent({ kind: "plan", items: [encode], replies: bad });
+		assert.match("reject" in r ? r.reject : "", /repl|annotat/i);
+	}
+	const first = b.send({ kind: "plan", items: [encode], replies });
+	assert.deepEqual(first.state.approvalReplies, replies);
+	b.send({ kind: "brief", ...brief, nodes: ["cash-port"] });
+	b.done({ kind: "worktree", base: repo.trunkHead });
+	const report = String(b.pub().send![0]!.event.brief);
+	assert.match(report, /cash-port/);
+	assert.match(report, /Price takes cents/);
+	assert.match(report, /fractional cents fail/);
+	b.send({ kind: "merged", item: "fix", head: merged });
+	b.done({ kind: "removed" });
+	b.send({ kind: "handoff", summary: "port ready", risk: "none" });
+	b.send({ kind: "rework", item: "full", head: merged, threads: ["proof"], evidence: "tie proof failed" });
+	const correction = b.send({ kind: "plan", items: [{ ...item, id: "proof", deps: ["fix"] }] });
+	assert.deepEqual(correction.state.approvalReplies, replies);
+});
+
+test("reviewed work without seams or rules can start with ordinary work", () => {
+	const b = setup();
+	b.start({ ...reviewed, encodeRequired: false, approvalNotes: [] });
+	b.send({ kind: "plan", items: [item] });
+	assert.deepEqual(b.request("coordinator").tools, ["brief_item"]);
 });
 
 test("briefs require ready work and bound labels; only a confirmed worktree starts a worker", () => {
