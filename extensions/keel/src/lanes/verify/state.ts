@@ -42,6 +42,7 @@ export type Verdict = {
 	outcome: "pass" | "fail";
 	text: string;
 	blocks: Block[];
+	diagnose: string[];
 	notes: string[];
 	addresses: string[];
 };

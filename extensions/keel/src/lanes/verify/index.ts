@@ -410,6 +410,7 @@ export const verify: Lane<State> = {
 							reject:
 								"Pass with no blocks, or fail with distinct grounded threads and evidence.",
 						};
+					const diagnose: string[] = [];
 					s.verdicts.push({
 						item: c.item,
 						scope: c.scope,
@@ -418,6 +419,7 @@ export const verify: Lane<State> = {
 						outcome: e.outcome,
 						text: e.text,
 						blocks,
+						diagnose,
 						notes: e.notes,
 					});
 					if (e.outcome === "pass") {
@@ -425,17 +427,16 @@ export const verify: Lane<State> = {
 						c.phase = c.scope === "item" ? "ready" : "passed";
 						break;
 					}
-					let diagnose = false;
 					for (const id of ids) {
 						const scope = c.scope === "item" ? "item" : "full";
 						const t = s.threads.find(
 							(t) => t.item === c.item && t.scope === scope && t.id === id,
 						);
 						if (!t) s.threads.push({ item: c.item, scope, id, survived: 0 });
-						else if (c.addresses.includes(id))
-							diagnose = ++t.survived >= 2 || diagnose;
+						else if (c.addresses.includes(id) && ++t.survived >= 2)
+							diagnose.push(id);
 					}
-					if (diagnose) {
+					if (diagnose.length) {
 						if (c.scope === "landing") release();
 						c.phase = "diagnose";
 						c.turn = ++s.seq;
@@ -463,7 +464,7 @@ export const verify: Lane<State> = {
 					c.phase = "nonconvergent";
 					hold(
 						c.item,
-						`Two claimed fixes failed. ${JSON.stringify(v.blocks)}\nPremise: ${e.premise}\nTest: ${e.test}\nResult: ${e.result}`,
+						`Two claimed fixes failed on ${v.diagnose.join(", ")}. ${JSON.stringify(v.blocks)}\nPremise: ${e.premise}\nTest: ${e.test}\nResult: ${e.result}`,
 					);
 					break;
 				}

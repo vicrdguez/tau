@@ -1,4 +1,4 @@
-The block survived two builds that claimed to fix it. The verdicts identify the thread and the commits involved.
+Threads that survived two claimed fixes: {{threads}}. The verdicts identify the commits involved.
 
 {{facts}}
 

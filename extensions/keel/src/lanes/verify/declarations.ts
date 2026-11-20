@@ -29,6 +29,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", [
 	"facts",
 	"principle",
+	"threads",
 ]);
 const principle = prose(dir, "principles/attack-the-premise.md", [])({});
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
@@ -91,7 +92,11 @@ function input(s: State, c: Review) {
 					: "rework";
 	const task =
 		c.phase === "diagnose"
-			? diagnose({ facts, principle })
+			? diagnose({
+					facts,
+					principle,
+					threads: history.at(-1)!.diagnose.join(", "),
+				})
 			: inputs[situation]!({ facts });
 	return c.direction ? resume({ direction: c.direction, task }) : task;
 }
