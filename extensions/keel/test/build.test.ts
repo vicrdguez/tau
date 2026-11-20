@@ -747,6 +747,36 @@ test("cancel without a worker acknowledges completion; unclaimed worktree creati
 	);
 });
 
+test("a claimed start may still create a ref; cancel waits for that exact result, never opening planning", () => {
+	const b = setup();
+	b.send({ kind: "bound", mandate });
+	b.done({ kind: "repo", repo });
+	const start = b.effect();
+	Object.assign(b.world, { runningEffect: (key: string) => key === start.key });
+	assert.equal(b.send({ kind: "cancel" }).send?.length ?? 0, 0);
+	assert.deepEqual(b.effects(), []);
+	assert.equal(
+		b.send({ kind: "effect_failed", key: "stale", error: "unrelated" }).send
+			?.length ?? 0,
+		0,
+	);
+	assert.deepEqual(
+		b.send({
+			kind: "effect_done",
+			key: start.key,
+			result: { kind: "started", base: repo.trunkHead },
+		}).send,
+		[
+			{
+				lane: "design",
+				work,
+				event: { kind: "cleanup_finished", lane: "build", kept: [] },
+			},
+		],
+	);
+	assert.deepEqual(b.agents(), []);
+});
+
 test("cancel drains an existing removal exactly once and includes an earlier kept worker", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
