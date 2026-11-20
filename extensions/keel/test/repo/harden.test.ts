@@ -91,3 +91,19 @@ test("criss-cross publish conservatively reports changes against every best base
 	assert.equal(filtered.kind, "ok");
 	assert.deepEqual(filtered.touched, ["check"]);
 });
+
+test("a merged head must contain the current worker before ignored outputs may be discarded", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	const nested = join(f.worker.path, "output");
+	git(f.worker.path, "init", nested);
+	git(nested, "-c", "user.name=test", "-c", "user.email=t@test", "commit", "--allow-empty", "-m", "only copy");
+	const onlyCopy = git(nested, "rev-parse", "HEAD");
+	await writeFile(join(f.repo.commonDir, "info/exclude"), "output/\n");
+	const remove = {kind: "remove", key: "drop", target: f.worker, merged: true} as const;
+	is(await f.run({...remove, mergedHead: f.base}), "kept");
+	assert.equal(git(nested, "rev-parse", "HEAD"), onlyCopy);
+	const merged = await f.run(item);
+	is(merged, "merged");
+	is(await f.run({...remove, mergedHead: merged.sha}), "removed");
+});
