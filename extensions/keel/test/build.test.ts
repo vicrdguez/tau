@@ -394,6 +394,30 @@ test("a discovery resumed after bad options reads the current base and trunk", (
 	assert.deepEqual(b.effect().spec,{kind:"read_repo",base:"stable",trunk:"release"});
 });
 
+test("only an attributed trunk move refreshes a start plan, and the refreshed snapshot must still match", () => {
+	for (const race of [false,true]) {
+		const b=setup();
+		b.send({kind:"bound",mandate});
+		b.done({kind:"repo",repo});
+		const old=b.effect();
+		const refresh=b.done({kind:"moved",actual:merged,keelMoved:true});
+		assert.equal(refresh.send?.length ?? 0,0);
+		assert.equal(b.effect().spec.kind,"read_repo");
+		const snapshot={...repo,trunkHead:race?sha:merged};
+		b.done({kind:"repo",repo:snapshot});
+		if (race) {
+			// Replay the original start so repo must attribute this second move too.
+			assert.deepEqual(b.effect().spec,old.spec);
+			const held=b.done({kind:"moved",actual:sha}).send![0]!.event;
+			assert.match(String(held.resume),/same pinned/i);
+			assert.deepEqual(b.effects(),[]);
+		} else {
+			assert.notEqual((b.effect().spec.op as JsonObject).key,(old.spec.op as JsonObject).key);
+			assert.deepEqual(b.effect().spec.repo,snapshot);
+		}
+	}
+});
+
 test("a start that failed after a possible CAS keeps its immutable git plan on explicit retry", () => {
 	const b = setup();
 	b.send({ kind: "bound", mandate });
