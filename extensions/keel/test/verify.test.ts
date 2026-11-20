@@ -752,6 +752,45 @@ test("policy files cannot be waived at merge even for Encode; resume returns evi
 	x.clean();
 	assert.deepEqual(x.effects(), []);
 });
+test("full verifier sees the protected files each merge actually changed, distinguishing an owner waiver from an ordinary addition", () => {
+	const x = pendingMerge();
+	const added = { ...change("tests/new"), kind: "added" };
+	x.done("merge_item", {
+		kind: "merged",
+		sha: "merged",
+		checks: [],
+		protectedChanges: [change("tests/balance"), added],
+	});
+	x.clean();
+	x.handoff();
+	x.checkout();
+	const input = x.agent().expects[0]!.input!();
+	assert.match(input, /tests\/balance[^\n]*owner allowed/i);
+	assert.match(input, /tests\/new[^\n]*no owner waiver/i);
+});
+test("a second stopped turn receives the new direction, not a replay of instructions already delivered", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	function stop() {
+		const a = x.agent();
+		const f = x.apply({
+			kind: "agent_stalled",
+			agent: a.key,
+			tokens: [a.expects[0]!.token],
+			cause: "stopped",
+			lastWords: "paused",
+		}).send?.[0]?.event;
+		assert.ok(f);
+		return f;
+	}
+	x.apply({ ...resume(stop()), direction: "inspect rounding" });
+	assert.match(x.agent().expects[0]!.input!(), /inspect rounding/);
+	x.apply({ ...resume(stop()), direction: "inspect carries" });
+	const next = x.agent().expects[0]!.input!();
+	assert.match(next, /inspect carries/);
+	assert.doesNotMatch(next, /inspect rounding/);
+});
 test("all finding directions survive handoff, including answers before the first publication", () => {
 	const x = flow();
 	for (const lane of ["design", "build", "verify"])
