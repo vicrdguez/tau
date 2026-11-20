@@ -341,9 +341,8 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			repo: s.repo!,
 			head: s.head!,
 			mandate: s.mandate!,
-			brief: [renderReport(s, i, p.summary), direction]
-				.filter(Boolean)
-				.join("\n"),
+			brief: renderReport(s, i, p.summary),
+			...(direction && { direction }),
 			rulings: i.rulings,
 		});
 	}
