@@ -12,12 +12,14 @@ import {
 	oid,
 	success,
 } from "./git.ts";
+import { changeReport, holds } from "./protection.ts";
 import type {
 	Check,
 	CheckReport,
 	Integrate,
 	Landing,
 	ProofChanges,
+	ProtectedChange,
 	RepoInfo,
 	RepoResult,
 } from "./types.ts";
@@ -27,7 +29,6 @@ import {
 	freeBranch,
 	integrationCheckout,
 	ownedBranch,
-	touchedPaths,
 	zlist,
 } from "./worktrees.ts";
 
@@ -116,7 +117,7 @@ export async function integrate(
 				sha: at,
 				trunk,
 				checks: [],
-				...(protectedGlobs ? { touched: [] } : {}),
+				...(protectedGlobs ? { touched: [], protectedChanges: [] } : {}),
 			};
 		}
 	}
@@ -149,11 +150,26 @@ export async function integrate(
 		taking ? "Take trunk" : op.message,
 	);
 	if (at !== op.expected && at !== candidate) moved(at);
-	const paths = protectedGlobs
-		? {
-				touched: await touchedPaths(g, op.expected, candidate, protectedGlobs),
-			}
-		: {};
+	let paths: { touched?: string[]; protectedChanges?: ProtectedChange[] } = {};
+	if (protectedGlobs) {
+		const policy = "protection" in op ? op.protection : null;
+		const { changes, touched } = await changeReport(
+			g,
+			[op.expected],
+			other,
+			candidate,
+			policy?.trunk ?? null,
+			policy ? [...protectedGlobs, ".keel/**"] : protectedGlobs,
+		);
+		if (policy && holds(changes, policy, candidate))
+			return {
+				kind: "protected",
+				sha: candidate,
+				touched,
+				protectedChanges: changes,
+			};
+		paths = { touched, protectedChanges: changes };
+	}
 	const target = {
 		kind: "checkout",
 		key: op.key,

@@ -46,6 +46,18 @@ export type Landing = Readonly<{
 	combined: Sha;
 	message: string;
 }>;
+export type ProtectedChange = {
+	path: string;
+	kind: "added" | "modified" | "deleted" | "renamed";
+	before: string;
+	after: string;
+};
+export type Protection = Readonly<{
+	reviewedEncode: boolean;
+	allowedChanges: readonly ProtectedChange[];
+	allowedCandidate: Sha | null;
+	trunk: Sha | null;
+}>;
 type IntegrationPlan =
 	| Readonly<{
 			kind: "merge_item";
@@ -69,7 +81,11 @@ type IntegrationPlan =
 // Stored JSON plans either omit the field entirely or carry a list, never undefined.
 export type Integrate =
 	| IntegrationPlan
-	| (IntegrationPlan & { readonly protectedGlobs: readonly string[] });
+	| (IntegrationPlan & { readonly protectedGlobs: readonly string[] })
+	| (Extract<IntegrationPlan, { kind: "merge_item" }> & {
+			readonly protectedGlobs: readonly string[];
+			readonly protection: Protection;
+	  });
 export type Remove = Readonly<{
 	kind: "remove";
 	key: string;
@@ -88,7 +104,7 @@ export type RepoOp =
 
 export type Obstruction =
 	| { kind: "occupied"; path: string }
-	| { kind: "moved"; actual: Sha | null };
+	| { kind: "moved"; actual: Sha | null; keelMoved?: true };
 export type RepoResult =
 	| Obstruction
 	| { kind: "started"; base: Sha }
@@ -97,13 +113,21 @@ export type RepoResult =
 	| { kind: "removed" }
 	| { kind: "kept"; reason: string; files: readonly string[] }
 	| {
+			kind: "protected";
+			sha: Sha;
+			touched: readonly string[];
+			protectedChanges: readonly ProtectedChange[];
+	  }
+	| {
 			kind: "merged";
+			protectedChanges?: readonly ProtectedChange[];
 			touched?: readonly string[];
 			sha: Sha;
 			checks: readonly CheckReport[];
 	  }
 	| {
 			kind: "combined";
+			protectedChanges?: readonly ProtectedChange[];
 			touched?: readonly string[];
 			sha: Sha;
 			trunk: Sha;
@@ -112,6 +136,7 @@ export type RepoResult =
 	| { kind: "conflict"; paths: readonly string[]; against: Sha }
 	| {
 			kind: "checks_failed";
+			protectedChanges?: readonly ProtectedChange[];
 			touched?: readonly string[];
 			sha: Sha;
 			checks: readonly CheckReport[];
@@ -123,6 +148,13 @@ export type RepoResult =
 
 export type PublishResult =
 	| Obstruction
-	| { kind: "ok"; sha: Sha; touched: readonly string[] }
+	| {
+			kind: "ok";
+			sha: Sha;
+			base: Sha;
+			trunk: Sha | null;
+			touched: readonly string[];
+			changes: readonly ProtectedChange[];
+	  }
 	| { kind: "dirty"; files: readonly string[] }
 	| { kind: "not_descendant" };

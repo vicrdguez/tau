@@ -7,14 +7,17 @@ import {
 	key,
 	moved,
 	occupied,
+	oid,
 	report,
 } from "./git.ts";
 import { integrate, landingCommit } from "./integrate.ts";
+import { changeReport } from "./protection.ts";
 import type {
 	PublishResult,
 	RepoInfo,
 	RepoOp,
 	RepoResult,
+	Sha,
 	Worker,
 } from "./types.ts";
 import {
@@ -22,15 +25,16 @@ import {
 	creation,
 	dirt,
 	inspect,
+	landedSince,
 	markdown,
 	materialize,
 	ownedBranch,
 	remove,
-	touchedPaths,
 	workerSpec,
 } from "./worktrees.ts";
 
 export { type Exec, layout, nodeExec } from "./git.ts";
+export { protectedViolations } from "./protection.ts";
 export type * from "./types.ts";
 
 function roles(base: string, trunk: string) {
@@ -91,8 +95,11 @@ export function converge(
 				if (
 					(at !== null && at !== base) ||
 					(at === null && repo.trunkHead !== null)
-				)
+				) {
+					if (at && (await landedSince(g, repo.trunk, base, at)))
+						return { kind: "moved", actual: at, keelMoved: true };
 					moved(at);
+				}
 				if (repo.trunkHead === null && !(await creation(g, repo.trunk, base)))
 					await advance(g, repo.trunk, null, base, op.key, true);
 				await advance(g, op.branch, null, base, op.key);
@@ -143,13 +150,14 @@ export function converge(
 	});
 }
 
-/** No model-supplied revision or pathspec magic. Disabling rename detection makes
- * moving a protected file OUT of a protected directory visible as a deletion. */
+/** Only Build may supply the sanctioned correction trunk; never infer a waiver
+ * of inherited changes from a live ref or a model-supplied commit. */
 export function readPublishable(
 	exec: Exec,
 	repo: RepoInfo,
 	worker: Worker,
 	protectedGlobs?: readonly string[],
+	inheritedTrunk: Sha | null = null,
 ): Promise<PublishResult> {
 	return report(async (): Promise<PublishResult> => {
 		workerSpec(repo, worker);
@@ -164,19 +172,21 @@ export function readPublishable(
 		const build = await g.head(worker.from);
 		if (build === null) moved(null);
 		await ownedBranch(g, worker.from);
-		let touched: string[] = [];
-		if (protectedGlobs?.length !== 0) {
-			const bases = (await g.output("merge-base", "--all", build, owned.head))
-				.trimEnd()
-				.split("\n");
-			for (const base of bases)
-				touched = touched.concat(
-					await touchedPaths(g, base, owned.head, protectedGlobs),
-				);
-			if (bases.length > 1) touched.sort();
-		}
+		const bases = (await g.output("merge-base", "--all", build, owned.head))
+			.trimEnd()
+			.split("\n")
+			.sort()
+			.map((b) => oid(b) as Sha);
+		const paths = await changeReport(
+			g,
+			bases,
+			owned.head,
+			owned.head,
+			inheritedTrunk,
+			protectedGlobs && [...protectedGlobs, ".keel/**"],
+		);
 		const at = await g.head(worker.branch);
 		if (at !== owned.head) moved(at);
-		return { kind: "ok", sha: owned.head, touched: [...new Set(touched)] };
+		return { kind: "ok", sha: owned.head, trunk: inheritedTrunk, ...paths };
 	});
 }

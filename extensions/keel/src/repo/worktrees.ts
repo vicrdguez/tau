@@ -203,6 +203,36 @@ export async function creation(
 	return false;
 }
 
+/** Only a continuous chain of keel landings from the snapshot explains a stale
+ * start. A matching SHA after a manual reset/write is not that evidence. */
+export async function landedSince(
+	g: Git,
+	name: BranchName,
+	base: Sha,
+	tip: Sha,
+) {
+	const log = await g.output(
+		"reflog",
+		"show",
+		"--format=%H%x00%P%x00%gs",
+		"refs/heads/" + name,
+	);
+	let next: string = tip;
+	for (const line of log.trimEnd().split("\n")) {
+		const [sha, parent, action] = line.split("\0");
+		if (
+			sha !== next ||
+			!action?.startsWith(`keel advance ${name} `) ||
+			!parent ||
+			parent.includes(" ")
+		)
+			return false;
+		if (parent === base) return true;
+		next = parent;
+	}
+	return false;
+}
+
 export async function advance(
 	g: Git,
 	name: BranchName,
@@ -218,7 +248,8 @@ export async function advance(
 		"--no-deref",
 		"--create-reflog",
 		"-m",
-		(old === null ? creationPrefix(name) : "keel advance ") + key(effect),
+		(old === null ? creationPrefix(name) : `keel advance ${name} `) +
+			key(effect),
 		ref,
 		oid(to),
 		old === null ? "0".repeat(to.length) : oid(old),
