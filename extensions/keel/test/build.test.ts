@@ -494,17 +494,28 @@ test("a worker racing a recorded merge is prepared from the new head without own
 test("resume recognizes a merge recorded after a worker first reported moved", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind:"brief", ...brief });
-	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
-	b.send({kind:"brief", ...brief,item:"other"});
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.send({ kind: "brief", ...brief, item: "other" });
 	const first = b.effect();
 	b.pub();
-	const finding = b.done({kind:"moved",actual:merged}).send![0]!.event;
-	b.send({kind:"merged",item:"fix",head:merged});
-	b.send({kind:"resume",item:"other",cause:finding.cause!,direction:"continue",evidence:""});
-	const next=b.effects().find(e=>(e.spec.op as JsonObject).kind==="worktree")!;
-	assert.notEqual((next.spec.op as JsonObject).key,(first.spec.op as JsonObject).key);
-	assert.equal((next.spec.op as JsonObject).base,merged);
+	const finding = b.done({ kind: "moved", actual: merged }).send![0]!.event;
+	b.send({ kind: "merged", item: "fix", head: merged });
+	b.send({
+		kind: "resume",
+		item: "other",
+		cause: finding.cause!,
+		direction: "continue",
+		evidence: "",
+	});
+	const next = b
+		.effects()
+		.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
+	assert.notEqual(
+		(next.spec.op as JsonObject).key,
+		(first.spec.op as JsonObject).key,
+	);
+	assert.equal((next.spec.op as JsonObject).base, merged);
 });
 
 test("a discovery resumed after bad options reads the current base and trunk", () => {
