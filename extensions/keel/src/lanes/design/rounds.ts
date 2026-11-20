@@ -189,7 +189,13 @@ function basis(a: Audit, reference: string, history: Round[]) {
 		removed: prev ? removed(prev, r.draft, a).join(", ") || "None." : "None.",
 		riders:
 			r.draft.riders
-				.map((v) => `- ${v.label} (${v.origin}): ${v.text}`)
+				.map((v) => {
+					const prior =
+						prev && sameRider(prev, v)
+							? prev.riders.find((p) => p.label === v.label)?.answer?.choice
+							: null;
+					return `- ${v.label} (${v.origin}${prior ? "; " + prior : ""}): ${v.text}`;
+				})
 				.join("\n") || "None.",
 		replies: repliesText(r, prev),
 	});
@@ -301,7 +307,11 @@ export function declineText(r: Round) {
 				.join("\n") || "None.",
 	});
 }
-export function binding(a: Audit, history: Round[]): Mandate {
+export function binding(
+	a: Audit,
+	reference: string,
+	history: Round[],
+): Mandate {
 	const r = history.at(-1)!;
 	const d = r.draft;
 	const ns = nodes(d, a).filter(
@@ -316,15 +326,35 @@ export function binding(a: Audit, history: Round[]): Mandate {
 	return {
 		reviewed: true,
 		encodeRequired: d.seams.length + d.nodes.length > 0 || accepted.length > 0,
-		approvalNotes: history.flatMap((v) =>
-			v.answer?.choice === "approve"
-				? v.answer.annotations.map((a) => a.text)
-				: [],
-		),
+		approvalNotes: history.flatMap((v, i) => {
+			if (v.answer?.choice !== "approve" || !v.answer.annotations.length)
+				return [];
+			const doc = basis(a, reference, history.slice(0, i + 1));
+			return v.answer.annotations.map((n) =>
+				n.range
+					? `${n.text}\n> ${doc.slice(n.range.start, n.range.end)}`
+					: n.text,
+			);
+		}),
+		delegated: d.riders
+			.filter((p) =>
+				r.riders.some(
+					(v) => p.label === v.label && v.answer?.choice === "leave_open",
+				),
+			)
+			.map(({ label, text }) => ({ label, text })),
 		intent: `${d.intent}\n\nDone when: ${d.done}`,
 		nodes: [
-			...ns.map((n) => ({ label: n.label, rule: n.body, probe: n.probe })),
-			...accepted.map((v) => ({ label: v.label, rule: v.text, probe: "" })),
+			...ns.map(({ label, section, body, probe }) =>
+				section === "Rule"
+					? { label, rule: body, probe }
+					: { label, section, body },
+			),
+			...accepted.map((v) => ({
+				label: v.label,
+				section: "Accepted rider",
+				body: v.text,
+			})),
 		],
 		checks: d.checks,
 		protectedPaths: paths(d),

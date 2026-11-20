@@ -63,10 +63,8 @@ export type Audit = {
 	gaps: Observation[];
 	contradictions: Observation[];
 };
-export type Draft = Pick<
-	Mandate,
-	"intent" | "nodes" | "checks" | "protectedPaths"
-> & {
+export type Draft = Pick<Mandate, "intent" | "checks" | "protectedPaths"> & {
+	nodes: { label: string; rule: string; probe: string }[];
 	done: string;
 	seams: {
 		label: string;
@@ -102,13 +100,13 @@ const rulingText = prose(dir, "ground-ruling.md", ["observation", "ruling"]);
 const proofText = prose(dir, "proof-command.md", ["argv", "timeout"]);
 const validText = (s: string) => !!s.trim();
 const unique = (xs: string[]) => new Set(xs).size === xs.length;
-export function validLabels(xs: string[]) {
+function validLabels(xs: string[]) {
 	return (
 		unique(xs) &&
 		xs.every((l) => validText(l) && l === l.trim() && !/[\r\n]/.test(l))
 	);
 }
-export const issueLabels = (a: Audit) =>
+const issueLabels = (a: Audit) =>
 	[...a.gaps, ...a.contradictions].map((n) => n.label);
 export function validAudit(a: Audit) {
 	return (
@@ -203,7 +201,7 @@ export function draftError(d: Draft, a: Audit) {
 		return "State each rider and its origin.";
 	return null;
 }
-export type Node = {
+type Node = {
 	label: string;
 	section: string;
 	body: string;

@@ -155,6 +155,7 @@ function draftTurn(s: State) {
 	return {
 		token: token("draft", s.seq),
 		tools: ["publish_mandate"],
+		situation: "shape",
 		input: () => designerInput(s.audit!, s.reference, s.rounds, s.direction),
 	};
 }
@@ -228,7 +229,7 @@ export const design: Lane<State> = {
 					};
 				switch (e.route) {
 					case "follow": {
-						const proposed = e.mandate as Mandate | undefined;
+						const proposed = e.mandate as Draft | undefined;
 						if (!proposed || !validSmall(proposed) || e.readings || e.audit)
 							return {
 								reject:
@@ -237,6 +238,7 @@ export const design: Lane<State> = {
 						const mandate = {
 							reviewed: false,
 							encodeRequired: false,
+							delegated: [],
 							approvalNotes: [],
 							intent: proposed.intent,
 							nodes: proposed.nodes,
@@ -360,7 +362,7 @@ export const design: Lane<State> = {
 				const next = { ...s, ...outcome };
 				switch (outcome.phase) {
 					case "bound": {
-						const mandate = binding(s.audit!, outcome.rounds);
+						const mandate = binding(s.audit!, s.reference, outcome.rounds);
 						return {
 							state: { ...next, mandate },
 							send: [toBuild(w.work!, { kind: "bound", mandate })],
