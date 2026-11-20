@@ -25,11 +25,11 @@ export function zlist(value: string) {
 	return value.split("\0").filter(Boolean);
 }
 
-export async function touchedPaths(g: Git, from: Sha, to: Sha, globs?: readonly string[], mergeBase = false) {
+export async function touchedPaths(g: Git, from: string, to: Sha, globs?: readonly string[]) {
 	if (globs?.length === 0 || from === to) return [];
 	return zlist(await g.output(
 		"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none",
-		"--name-only", "-z", ...(mergeBase ? ["--merge-base"] : []), from, to, "--",
+		"--name-only", "-z", oid(from), oid(to), "--",
 		...(globs ?? []).map((glob) => ":(top,glob)" + glob),
 	));
 }
