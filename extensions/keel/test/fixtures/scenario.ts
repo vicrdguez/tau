@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
@@ -58,9 +59,9 @@ export async function openScenario(
 		{
 			registry,
 			models,
-			env: ({ cwd }) =>
+			env: (target) =>
 				new NodeExecutionEnv({
-					cwd: cwd!,
+					cwd: target.cwd ?? cwd,
 					shellEnv: {
 						...process.env,
 						GIT_CONFIG_NOSYSTEM: "1",
@@ -290,6 +291,18 @@ export async function openScenario(
 			},
 			expected,
 		);
+		const checkouts = ops.filter((op) => op?.kind === "checkout");
+		assert.equal(
+			checkouts.length,
+			Math.max(1, expected.reviews),
+			"exactly one durable checkout plan per published review",
+		);
+		if (expected.reviews > 0) {
+			for (const checkout of checkouts)
+				await assert.rejects(access(String(checkout?.path)), {
+					code: "ENOENT",
+				});
+		}
 		if (expected.reviews === 0)
 			assert.equal(
 				slots.filter((a) => a.role === "verifier").length,
@@ -317,14 +330,19 @@ export async function openScenario(
 				.then((p) => Object.values(p?.asks ?? {}));
 		const open = await asks();
 		assert.equal(open.length, 1, "just the hand-over is open");
+		const [handOver] = open;
+		assert.ok(handOver);
 		const d = await harness.commit(
-			(tx) => decision(tx, open[0]!.decision),
+			(tx) => decision(tx, handOver.decision),
 			ctx,
 		);
 		assert.ok(d?.status === "open");
 		assert.deepEqual([...d.choices].sort(), ["accept", "reject"]);
 		const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
-		const rendered = String(basis?.data?.text);
+		assert.ok(
+			basis?.data && typeof basis.data === "object" && "text" in basis.data,
+		);
+		const rendered = String(basis.data.text);
 		for (const part of [trunk, goal, what, note, risk])
 			assert.ok(
 				rendered.includes(part),
