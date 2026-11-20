@@ -63,7 +63,16 @@ test("rulings admit delivered and pulled bodies, not index-only names, another w
 	const {cwd,put}=await checkout(t);
 	await put("on-desk","Worker policy.","roles: [worker]\n","Bound body.");
 	await put("lookup","Read by judgement.","","Original body.");
-	const x=await toy({tools:[cite], plainTools:principleTools,input:principleInputs});
+	// Replay the first pull on the very same durable task, after its source changed.
+	let replayed=false;
+	const plainTools=principleTools.map(({roles,tool})=>({roles,tool:{...tool,async execute(...call:Parameters<typeof tool.execute>) {
+		const result=await tool.execute(...call);
+		if(replayed) return result;
+		replayed=true;
+		await put("lookup","Read by judgement.","","This was never delivered.");
+		return tool.execute(...call);
+	}}}));
+	const x=await toy({tools:[cite], plainTools,input:principleInputs});
 	t.after(()=>x.harness.close(ctx));
 	await x.harness.commit(tx=>configure(tx,x.root.id,{cwd}),ctx);
 	await x.send("agent",{count:2});
@@ -90,6 +99,7 @@ test("rulings admit delivered and pulled bodies, not index-only names, another w
 	assert.match((await pull()).text,/Original body/);
 	await put("lookup","Read by judgement.","","Replacement body.");
 	assert.match((await pull()).text,/Replacement body/);
+	assert.equal((await a.entries({},100,undefined,ctx)).items.filter(e=>e.kind==="keel.pull").length,2,"one durable pull per call, including under replay");
 	assert.equal((await call(b,"cite","lookup")).error,true);
 	assert.equal((await call(a,"cite","lookup")).error,false);
 	x.provider.setResponses([fauxAssistantMessage([fauxToolCall("cite",{name:"on-desk"})],{stopReason:"toolUse"})]);
