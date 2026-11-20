@@ -295,6 +295,21 @@ test("an added .keel symlink is owner policy even for Encode, including an exact
 	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
 });
 
+test("a case variant of the policy directory is unwaivable at publication and integration", async (t) => {
+	const f = await fixture(t);
+	const item = await f.item();
+	await mkdir(join(f.worker.path, ".KEEL"));
+	await writeFile(join(f.worker.path, ".KEEL", "rule"), "policy");
+	git(f.worker.path, "add", ".KEEL/rule");
+	git(f.worker.path, "commit", "-m", "policy with different casing");
+	const pub = await f.publish([]);
+	assert.equal(pub.kind, "ok");
+	const { protectedViolations } = await import("../../src/repo/index.ts");
+	assert.deepEqual(protectedViolations(pub.changes, true).map(c => c.path), [".KEEL/rule"]);
+	is(await f.run({ ...item, item: pub.sha, protectedGlobs: [], protection: { ...protection, reviewedEncode: true, allowedChanges: pub.changes } }), "protected");
+	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+});
+
 test("a publication waiver does not cover different content at the same protected path", async (t) => {
 	const f = await fixture(t);
 	const lines = Array.from({ length: 20 }, (_, i) => `line ${i}\n`);
