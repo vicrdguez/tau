@@ -4,8 +4,8 @@ import type { ConversationId } from "tau/durable";
 import { type WorkId, workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, RegisteredLane, World } from "../src/kernel/lane.ts";
 import { queueLane, queueTools } from "../src/lanes/queue/index.ts";
-import { drive } from "./fixtures/drive.ts";
 import { trunkLane } from "../src/lanes/verify/trunk.ts";
+import { drive } from "./fixtures/drive.ts";
 
 const id = (n: number) => workId(n as ConversationId);
 const a = id(1),
