@@ -269,13 +269,11 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 	x.publish(revised, [reply(2), reply(1)]);
 	assert.equal(x.state().rounds.length, 2);
 	assert.deepEqual(
-		x
-			.state()
-			.rounds[0]!.answer?.annotations.map(({ n, text, range }) => ({
-				n,
-				text,
-				range,
-			})),
+		x.state().rounds[0]!.answer?.annotations.map(({ n, text, range }) => ({
+			n,
+			text,
+			range,
+		})),
 		annotations,
 	);
 	assert.deepEqual(x.state().rounds[0]!.draft, draft);
