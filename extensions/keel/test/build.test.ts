@@ -666,23 +666,25 @@ test("a worker racing a recorded merge is prepared from the new head without own
 	assert.equal((next.spec.op as JsonObject).base, merged);
 });
 
-test("resume recognizes a merge recorded after a worker first reported moved", () => {
+function preparingBesidePublication() {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
 	b.send({ kind: "brief", ...brief });
 	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
 	b.send({ kind: "brief", ...brief, item: "other" });
-	const first = b.effect();
 	b.pub();
-	const finding = b.done({ kind: "moved", actual: merged }).send![0]!.event;
-	b.send({ kind: "merged", item: "fix", head: merged });
-	b.send({
-		kind: "resume",
-		item: "other",
-		cause: finding.cause!,
-		direction: "continue",
-		evidence: "",
-	});
+	return b;
+}
+
+test("a later-recorded merge explains a moved preparation without filing a finding", () => {
+	const b = preparingBesidePublication();
+	const first = b.effect();
+	assert.deepEqual(b.done({ kind: "moved", actual: merged }).send ?? [], []);
+	assert.deepEqual(b.effects(), []);
+	assert.deepEqual(
+		b.send({ kind: "merged", item: "fix", head: merged }).send ?? [],
+		[],
+	);
 	const next = b
 		.effects()
 		.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
@@ -692,6 +694,150 @@ test("resume recognizes a merge recorded after a worker first reported moved", (
 	);
 	assert.equal((next.spec.op as JsonObject).base, merged);
 });
+
+for (const kind of ["merged", "rework", "integration"]) {
+	test(`a sibling's ${kind} that cannot explain a moved preparation files the observed head`, () => {
+		const b = preparingBesidePublication();
+		b.done({ kind: "moved", actual: sha });
+		const files = b.send({
+			kind,
+			item: "fix",
+			head: merged,
+			evidence: "conflict",
+			threads: [],
+		}).send;
+		assert.equal(files?.length, 1);
+		assert.equal(files[0]!.event.item, "other");
+		assert.match(String(files[0]!.event.evidence), new RegExp(sha));
+		assert.ok(
+			!b.effects().some((e) => (e.spec.op as JsonObject).kind === "worktree"),
+		);
+	});
+}
+
+function replaceOccupied(b: ReturnType<typeof setup>) {
+	const before = b.effect();
+	const hold = b.done({ kind: "occupied", path: "/foreign" }).send![0]!.event;
+	b.send({
+		kind: "resume",
+		cause: hold.cause!,
+		item: hold.item!,
+		evidence: hold.evidence!,
+		direction: "",
+	});
+	return before.spec.op as JsonObject;
+}
+
+test("only the confirmed replacement releases all its own old attempts for unmerged cleanup", () => {
+	const b = setup(2);
+	b.plan([item, { ...item, id: "other" }]);
+	b.send({ kind: "brief", ...brief });
+	const first = replaceOccupied(b);
+	const second = replaceOccupied(b);
+	const replacement = b.effect();
+	b.send({ kind: "brief", ...brief, item: "other" });
+	const sibling = b.effects().find((e) => e.key !== replacement.key)!;
+	const confirm = (key: string) =>
+		b.send({
+			kind: "effect_done",
+			key,
+			result: { kind: "worktree", base: repo.trunkHead, principles: [] },
+		});
+	confirm(sibling.key);
+	assert.deepEqual(b.effects(), [replacement]);
+	confirm(replacement.key);
+	assert.deepEqual(
+		b.effects().map((e) => (e.spec.op as JsonObject).target),
+		[first, second],
+	);
+	assert.ok(
+		b.effects().every((e) => (e.spec.op as JsonObject).merged !== true),
+	);
+	b.done({ kind: "removed" });
+	b.done({ kind: "removed" });
+	b.send({ kind: "cancel" });
+	assert.deepEqual(
+		b.effects().map((e) => (e.spec.op as JsonObject).target),
+		[replacement.spec.op, sibling.spec.op],
+	);
+});
+
+for (const denied of ["kept", "effect_failed"]) {
+	test(`an old attempt's ${denied} cleanup reports the path without holding the replacement`, () => {
+		const b = setup();
+		b.prepare();
+		const old = replaceOccupied(b);
+		b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+		const key = b.effect().key;
+		const outcome = b.send(
+			denied === "kept"
+				? {
+						kind: "effect_done",
+						key,
+						result: { kind: "kept", reason: "private", files: ["scratch"] },
+					}
+				: { kind: "effect_failed", key, error: "lost registration" },
+		);
+		const evidence = denied === "kept" ? "scratch" : "lost registration";
+		assert.ok(
+			outcome.notes?.some(
+				(n) => n.text.includes(String(old.path)) && n.text.includes(evidence),
+			),
+		);
+		assert.deepEqual(b.request("worker").tools, ["publish_build"]);
+		b.send({ kind: "cancel" });
+		const final = b.done({ kind: "removed" }).send![0]!.event;
+		assert.match(JSON.stringify(final.kept), new RegExp(evidence));
+	});
+}
+
+for (const confirmed of [false, true]) {
+	test(`cancel drains both attempts ${confirmed ? "during old checkout cleanup" : "before replacement confirmation"}`, () => {
+		const b = setup();
+		b.prepare();
+		const old = replaceOccupied(b);
+		const replacement = b.effect();
+		if (confirmed)
+			b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+		const claimed = b.effect();
+		Object.assign(b.world, {
+			runningEffect: (key: string) => key === claimed.key,
+		});
+		b.send({ kind: "cancel" });
+		const removal = b
+			.effects()
+			.find(
+				(e) =>
+					((e.spec.op as JsonObject).target as JsonObject).path === old.path,
+			)!;
+		assert.deepEqual((removal.spec.op as JsonObject).target, old);
+		if (confirmed) assert.equal(removal.key, claimed.key);
+		assert.deepEqual(
+			b.send({
+				kind: "effect_done",
+				key: removal.key,
+				result: { kind: "removed" },
+			}).send ?? [],
+			[],
+		);
+		if (!confirmed) {
+			assert.deepEqual(b.effects(), []);
+			b.send({
+				kind: "effect_done",
+				key: claimed.key,
+				result: { kind: "worktree", principles: [] },
+			});
+		}
+		assert.deepEqual(
+			(b.effect().spec.op as JsonObject).target,
+			replacement.spec.op,
+		);
+		assert.equal(
+			b.done({ kind: "removed" }).send![0]!.event.kind,
+			"cleanup_finished",
+		);
+	});
+}
 
 test("a discovery resumed after bad options reads the current base and trunk", () => {
 	const b = setup();
