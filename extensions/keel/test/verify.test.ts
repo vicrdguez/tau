@@ -90,8 +90,7 @@ function flow() {
 			mandate,
 			repo,
 			rulings,
-			brief: "repair the balance",
-			summary: "No account loses a cent.",
+			brief: "repair the balance\n\nWorker report:\nNo account loses a cent.",
 		});
 	const checkout = () =>
 		done("checkout", { kind: "checkout", playbook: "project oracle" });
