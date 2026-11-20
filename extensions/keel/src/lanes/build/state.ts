@@ -93,6 +93,7 @@ export type Build = {
 		item: string | null;
 		evidence: string;
 		obstruction: string;
+		actual: Sha | null;
 	}[];
 };
 

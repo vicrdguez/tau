@@ -15,6 +15,7 @@ import {
 	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
+	type Sha,
 } from "../../repo/index.ts";
 import { mandateLabels } from "../design/public.ts";
 import { fileHolding, type Resume } from "../queue/public.ts";
@@ -156,28 +157,34 @@ function plans(
 		];
 	});
 }
+function ourAdvance(s: Build, i: Item, actual: Sha | null) {
+	return actual !== null && actual === s.head && i.worker!.base !== actual;
+}
 function hold(
 	s: Build,
 	w: World,
 	item: string | null,
 	obstruction: string,
 	evidence: string,
+	actual: Sha | null = null,
 ): Accepted<Build> {
 	const stage = s.items.find((i) => i.id === item)?.stage;
 	const resume =
 		s.phase === "discover"
 			? "Read the repository again using the current branch options."
-			: stage === "preparing" && obstruction === "occupied"
-				? "Prepare a new worker checkout at a fresh path."
-				: s.phase === "start" || stage === "preparing" || stage === "cleaning"
-					? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
-					: obstruction === "protected" || obstruction === "policy"
-						? "Return to the worker to revise and republish; this does not allow the protected change."
-						: item
-							? "Return to the worker in the same checkout to continue and republish."
-							: "Return to the coordinator to continue the requested turn.";
+			: stage === "preparing" && obstruction === "moved"
+				? "Retry the same pinned worker preparation unless the reported move now matches a recorded build merge. In that case, prepare a fresh checkout from the recorded head."
+				: stage === "preparing" && obstruction === "occupied"
+					? "Prepare a new worker checkout at a fresh path."
+					: s.phase === "start" || stage === "preparing" || stage === "cleaning"
+						? "Retry the same pinned repository operation. A conflicting ref or path must be restored first."
+						: obstruction === "protected" || obstruction === "policy"
+							? "Return to the worker to revise and republish; this does not allow the protected change."
+							: item
+								? "Return to the worker in the same checkout to continue and republish."
+								: "Return to the coordinator to continue the requested turn.";
 	const cause = `build/${++s.seq}`;
-	s.holds.push({ cause, item, obstruction, evidence });
+	s.holds.push({ cause, item, obstruction, evidence, actual });
 	return {
 		state: s,
 		send: [
@@ -231,8 +238,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 			if (
 				i?.stage === "preparing" &&
 				result.kind === "moved" &&
-				result.actual === s.head &&
-				i.worker!.base !== s.head
+				ourAdvance(s, i, result.actual)
 			) {
 				prepare(s, i, w);
 				break;
@@ -244,6 +250,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 					id,
 					result.kind,
 					`${e.key}: ${JSON.stringify(result)}`,
+					result.kind === "moved" ? result.actual : null,
 				);
 			if (id === null && s.phase === "discover" && result.kind === "repo") {
 				s.repo = result.repo;
@@ -445,9 +452,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					s,
 					w,
 					i.id,
-					violations.some((c) => c.path.startsWith(".keel/"))
-						? "policy"
-						: "protected",
+					protectedViolations(violations, true).length ? "policy" : "protected",
 					`Protected changes in ${i.id} at ${f.sha}: ${violations.map((c) => `${c.kind}: ${c.path}`).join(", ")}`,
 				);
 			return publish(i, false);
@@ -544,7 +549,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				if (s.phase === "discover") discover(s, w);
 				else if (s.phase === "start") s.setupRetry++;
 			} else if (!held(s, i.id)) {
-				if (i.stage === "preparing" && h.obstruction === "occupied")
+				if (
+					i.stage === "preparing" &&
+					(h.obstruction === "occupied" ||
+						(h.obstruction === "moved" && ourAdvance(s, i, h.actual)))
+				)
 					prepare(s, i, w);
 				else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
 				else i.seq = ++s.seq;

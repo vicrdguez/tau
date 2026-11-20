@@ -116,6 +116,7 @@ type V1 = {
 		item: string | null;
 		evidence: string;
 		obstruction: string;
+		actual: Sha | null;
 	}[];
 };
 export const buildV1 = {
