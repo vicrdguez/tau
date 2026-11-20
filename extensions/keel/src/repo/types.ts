@@ -66,11 +66,17 @@ export type Integrate =
 			trunk: Sha;
 			checks: readonly Check[];
 	  }>;
+export type Remove = Readonly<{
+	kind: "remove";
+	key: string;
+	target: Worker | (Omit<Checkout, "sha"> & { readonly sha?: Sha });
+	merged?: boolean;
+}>;
 export type RepoOp =
 	| Readonly<{ kind: "start_build"; key: string; branch: BranchName }>
 	| Worker
 	| Checkout
-	| Readonly<{ kind: "remove"; key: string; target: Worker | Checkout }>
+	| Remove
 	| Integrate
 	| (Landing & Readonly<{ kind: "land"; target: Sha }>);
 
@@ -83,7 +89,7 @@ export type RepoResult =
 	| { kind: "worktree"; base: Sha; principles: readonly ProjectPrincipleFile[] }
 	| { kind: "checkout"; playbook: string | null }
 	| { kind: "removed" }
-	| { kind: "kept"; reason: string }
+	| { kind: "kept"; reason: string; files: readonly string[] }
 	| { kind: "merged"; sha: Sha; checks: readonly CheckReport[] }
 	| { kind: "combined"; sha: Sha; trunk: Sha; checks: readonly CheckReport[] }
 	| { kind: "conflict"; paths: readonly string[]; against: Sha }

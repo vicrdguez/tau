@@ -126,7 +126,7 @@ export function converge(
 						)?.body ?? null,
 				};
 			case "remove":
-				return remove(g, repo, op.target);
+				return remove(g, repo, op);
 			case "merge_item":
 			case "take_trunk":
 				return integrate(g, repo, op);

@@ -12,7 +12,14 @@ import {
 	part,
 	success,
 } from "./git.ts";
-import type { BranchName, Checkout, RepoInfo, Sha, Worker } from "./types.ts";
+import type {
+	BranchName,
+	Checkout,
+	Remove,
+	RepoInfo,
+	Sha,
+	Worker,
+} from "./types.ts";
 
 export function zlist(value: string) {
 	return value.split("\0").filter(Boolean);
@@ -193,7 +200,7 @@ export async function advance(
 
 export async function dirt(
 	g: Git,
-	mode: "publish" | "remove" | "proof" = "publish",
+	mode: "publish" | "remove" | "remove_merged" | "proof" = "publish",
 ) {
 	const out = await g.output(
 		"status",
@@ -207,26 +214,31 @@ export async function dirt(
 		...(mode === "remove" ? ["--ignored"] : []),
 	);
 	const files = zlist(out).map((line) => line.slice(3));
-	if (files.length) return files;
 	// status trusts assume-unchanged and skip-worktree bits. It also cannot
 	// certify the absence of ignored/private files INSIDE a submodule.
 	const index = await g.output("ls-files", "-v", "--stage", "-z");
-	return zlist(index)
+	const uncertain = zlist(index)
 		.filter(
 			(row) =>
 				/^[a-zS]/.test(row) ||
-				(mode === "remove" && row.startsWith("H 160000 ")),
+				((mode === "remove" || mode === "remove_merged") &&
+					row.startsWith("H 160000 ")),
 		)
 		.map((row) => row.slice(row.indexOf("\t") + 1));
+	return [...new Set([...files, ...uncertain])];
+}
+
+function lockReason(target: Remove["target"]) {
+	// A disposable checkout may attach to any branch. Never let its removal
+	// policy apply to a worker, even if the caller mixes up their specs.
+	return (
+		(target.kind === "checkout" ? "keel checkout " : "keel ") + key(target.key)
+	);
 }
 
 /** Registration + lock + both directions of Git's private gitdir link.
  * A stale registration alone proves nothing about the directory now there. */
-export async function inspect(
-	g: Git,
-	repo: RepoInfo,
-	target: Worker | Checkout,
-) {
+async function registered(g: Git, repo: RepoInfo, target: Remove["target"]) {
 	const { path } = target;
 	pathWork(repo, path);
 	for (const p of [join(repo.commonDir, "keel"), dirname(path), path]) {
@@ -241,7 +253,7 @@ export async function inspect(
 	if (
 		!present ||
 		!entry ||
-		entry.locked !== "keel " + key(target.key) ||
+		entry.locked !== lockReason(target) ||
 		"prunable" in entry
 	)
 		occupied(path);
@@ -270,12 +282,22 @@ export async function inspect(
 			dot
 	)
 		occupied(path);
+	return { entry, admin, wt: new Git(g.exec, path) };
+}
+
+export async function inspect(
+	g: Git,
+	repo: RepoInfo,
+	target: Worker | Checkout,
+) {
+	const owned = await registered(g, repo, target);
+	if (!owned) return null;
+	const { entry, admin, wt } = owned;
 	if (
 		target.kind === "worktree" &&
 		entry.branch !== "refs/heads/" + target.branch
 	)
-		occupied(path);
-	const wt = new Git(g.exec, path);
+		occupied(target.path);
 	const head = await wt.checkoutHead();
 	if (head !== null && head !== entry.HEAD) moved(head);
 	if (target.kind === "worktree") {
@@ -310,7 +332,7 @@ export async function ensureWorktree(
 			"add",
 			"--lock",
 			"--reason",
-			"keel " + key(target.key),
+			lockReason(target),
 			...(target.kind === "checkout" ? ["--detach"] : []),
 			"--",
 			target.path,
@@ -346,16 +368,27 @@ export async function materialize(
 export async function remove(
 	g: Git,
 	repo: RepoInfo,
-	target: Worker | Checkout,
+	{ target, merged }: Remove,
 ) {
 	if (target.kind === "worktree") workerSpec(repo, target);
-	const owned = await inspect(g, repo, target);
+	const owned =
+		target.kind === "checkout"
+			? await registered(g, repo, target)
+			: await inspect(g, repo, target);
 	if (owned) {
-		if (target.kind === "worktree" && (await dirt(owned.wt, "remove")).length)
-			return {
-				kind: "kept",
-				reason: "worker has changes or files Git cannot certify are disposable",
-			} as const;
+		if (target.kind === "worktree") {
+			const files = await dirt(
+				owned.wt,
+				merged === true ? "remove_merged" : "remove",
+			);
+			if (files.length)
+				return {
+					kind: "kept",
+					reason:
+						"worker has changes or files Git cannot certify are disposable",
+					files,
+				} as const;
+		}
 		// One force permits a dirty disposable verifier; two are required for
 		// a locked registration. Do not unlock first (that loses the proof).
 		await g.output(
