@@ -113,7 +113,6 @@ type V1 = {
 		id: string;
 		survived: number;
 	}[];
-	lastMerged: string | null;
 	handoff: {
 		base: Sha;
 		summary: string;
@@ -143,7 +142,6 @@ export const verifyFixture = {
 		holds: [],
 		verdicts: [],
 		threads: [],
-		lastMerged: null,
 		handoff: null,
 		slot: "none",
 		plan: null,
