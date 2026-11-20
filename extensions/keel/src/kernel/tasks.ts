@@ -37,7 +37,11 @@ export type StopInput = Address & {
 	key: AgentKey;
 	conversation: ConversationId;
 };
-export type DeliverInput = StopInput & { token: Token; text: string };
+export type DeliverInput = StopInput & {
+	token: Token;
+	text: string;
+	data?: JsonObject;
+};
 
 type EffectPhase = { phase: "claim" } | { phase: "run"; attempt: number };
 /** Effect code can create and recover its owned conversations, but never advance the task. */
@@ -105,7 +109,10 @@ function draft(
 				type: "input",
 				requestId,
 				content: input.text,
-				entry: { kind: "keel.input", data: { token: input.token } },
+				entry: {
+					kind: "keel.input",
+					data: { ...input.data, token: input.token },
+				},
 			};
 }
 

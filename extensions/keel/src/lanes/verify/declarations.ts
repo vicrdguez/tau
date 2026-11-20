@@ -27,18 +27,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"addresses",
 	"protected",
 ]);
-const diagnose = prose(dir, "inputs/verify/diagnosis.md", [
-	"facts",
-	"principle",
-	"threads",
-]);
-const principle = prose(
-	dir,
-	"principles/attack-the-premise.md",
-	[],
-)({})
-	.replace(/^---\n[\s\S]*?\n---\n+/, "")
-	.replace(/\[([^\]]+)\]\([^)]+\.md\)/g, "$1");
+const diagnose = prose(dir, "inputs/verify/diagnosis.md", ["facts", "threads"]);
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
 const handover = prose(dir, "documents/handover.md", [
 	"trunk",
@@ -62,7 +51,7 @@ function rulings(rs: Ruling[]) {
 		rs
 			.map(
 				(r) =>
-					`${r.what}\n  Why: ${r.why}. Cost if wrong: ${r.cost}. Follows: ${r.follows}.`,
+					`${r.what}\n  Why: ${r.why}. Cost if wrong: ${r.cost}. Follows: ${r.follows}.${r.principles.length ? ` Principles: ${r.principles.join(", ")}.` : ""}`,
 			)
 			.join("\n") || "None."
 	);
@@ -122,7 +111,6 @@ function input(s: State, c: Review) {
 		c.phase === "diagnose"
 			? diagnose({
 					facts,
-					principle,
 					threads: history.at(-1)!.diagnose.join(", "),
 				})
 			: inputs[situation]!({ facts });
@@ -149,6 +137,9 @@ export function agents(s: State): AgentDecl[] {
 										? "publish_diagnosis"
 										: "publish_verdict",
 								],
+								paths: c.paths,
+								situation:
+									c.phase === "diagnose" ? "diagnosis" : "verification",
 								input: () => input(s, c),
 							},
 						],

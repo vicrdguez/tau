@@ -14,17 +14,23 @@ import {
 } from "../roles/index.ts";
 import type { WorkId } from "./ids.ts";
 import type { Delivery, FactDelivery, RegisteredLane, Result } from "./lane.ts";
-import { reconcile } from "./reconcile.ts";
+import { type RenderInput, reconcile } from "./reconcile.ts";
 import * as records from "./records.ts";
 import { readViews, route } from "./routing.ts";
 import { stateDoc } from "./state.ts";
 import { project } from "./storage.ts";
 import { type EffectRunner, makeTasks } from "./tasks.ts";
-import { type LaneTool, wrapPlainTool, wrapTool } from "./tool.ts";
+import {
+	type CheckCitations,
+	type LaneTool,
+	wrapPlainTool,
+	wrapTool,
+} from "./tool.ts";
 
 export function createKernel(config: {
 	lanes: readonly RegisteredLane[];
 	tools: readonly LaneTool[];
+	input?: { render: RenderInput; checkCitations: CheckCitations };
 	plainTools?: readonly {
 		roles: readonly RoleName[];
 		tool: ToolRegistration;
@@ -62,6 +68,7 @@ export function createKernel(config: {
 				transact,
 				(tx, self) => readViews(tx, lanes, self.work),
 				scope,
+				config.input?.checkCitations,
 			),
 		),
 		...(config.plainTools ?? []).map(wrapPlainTool),
@@ -126,7 +133,7 @@ export function createKernel(config: {
 		}
 		const forRole = (role: RoleName) => settings(role, opts, extension, tools);
 		for (const frame of result.frames)
-			await reconcile(tx, frame, tasks, forRole, now);
+			await reconcile(tx, frame, tasks, forRole, now, config.input?.render);
 		return { reply: result.reply };
 	}
 	return {

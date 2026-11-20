@@ -1,5 +1,6 @@
 import type { Annotation, DecisionId } from "tau";
 import type { JsonObject } from "tau/durable";
+import type { ProjectPrincipleFile } from "../repo/index.ts";
 import type { KeelOptions, RoleName } from "../roles/index.ts";
 import type {
 	AgentKey,
@@ -47,6 +48,11 @@ export type Ask = {
 export type Expectation = {
 	token: Token;
 	tools: readonly string[];
+	/** Facts for the composition root's input policy, never inferred from input text. */
+	situation?: string;
+	paths?: readonly string[];
+	/** Project bindings pinned by the worktree effect. Other inputs read the current checkout. */
+	projectPrinciples?: readonly ProjectPrincipleFile[];
 	/** Null: no delivery. Only the anchor designer may answer without preceding tagged input. */
 	input: (() => string) | null;
 };

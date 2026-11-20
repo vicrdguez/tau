@@ -27,7 +27,7 @@ async function checkout(t: TestContext) {
 		body: string,
 	) =>
 		writeFile(
-			join(dir, name + ".md"),
+			join(dir, `${name}.md`),
 			`---\ndescription: "${description}"\n${bindings}---\n\n${body}\n`,
 		);
 	return { cwd, put };
@@ -97,14 +97,25 @@ test("a malformed project principle is reported without hiding healthy policy or
 	assert.doesNotMatch(index(), /unavailable/i);
 	assert.match(input(), /Repaired body/);
 });
-test("worker bindings follow the policy pinned at preparation while the index sees checkout edits", async(t)=>{
-	const {cwd,put}=await checkout(t);
-	await put("ticks","Later statement.","roles: [worker]\n","Later body");
-	const projectPrinciples=[{name:"ticks",body:'---\ndescription: "Original statement."\nroles: [worker]\n---\nOriginal body'}];
-	const {text}=principleInputs.render({cwd,role:"worker",situation:"survived_fix", projectPrinciples},"Rework.");
-	assert.match(text,/Original body/);
-	assert.doesNotMatch(text,/Later body/);
-	assert.match(indexFor(cwd,[{name:"principle"}])!,/ticks: Later statement/);
+test("worker bindings follow the policy pinned at preparation while the index sees checkout edits", async (t) => {
+	const { cwd, put } = await checkout(t);
+	await put("ticks", "Later statement.", "roles: [worker]\n", "Later body");
+	const projectPrinciples = [
+		{
+			name: "ticks",
+			body: '---\ndescription: "Original statement."\nroles: [worker]\n---\nOriginal body',
+		},
+	];
+	const { text } = principleInputs.render(
+		{ cwd, role: "worker", situation: "survived_fix", projectPrinciples },
+		"Rework.",
+	);
+	assert.match(text, /Original body/);
+	assert.doesNotMatch(text, /Later body/);
+	assert.match(
+		indexFor(cwd, [{ name: "principle" }])!,
+		/ticks: Later statement/,
+	);
 });
 test("shape binds domain modeling and only a survived fix triggers a worker's premise check", async (t) => {
 	const { cwd } = await checkout(t);

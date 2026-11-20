@@ -5,8 +5,10 @@ import {
 	type ConversationId,
 	configure,
 	defineEntry,
+	type JsonObject,
 	type Tx,
 } from "tau/durable";
+import type { ProjectPrincipleFile } from "../repo/index.ts";
 import type { RoleName } from "../roles/index.ts";
 import { agentKey, slotKey, subjectKey } from "./ids.ts";
 import type { AgentSlot } from "./records.ts";
@@ -29,6 +31,17 @@ const background = (conversationId: ConversationId) =>
 		background: true,
 	}) as const;
 
+export type RenderInput = (
+	facts: {
+		role: RoleName;
+		cwd: string;
+		situation?: string | undefined;
+		paths?: readonly string[] | undefined;
+		projectPrinciples?: readonly ProjectPrincipleFile[] | undefined;
+	},
+	text: string,
+) => { text: string; data?: JsonObject };
+
 /** All table operations here are writes. Deliveries are durable tasks, never submits. */
 export async function reconcile(
 	tx: Tx,
@@ -36,6 +49,7 @@ export async function reconcile(
 	tasks: ReturnType<typeof makeTasks>,
 	settings: (role: RoleName) => AgentChange,
 	now: number,
+	renderInput?: RenderInput,
 ) {
 	const { lane, work } = frame;
 	const address = { lane, work };
@@ -92,7 +106,7 @@ export async function reconcile(
 		if (agent.paused && slot.status === "active") await stop(agent.key, slot);
 		slot.status = agent.paused ? "paused" : "active";
 		if (!agent.paused) slot.stop = null;
-		slot.cwd = agent.cwd ?? p.root;
+		slot.cwd = agent.cwd ?? frame.root;
 		const open: AgentSlot["open"] = [];
 		for (const exp of agent.paused ? [] : agent.expects) {
 			if (open.some((e) => e.token === exp.token))
@@ -107,6 +121,17 @@ export async function reconcile(
 					throw new Error(`Reused token ${exp.token} on ${key}`);
 				slot.used.push(exp.token);
 				if (!exp.input) continue;
+				const text = exp.input();
+				const rendered = renderInput?.(
+					{
+						role: agent.role,
+						cwd: slot.cwd,
+						situation: exp.situation,
+						paths: exp.paths,
+						projectPrinciples: exp.projectPrinciples,
+					},
+					text,
+				) ?? { text };
 				await tx.createTask(
 					tasks.deliver,
 					{
@@ -114,7 +139,7 @@ export async function reconcile(
 						key: agent.key,
 						conversation: slot.conversation,
 						token: exp.token,
-						text: exp.input(),
+						...rendered,
 					},
 					background(slot.conversation),
 				);

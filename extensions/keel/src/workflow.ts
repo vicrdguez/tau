@@ -3,6 +3,11 @@ import { createKernel } from "./kernel/kernel.ts";
 import type { EffectRunner } from "./kernel/tasks.ts";
 import { lanes, tools } from "./lanes/index.ts";
 import {
+	principleInputs,
+	principleSections,
+	principleTools,
+} from "./principles/index.ts";
+import {
 	converge,
 	nodeExec,
 	type RepoInfo,
@@ -30,5 +35,12 @@ export const runRepoEffect: EffectRunner = async ({ root, spec }) => {
 	return (await converge(nodeExec, repo, op)) as JsonObject;
 };
 export function createWorkflow(runEffect: EffectRunner = runRepoEffect) {
-	return createKernel({ lanes, tools, runEffect });
+	return createKernel({
+		lanes,
+		tools,
+		runEffect,
+		plainTools: principleTools,
+		sections: principleSections,
+		input: principleInputs,
+	});
 }

@@ -48,6 +48,7 @@ type ToolSpec<P extends object, F> = Header & {
 	parameters: P;
 	terminate: boolean | ((args: Args<P>) => boolean);
 	expectation?(args: Args<P>): Token;
+	citations?(args: Args<P>): readonly string[];
 	observe(args: Args<P>, self: Self, context: Context, view: View): Promise<F>;
 	event(args: Args<P>, facts: F, self: Self): LaneEvent;
 };
@@ -59,6 +60,7 @@ type Publish = (
 	api: ToolExecutionApi,
 	context: Context,
 	selected: Token | undefined,
+	citations: readonly string[],
 	prepare: (
 		self: Self,
 		view: View,
@@ -117,6 +119,7 @@ export function defineLaneTool<P extends object, F>(
 						api,
 						context,
 						spec.expectation?.(args),
+						spec.citations?.(args) ?? [],
 						async (self, view) => ({
 							event: spec.observe
 								? spec.event(
@@ -139,12 +142,7 @@ export function defineLaneTool<P extends object, F>(
 	};
 }
 
-/** undefined = malformed call/input (refuse); null = no Keel input precedes this call. */
-async function callToken(
-	tx: Tx,
-	api: ToolExecutionApi,
-	selected: Token | undefined,
-): Promise<string | null | undefined> {
+async function assistantEntry(tx: Tx, api: ToolExecutionApi) {
 	const task = await tx.task(api.taskId);
 	const input = task?.input;
 	if (
@@ -159,11 +157,22 @@ async function callToken(
 		!Number.isSafeInteger(input.assistant)
 	)
 		return undefined;
+	return input.assistant as EntryId;
+}
+
+/** undefined = malformed call/input (refuse); null = no Keel input precedes this call. */
+async function callToken(
+	tx: Tx,
+	api: ToolExecutionApi,
+	selected: Token | undefined,
+): Promise<string | null | undefined> {
+	const assistant = await assistantEntry(tx, api);
+	if (assistant === undefined) return undefined;
 	// pi.tool persists its assistant EntryId as a JSON number. Later queued inputs
 	// must not retroactively grant this assistant a different expectation.
 	const query = {
 		conversationId: api.conversationId,
-		maxEntryId: input.assistant as EntryId,
+		maxEntryId: assistant,
 		order: "descending" as const,
 	};
 	let cursor: Cursor | undefined;
@@ -320,6 +329,13 @@ function finish(receipt: ReceiptState, result: Result, terminate: boolean) {
 	return output(receipt);
 }
 
+export type CheckCitations = (
+	tx: Tx,
+	conversation: ConversationId,
+	assistant: EntryId,
+	names: readonly string[],
+) => Promise<string | null>;
+
 export function wrapTool(
 	spec: LaneTool,
 	transact: (
@@ -330,11 +346,18 @@ export function wrapTool(
 	) => Promise<Result>,
 	views: (tx: Tx, self: Self) => Promise<View>,
 	scopeForLane: (name: string) => "session" | "conversation",
+	checkCitations?: CheckCitations,
 ) {
 	const targetScope = scopeForLane(spec.lane);
 	if (spec.gate === "adopt" && targetScope !== "conversation")
 		throw new Error("Adoption needs a work lane");
-	const tool = spec.build(async (api, context, selected, prepare) => {
+	const publish: Publish = async (
+		api,
+		context,
+		selected,
+		citations,
+		prepare,
+	) => {
 		// Document presence, not reply text, marks a completed call (a reply may be null).
 		const receipt = stateDoc(ReceiptState);
 		const saved = await api.snapshot(receipt, api.taskId, context);
@@ -347,6 +370,17 @@ export function wrapTool(
 				return {
 					done: finish(await tx.doc(receipt, api.taskId), self, false),
 				} as const;
+			if (citations.length) {
+				const assistant = await assistantEntry(tx, api);
+				const reject =
+					assistant !== undefined && checkCitations
+						? await checkCitations(tx, api.conversationId, assistant, citations)
+						: "Citation evidence is unavailable.";
+				if (reject)
+					return {
+						done: finish(await tx.doc(receipt, api.taskId), { reject }, false),
+					} as const;
+			}
 			return {
 				token,
 				self,
@@ -422,6 +456,6 @@ export function wrapTool(
 					context,
 				);
 			});
-	});
-	return { roles: spec.roles, tool };
+	};
+	return { roles: spec.roles, tool: spec.build(publish) };
 }
