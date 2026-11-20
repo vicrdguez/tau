@@ -700,6 +700,77 @@ test("owner direction on a merge retry reaches the worker on conflict or the ful
 		assert.match(next, /lost integration checkout/);
 	}
 });
+for (const outcome of ["landed", "moved", "unreadable"]) {
+	test(`cancel after exhausted CAS: settle the pinned landing under the slot and report ${outcome}`, () => {
+		const x = flow();
+		x.prepared();
+		const plan = x.effect("land");
+		const failed = x.apply({
+			kind: "effect_failed",
+			key: plan.key,
+			error: "lost git reply",
+		});
+		const file = failed.send?.find((m) => m.lane === "queue")?.event;
+		assert.ok(file);
+		// A pending redelivery doesn't prove the earlier attempt made no write.
+		if (outcome === "moved") x.apply(resume(file));
+		const cancelled = x.apply({ kind: "cancel" });
+		assert.ok(
+			!cancelled.send?.some(
+				(m) =>
+					m.event.kind === "release_slot" ||
+					m.event.kind === "cleanup_finished",
+			),
+		);
+		const replay = x.effect("land");
+		assert.notEqual(replay.key, plan.key);
+		assert.deepEqual(replay.op, plan.op);
+		const reported =
+			outcome === "unreadable"
+				? x.apply({
+						kind: "effect_failed",
+						key: replay.key,
+						error: "trunk read failed again",
+					})
+				: x.done(
+						"land",
+						outcome === "landed"
+							? { kind: "landed", sha: "prepared" }
+							: { kind: "moved", actual: "foreign-head" },
+					);
+		const note = reported.notes?.map((n) => n.text).join("\n") ?? "";
+		if (outcome === "landed")
+			assert.match(note, /landed on trunk at prepared/i);
+		else if (outcome === "moved") assert.match(note, /trunk.*foreign-head/i);
+		else {
+			assert.match(note, /unknown|could not (confirm|determine)|unconfirmed/i);
+			assert.match(note, /trunk read failed again/);
+			assert.match(note, /prepared/);
+		}
+		assert.ok(reported.send?.some((m) => m.event.kind === "release_slot"));
+		assert.ok(reported.send?.some((m) => m.event.kind === "cleanup_finished"));
+		assert.deepEqual(x.effects(), []);
+		assert.deepEqual(x.asks(), []);
+	});
+}
+
+test("a retry that observed a foreign trunk before cancellation needs no further CAS", () => {
+	const x = flow();
+	x.prepared();
+	const failed = x.apply({
+		kind: "effect_failed",
+		key: x.effect("land").key,
+		error: "lost git reply",
+	});
+	const file = failed.send?.find((m) => m.lane === "queue")?.event;
+	assert.ok(file);
+	x.apply(resume(file));
+	x.done("land", { kind: "moved", actual: "foreign-head" });
+	const cancelled = x.apply({ kind: "cancel" });
+	assert.ok(cancelled.send?.some((m) => m.event.kind === "release_slot"));
+	assert.deepEqual(x.effects(), []);
+});
+
 test("exhausted CAS holds its exact plan for safe retry even if the write already succeeded", () => {
 	const x = flow();
 	x.prepared();
