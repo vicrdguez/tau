@@ -92,19 +92,20 @@ export function converge(
 			case "start_build": {
 				buildWork(op.branch);
 				const base = repo.trunkHead ?? repo.baseHead;
+				if (await creation(g, op.branch, base, op.key))
+					return { kind: "started", base };
 				const at = await g.head(repo.trunk);
 				if (
 					(at !== null && at !== base) ||
 					(at === null && repo.trunkHead !== null)
 				)
 					moved(at);
-				const buildExists = await creation(g, op.branch, base, op.key);
 				if (
 					repo.trunkHead === null &&
 					!(await creation(g, repo.trunk, base, op.key))
 				)
 					await advance(g, repo.trunk, null, base, op.key);
-				if (!buildExists) await advance(g, op.branch, null, base, op.key);
+				await advance(g, op.branch, null, base, op.key);
 				return { kind: "started", base };
 			}
 			case "worktree":

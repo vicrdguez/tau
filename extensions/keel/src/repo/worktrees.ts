@@ -289,8 +289,10 @@ export async function materialize(
 	let owned = await inspect(g, repo, target);
 	if (!owned && !createIfMissing) occupied(target.path);
 	if (target.kind === "worktree") {
-		const from = await g.head(target.from);
-		if (from !== target.base) moved(from);
+		if (!owned) {
+			const from = await g.head(target.from);
+			if (from !== target.base) moved(from);
+		}
 		const exists = await creation(g, target.branch, target.base, target.key);
 		if (!exists) await advance(g, target.branch, null, target.base, target.key);
 		if (!owned) await freeBranch(g, target.branch);

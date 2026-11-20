@@ -101,11 +101,10 @@ export async function integrate(
 	const at = await g.head(into);
 	if (at === null) moved(null);
 	await ownedBranch(g, into);
-	if (taking) {
+	if (taking && at === op.expected) {
 		const trunk = await g.head(repo.trunk);
 		if (trunk !== other) moved(trunk);
 		if (await g.ancestor(other, op.expected)) {
-			if (at !== op.expected) moved(at);
 			return { kind: "combined", sha: at, trunk, checks: [] };
 		}
 	}
