@@ -42,9 +42,9 @@ async function check(
 	index: number,
 	spec: Check,
 	published: boolean,
-	before: ProofChanges | undefined,
+	prepare: () => Promise<void>,
 	verifyCheckout: () => Promise<ProofChanges | undefined>,
-): Promise<{ report?: CheckReport; changes: ProofChanges | undefined }> {
+): Promise<{ report: CheckReport; changes: ProofChanges | undefined }> {
 	const { id, argv, timeoutMs } = spec;
 	if (
 		!argv[0] ||
@@ -79,7 +79,7 @@ async function check(
 		if (!hasCode(error, "ENOENT")) throw error;
 		if (published) occupied(g.cwd);
 	}
-	if (before) return { changes: before };
+	await prepare();
 	const r = await g.exec(argv, g.cwd, { env: environment(), timeoutMs });
 	const result = { id, code: r.code, tail: (r.stdout + r.stderr).slice(-4096) };
 	const changes = await verifyCheckout();
@@ -181,7 +181,15 @@ export async function integrate(
 			? { paths: [...new Set(paths)].sort(), headChanged }
 			: undefined;
 	}
-	const before = await changesIn(owned);
+	let before = await changesIn(owned);
+	const prepare = async () => {
+		if (!before) return;
+		// Forget skip-worktree/assume-unchanged bits as well as staged dirt.
+		// Checkout detached: reset --hard would move a proof-attached branch.
+		await owned.wt.output("read-tree", "--empty");
+		await owned.wt.output("checkout", "--force", "--detach", candidate);
+		before = undefined;
+	};
 	const verifyCheckout = async () => {
 		const still = await inspect(g, repo, target);
 		if (!still) occupied(op.integration);
@@ -195,10 +203,10 @@ export async function integrate(
 			index,
 			spec,
 			published,
-			before,
+			prepare,
 			verifyCheckout,
 		);
-		if (r.report) reports.push(r.report);
+		reports.push(r.report);
 		if (r.changes)
 			return {
 				kind: "checks_failed",
@@ -206,7 +214,7 @@ export async function integrate(
 				checks: reports,
 				changes: r.changes,
 			};
-		if (r.report?.code !== 0)
+		if (r.report.code !== 0)
 			return { kind: "checks_failed", sha: candidate, checks: reports };
 	}
 	if (!published && before)
