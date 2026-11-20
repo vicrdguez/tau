@@ -73,6 +73,30 @@ test("an existing trunk is the build base even when the owner's main has advance
 	assert.deepEqual(await converge(nodeExec, repo, f.start), result);
 	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
 });
+test("completed build creation survives another work landing before replay", async (t) => {
+	const f = await fixture(t);
+	const other = await f.item();
+	const repo = await readRepo(nodeExec, f.root);
+	const start = { ...f.start, key: "start:A", branch: layout.buildBranch("A") };
+	const result = await converge(nodeExec, repo, start);
+	is(result, "started");
+	const plan = { key: "B", expectedTrunk: f.base, combined: other.item, message: "land B" };
+	const target = await prepareLanding(nodeExec, f.repo, plan);
+	is(await f.run({ ...plan, kind: "land", target }), "landed");
+	assert.deepEqual(await converge(nodeExec, repo, start), result);
+	assert.equal(git(f.root, "rev-parse", start.branch), f.base);
+	assert.equal(git(f.root, "rev-parse", "trunk"), target);
+});
+test("completed worker creation survives another item merging before replay", async (t) => {
+	const f = await fixture(t);
+	const other = await f.item();
+	const worker = { ...f.worker, key: "worker:2", branch: layout.itemBranch("42", "second", 1), path: layout.worktree(f.repo, "42", "second") };
+	const result = await f.run(worker);
+	is(result, "worktree");
+	is(await f.run(other), "merged");
+	assert.deepEqual(await f.run(worker), result);
+	assert.equal(git(worker.path, "rev-parse", "HEAD"), f.base);
+});
 test("discovery from a linked checkout uses its toplevel but the shared repository layout", async (t) => {
 	const f = await fixture(t);
 	const linked = join(f.root, "linked space");
@@ -515,6 +539,8 @@ test("merge and take-trunk survive integration creation and build CAS on both si
 	assert.equal(combined.trunk, trunk);
 	assert.equal(git(f.root, "show", combined.sha + ":book"), "new");
 	assert.equal(git(f.root, "show", combined.sha + ":tick"), "new");
+	git(f.root, "update-ref", "refs/heads/trunk", combined.sha, trunk);
+	assert.deepEqual(await f.run(combine), combined);
 	assert.equal(await readFile(other.log, "utf8"), "once");
 });
 test("conflict reports the path, and creates no conflict state on the build branch", async (t) => {
