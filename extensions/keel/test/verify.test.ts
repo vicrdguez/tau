@@ -91,6 +91,7 @@ function flow() {
 			repo,
 			rulings,
 			brief: "repair the balance",
+			summary: "No account loses a cent.",
 		});
 	const checkout = () =>
 		done("checkout", { kind: "checkout", playbook: "project oracle" });
@@ -137,9 +138,8 @@ function flow() {
 		merged();
 		handoff();
 		checkout();
-		const r = pass();
-		clean();
-		return r;
+		pass();
+		return done("remove", { kind: "removed" });
 	};
 	const take = (trunk = "base") => {
 		apply({ kind: "slot_granted" });
@@ -207,6 +207,7 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 		"one",
 		"project oracle",
 		"repair the balance",
+		"No account loses a cent.",
 		"high ruling",
 		"compare totals",
 		"totals",
@@ -289,6 +290,86 @@ test("unaddressed reappearances and unrelated blocks never spend a fix; supersed
 		x.checkout();
 		assert.equal(x.fail(thread).send?.[0]?.event.kind, "rework");
 	}
+});
+test("a superseded checkout obstruction holds the next review; a pass cleanup failure prevents a merge until the removal succeeds", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	x.fail();
+	x.publish("repair");
+	const f = x.done("remove", { kind: "occupied", path: "/private" }).send?.[0]
+		?.event;
+	assert.ok(f);
+	assert.deepEqual(x.effects(), []);
+	x.apply(resume(f));
+	x.clean();
+	x.checkout();
+	x.pass();
+	const key = x.effect("remove").key;
+	const r = x.apply({
+		kind: "effect_failed",
+		key,
+		error: "could not clean checkout",
+	});
+	const held = r.send?.[0]?.event;
+	assert.ok(held);
+	assert.equal(held.item, "bug");
+	assert.deepEqual(x.effects(), []);
+	x.apply(resume(held));
+	x.clean();
+	assert.equal(x.effect("merge_item").op.item, "repair");
+});
+test("integration checkout must be removed before the full review; full checkout removal precedes taking the slot", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+	x.handoff();
+	assert.deepEqual(
+		x.effects().map((j) => (j.spec.op as LaneEvent)?.kind),
+		["remove"],
+	);
+	x.clean();
+	x.checkout();
+	const pass = x.pass();
+	assert.ok(!pass.send?.some((m) => m.event.kind === "take_slot"));
+	const held = x.done("remove", { kind: "occupied", path: "/private" })
+		.send?.[0]?.event;
+	assert.ok(held);
+	assert.equal(x.asks().length, 0);
+	x.apply(resume(held));
+	assert.ok(
+		x
+			.done("remove", { kind: "removed" })
+			.send?.some((m) => m.event.kind === "take_slot"),
+	);
+});
+test("full threads addressed by a correction still count after a separate item rework before merge", () => {
+	const x = flow();
+	x.merged();
+	x.handoff();
+	x.checkout();
+	x.fail("cross-book");
+	for (const n of [1, 2]) {
+		const item = `correction${n}`;
+		x.publish(`fix${n}`, ["cross-book"], item, "merged");
+		x.clean();
+		x.checkout();
+		x.fail("local");
+		x.publish(`retry${n}`, ["local"], item, "merged");
+		x.clean();
+		x.checkout();
+		x.pass();
+		x.clean();
+		x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+		x.clean();
+		x.handoff();
+		x.checkout();
+		x.fail("cross-book");
+	}
+	assert.ok(x.agent("diagnoser").expects.length);
 });
 test("item merges serialize against successive build heads with Mandate checks, and pass cleans up the verifier", () => {
 	const x = flow();
