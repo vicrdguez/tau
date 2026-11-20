@@ -8,7 +8,7 @@ Everything an agent reads, kept apart from the code that sends it. Each folder a
 | `inputs/` | What just happened, and what now? | As the message keel sends at a transition. One file per situation. |
 | `documents/` | What does the thing you write look like? | Inside a role or an input, through a slot. |
 | `playbooks/` | How is this kind of work done? | Not wired yet. |
-| `principles/` | What do we value when choosing? | Not wired yet. |
+| `principles/` | What do we value when choosing? | Indexed for pulls, bound to inputs by role or path, or triggered by an event. |
 
 A `{{name}}` is a slot. Keel fills it with a fact it already knows, so no file asks an agent to work out its own situation. A file with a different situation is a different file.
 
