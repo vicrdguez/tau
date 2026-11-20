@@ -525,6 +525,7 @@ test("merge and take-trunk survive integration creation and build CAS on both si
 		const checks: Check[] = [
 			{
 				id: "proof",
+				timeoutMs: 5000,
 				argv: [
 					process.execPath,
 					"-e",
@@ -611,6 +612,20 @@ test("conflict reports the path, and creates no conflict state on the build bran
 	is(await f.run({ kind: "remove", key: "drop", target }), "removed");
 	await assert.rejects(access(op.integration));
 	assert.equal(git(f.root, "rev-parse", f.branch), expected);
+});
+test("proof exit terminates children holding the output pipe, pass or fail", async (t) => {
+	const f = await fixture(t);
+	const results = await Promise.all([0, 7].map((code) =>
+		nodeExec(["sh", "-c", "sleep 10 & exit " + code], f.root, { env: { PATH: process.env.PATH }, timeoutMs: 1000 })));
+	assert.deepEqual(results.map(r => r.code), [0, 7]);
+});
+test("a stored Mandate check without its timeout cannot run", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	const checks = JSON.parse('[{"id":"no-timeout","argv":["touch","ran"]}]');
+	await assert.rejects(f.run({ ...op, checks }), /invalid Mandate check/);
+	await assert.rejects(access(join(op.integration, "ran")));
+	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
 });
 for (const [name, script] of [
 	["failed", "console.error('bad book');process.exit(7)"],
