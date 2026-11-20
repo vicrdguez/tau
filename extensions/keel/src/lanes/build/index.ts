@@ -1,6 +1,7 @@
 import { effectKey } from "../../kernel/ids.ts";
 import {
 	defineLane,
+	type Accepted,
 	type EffectDecl,
 	type KernelEvent,
 	type Lane,
@@ -35,7 +36,6 @@ import { buildV1 } from "./v1.ts";
 export { buildTools } from "./tools.ts";
 
 type Event =
-	| KernelEvent
 	| BuildUpdate
 	| Resume
 	| { kind: "plan"; items: Goal[] }
@@ -150,22 +150,13 @@ function plans(
 		];
 	});
 }
-function reduce(s: Build, e: Event, w: World): Reduction<Build> {
-	const state = s;
-	if (s.phase === "cancelled" || s.phase === "closed") return { state };
-	if (e.kind === "cancel") {
-		s.phase = "cancelled";
-		return { state };
-	}
-	if (e.kind === "closed") {
-		s.phase = "closed";
-		return { state };
-	}
-	function hold(
+function hold(
+		s: Build,
+		w: World,
 		item: string | null,
 		obstruction: string,
 		evidence: string,
-	): Reduction<Build> {
+	): Accepted<Build> {
 		const stage = s.items.find(i => i.id === item)?.stage;
 		const resume = s.phase === "discover" ? "Read the repository again using the current branch options."
 			: stage === "preparing" && obstruction === "occupied" ? "Prepare a new worker checkout at a fresh path."
@@ -176,11 +167,99 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		const cause = `build/${++s.seq}`;
 		s.holds.push({ cause, item, obstruction, evidence });
 		return {
-			state,
+			state:s,
 			send: [
 				fileHolding({ work: w.work!, lane: "build", goal: s.mandate!.intent, resume, item, cause, evidence }),
 			],
 		};
+	}
+function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
+	const state = s;
+	if (s.phase === "closed" || s.phase === "cancelled") return { state };
+	switch (e.kind) {
+		case "effect_done":
+		case "effect_failed": {
+			const planned = plans(s, w).find((p) => p.effect.key === e.key);
+			if (!planned) return { state };
+			const id = planned.item;
+			if (e.kind === "effect_failed")
+				return hold(s,w,id, "failed", `${e.key}: ${e.error}`);
+			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
+			const i = s.items.find((i) => i.id === id);
+			if (i?.stage === "preparing" && result.kind === "moved" && result.actual === s.head && i.worker!.base !== s.head) {
+				prepare(s, i, w);
+				break;
+			}
+			if (result.kind === "moved" || result.kind === "occupied")
+				return hold(s,w,id, result.kind, `${e.key}: ${JSON.stringify(result)}`);
+			if (id === null && s.phase === "discover" && result.kind === "repo") {
+				s.repo = result.repo;
+				s.phase = "start";
+				s.setupSeq = ++s.seq;
+				s.setupRetry = 0;
+				return { state };
+			}
+			if (id === null && s.phase === "start" && result.kind === "started") {
+				s.base = s.head = result.base;
+				s.phase = "active";
+				coordinator(s, "publish_plan");
+				return { state };
+			}
+			if (i?.stage === "preparing" && result.kind === "worktree") {
+				i.stage = "building";
+				i.seq = ++s.seq;
+				break;
+			}
+			if (
+				i?.stage === "cleaning" &&
+				(result.kind === "removed" || result.kind === "kept")
+			) {
+				i.stage = "merged";
+				schedule(s, w);
+				return {
+					state,
+					notes:
+						result.kind === "kept"
+							? [
+									{
+										agent: null,
+										text: `Kept ${i.worker!.path}: ${result.reason}: ${result.files.join(", ")}`,
+									},
+								]
+							: [],
+				};
+			}
+			throw Error(`Unexpected Build result ${result.kind} for ${e.key}`);
+		}
+		case "agent_stalled": {
+			const agent = agents(s).find(
+				(a) =>
+					a.key === e.agent &&
+					a.expects.some((x) => e.tokens.includes(x.token)),
+			);
+			if (!agent) return { state };
+			const id =
+				agent.role === "coordinator"
+					? null
+					: s.items.find((i) => workerKey(i) === agent.key)!.id;
+			return hold(s,w,id, "stall", `${agent.key} ${e.cause}: ${e.lastWords}`);
+		}
+
+		case "answered": return {state};
+	}
+	schedule(s,w);
+	return {state};
+}
+function reduce(s: Build, e: Event, w: World): Reduction<Build> {
+	const state = s;
+	if (s.phase === "cancelled" || s.phase === "closed") return { state };
+	if (e.kind === "cancel") {
+		s.phase = "cancelled";
+		return { state };
+	}
+	if (e.kind === "closed") {
+		s.phase = "closed";
+		return { state };
 	}
 	function verify(event: Publication): Reduction<Build> {
 		return { state, send: [{ lane: "verify", work: w.work, event }] };
@@ -243,60 +322,6 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			coordinator(s, null);
 			break;
 		}
-		case "effect_done":
-		case "effect_failed": {
-			const planned = plans(s, w).find((p) => p.effect.key === e.key);
-			if (!planned) return { state };
-			const id = planned.item;
-			if (e.kind === "effect_failed")
-				return hold(id, "failed", `${e.key}: ${e.error}`);
-			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
-			const i = s.items.find((i) => i.id === id);
-			if (i?.stage === "preparing" && result.kind === "moved" && result.actual === s.head && i.worker!.base !== s.head) {
-				prepare(s, i, w);
-				break;
-			}
-			if (result.kind === "moved" || result.kind === "occupied")
-				return hold(id, result.kind, `${e.key}: ${JSON.stringify(result)}`);
-			if (id === null && s.phase === "discover" && result.kind === "repo") {
-				s.repo = result.repo;
-				s.phase = "start";
-				s.setupSeq = ++s.seq;
-				s.setupRetry = 0;
-				return { state };
-			}
-			if (id === null && s.phase === "start" && result.kind === "started") {
-				s.base = s.head = result.base;
-				s.phase = "active";
-				coordinator(s, "publish_plan");
-				return { state };
-			}
-			if (i?.stage === "preparing" && result.kind === "worktree") {
-				i.stage = "building";
-				i.seq = ++s.seq;
-				break;
-			}
-			if (
-				i?.stage === "cleaning" &&
-				(result.kind === "removed" || result.kind === "kept")
-			) {
-				i.stage = "merged";
-				schedule(s, w);
-				return {
-					state,
-					notes:
-						result.kind === "kept"
-							? [
-									{
-										agent: null,
-										text: `Kept ${i.worker!.path}: ${result.reason}: ${result.files.join(", ")}`,
-									},
-								]
-							: [],
-				};
-			}
-			throw Error(`Unexpected Build result ${result.kind} for ${e.key}`);
-		}
 		case "ruling":
 		case "publish": {
 			const i = s.items.find((i) => workerKey(i) === e.agent);
@@ -316,10 +341,10 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					reject: "The worker commit must descend from its pinned base.",
 				};
 			if (f.kind === "occupied" || f.kind === "moved")
-				return hold(i.id, f.kind, JSON.stringify(f));
+				return hold(s,w,i.id, f.kind, JSON.stringify(f));
 			if (i.kind !== "encode" && f.touched.length)
 				return hold(
-					i.id,
+					s,w,i.id,
 					"protected",
 					`Protected paths touched by ${i.id} at ${f.sha}: ${f.touched.join(", ")}`,
 				);
@@ -403,19 +428,6 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				summary: e.summary,
 				risk: e.risk,
 			});
-		case "agent_stalled": {
-			const agent = agents(s).find(
-				(a) =>
-					a.key === e.agent &&
-					a.expects.some((x) => e.tokens.includes(x.token)),
-			);
-			if (!agent) return { state };
-			const id =
-				agent.role === "coordinator"
-					? null
-					: s.items.find((i) => workerKey(i) === agent.key)!.id;
-			return hold(id, "stall", `${agent.key} ${e.cause}: ${e.lastWords}`);
-		}
 		case "resume": {
 			const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
 			if (!h) return { state };
@@ -452,6 +464,7 @@ const build: Lane<Build> = {
 	name: "build",
 	state: buildDoc,
 	reduce: (s, e, w) => reduce(structuredClone(s), e as Event, w),
+	onFact:(s,e,w)=>onFact(structuredClone(s),e,w),
 	agents,
 	view: buildView,
 	asks: () => [],
