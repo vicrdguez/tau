@@ -3,7 +3,7 @@ import { type TestContext, test } from "node:test";
 import { type DecisionId, decision, eventLog } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import { token, workId } from "../src/kernel/ids.ts";
+import { agentKey, token, workId } from "../src/kernel/ids.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { latch, Shared, toy } from "./toy.ts";
 
@@ -276,7 +276,9 @@ test("a rejected routed message publishes none of the preceding lane changes", a
 
 test("a withdrawn, unclaimed effect can be declared again", async (t) => {
 	let runs = 0;
-	const x = await setup(t, { runEffect: async () => ({ value: String(++runs) }) });
+	const x = await setup(t, {
+		runEffect: async () => ({ value: String(++runs) }),
+	});
 	await x.send("effect");
 	await x.send("cancel");
 	await x.send("effect");
@@ -291,7 +293,10 @@ test("no decision can be derived from an independently changing project lane", a
 	await x.send("forward");
 	await x.send("ask", { basis: "dependent" });
 	await x.deliver("shared", null, { kind: "changed" });
-	assert.equal(await x.harness.commit(tx => decision(tx, id(1, x.root.id)), ctx), undefined);
+	assert.equal(
+		await x.harness.commit((tx) => decision(tx, id(1, x.root.id)), ctx),
+		undefined,
+	);
 });
 
 test("both creation and delivery resolve null cwd to the host's project directory", async (t) => {
@@ -308,17 +313,27 @@ test("both creation and delivery resolve null cwd to the host's project director
 });
 
 for (const mode of ["failed", "queued stop", "placed stop"] as const)
-	test(`a ${mode} run reports the still-open obligation`, { timeout: 5000 }, async (t) => {
+	test(`a ${mode} run reports the still-open obligation`, {
+		timeout: 5000,
+	}, async (t) => {
 		const x = await setup(t);
 		const entered = latch<void>();
 		const release = latch<void>();
-		const failure = fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid request" });
-		x.provider.setResponses([async (_, options) => {
-			entered.resolve();
-			options?.signal?.addEventListener("abort", () => release.resolve(), { once: true });
-			await release.promise;
-			return failure;
-		}, failure]);
+		const failure = fauxAssistantMessage("", {
+			stopReason: "error",
+			errorMessage: "invalid request",
+		});
+		x.provider.setResponses([
+			async (_, options) => {
+				entered.resolve();
+				options?.signal?.addEventListener("abort", () => release.resolve(), {
+					once: true,
+				});
+				await release.promise;
+				return failure;
+			},
+			failure,
+		]);
 		await x.send("agent");
 		x.harness.resume();
 		await entered.promise;
@@ -327,10 +342,13 @@ for (const mode of ["failed", "queued stop", "placed stop"] as const)
 		if (mode !== "placed stop") {
 			await x.send("agent");
 			for (let i = 0; ; i++) {
-				const record = await x.harness.commit(tx => tx.submissionByRequest(worker, token("worker/0", 2)), ctx);
+				const record = await x.harness.commit(
+					(tx) => tx.submissionByRequest(worker, token("worker/0", 2)),
+					ctx,
+				);
 				if (record?.status === "queued") break;
 				assert.ok(i < 200, "replacement input did not queue");
-				await new Promise(resolve => setTimeout(resolve, 5));
+				await new Promise((resolve) => setTimeout(resolve, 5));
 			}
 		}
 		if (mode === "failed") release.resolve();
@@ -338,8 +356,105 @@ for (const mode of ["failed", "queued stop", "placed stop"] as const)
 		await x.finish("keel.deliver");
 		assert.equal(x.provider.state.callCount, mode === "failed" ? 2 : 1);
 		assert.equal((await x.state()).stalls, 1);
-		assert.deepEqual((await x.state()).notes, [mode === "failed" ? "failed" : "stopped"]);
+		assert.deepEqual((await x.state()).notes, [
+			mode === "failed" ? "failed" : "stopped",
+		]);
 	});
+
+for (const move of ["pause", "cancel", "quiet"])
+	test(`a token cannot re-enter after ${move}`, async (t) => {
+		const x = await setup(t);
+		await x.send("manual");
+		await x.send(move);
+		if (move === "pause") await x.send("agent"); // resumes with no expectation (turn zero)
+		await assert.rejects(x.send("manual"), /reus.*token|token.*reus/i);
+	});
+
+test("two designers cannot share and overwrite the work binding", async (t) => {
+	const x = await setup(t);
+	await x.send("ask", { basis: "designers" });
+	await assert.rejects(
+		x.send("agent", { count: 2 }),
+		/designer|already bound/i,
+	);
+	assert.deepEqual(await x.agents(), []);
+});
+
+test("a rejected fact is preserved on the owner's timeline with the reason", async (t) => {
+	const x = await setup(t);
+	await x.send("ask", { basis: "reject fact" });
+	await x.send("effect");
+	x.harness.resume();
+	await x.finish("keel.effect");
+	const log = await x.harness.commit(
+		async (tx) => tx.scanEntries({ conversationId: await eventLog(tx) }, 100),
+		ctx,
+	);
+	assert.ok(
+		log.items.some(
+			(e) =>
+				e.kind === "keel.event" &&
+				["effect_done", "outside", "unexpected result"].every((part) =>
+					JSON.stringify(e.data).includes(part),
+				),
+		),
+	);
+});
+
+test("a stale stop cannot abort a later run just because the agent is paused again", async (t) => {
+	const x = await setup(t);
+	await x.send("manual");
+	await x.send("pause");
+	x.harness.resume();
+	await x.finish("keel.stop");
+	await x.send("agent"); // resumes worker 0 without the old token
+	await x.send("pause");
+	await x.finish("keel.stop");
+	const [id] = await x.agents();
+	assert.ok(id);
+	const worker = (await x.harness.conversation(id, ctx))!;
+	const entered = latch<void>(),
+		release = latch<void>();
+	x.provider.setResponses([
+		async (_, opts) => {
+			entered.resolve();
+			opts?.signal?.addEventListener("abort", () => release.resolve(), {
+				once: true,
+			});
+			await release.promise;
+			return fauxAssistantMessage("done");
+		},
+	]);
+	const submission = await worker.submit(
+		{ type: "input", content: "separate run" },
+		ctx,
+	);
+	await entered.promise;
+	try {
+		await x.harness.commit(
+			(tx) =>
+				tx.createTask(
+					x.k.tasks.stop,
+					{
+						lane: "toy",
+						work: workId(x.root.id),
+						conversation: id,
+						key: agentKey("worker/0"),
+					},
+					{
+						ownership: { kind: "conversation" },
+						conversationId: id,
+						background: true,
+					},
+				),
+			ctx,
+		);
+		await x.finish("keel.stop");
+	} finally {
+		release.resolve();
+	}
+	assert.equal((await submission.wait(ctx)).status, "done");
+});
 
 test("three failed effect attempts deliver one failure to the lane", async (t) => {
 	let n = 0;

@@ -1,4 +1,15 @@
 [
+	["repo/git.ts", "import { prose } from 'tau'", false],
+	["repo/git.ts", "export * from 'tau/schema'", false],
+	[
+		"repo/nested/read.ts",
+		"import type { Token } from '../../kernel/ids.ts'",
+		false
+	],
+	["repo/git.ts", "import type { Sha } from './types.ts'", true],
+	["lanes/build/lane.ts", "const head = value as Sha", false],
+	["kernel/tool.ts", "return value as /* hash */ Sha", false],
+	["repo/git.ts", "return value as Sha", true],
 	[
 		"lanes/build/lane.ts",
 		"import type { WorkId } from '../../kernel/ids.ts'",

@@ -14,20 +14,3 @@ export type Exact<A, B> =
 export type Check<T extends true> = T;
 
 export type AddressV1 = { lane: string; work: WorkId | null };
-// Role names occur in persisted slots; a catalog change must not silently retype v1.
-export type RoleV1 =
-	| "designer"
-	| "design_explorer"
-	| "design_prototype"
-	| "arena_seat_1"
-	| "arena_seat_2"
-	| "arena_seat_3"
-	| "arena_judge"
-	| "arena_challenger"
-	| "coordinator"
-	| "worker"
-	| "build_explorer"
-	| "verifier"
-	| "diagnoser"
-	| "investigator"
-	| "queue_explorer";

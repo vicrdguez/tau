@@ -1,14 +1,16 @@
 import type { ConversationId, TaskId } from "tau/durable";
 import { type Token, token } from "../../src/kernel/ids.ts";
 import type { WorkState } from "../../src/kernel/records.ts";
-import type { Check, Exact, RoleV1 } from "./fixture.ts";
+import type { Check, Exact } from "./fixture.ts";
 
 export type V1 = {
 	agents: Record<
 		string,
 		{
 			conversation: ConversationId;
-			role: RoleV1;
+			role: string;
+			used: Token[];
+			stop: TaskId | null;
 			cwd: string | null;
 			status: "active" | "paused" | "retired";
 			open: { token: Token; tools: string[]; unsolicited: boolean }[];
@@ -28,6 +30,8 @@ export const current = {
 		worker: {
 			conversation: 11 as ConversationId,
 			role: "worker",
+			used: [token("worker", 1), token("worker", 2)],
+			stop: null,
 			cwd: "/work",
 			status: "active",
 			open: [

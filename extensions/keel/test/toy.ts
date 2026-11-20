@@ -124,6 +124,7 @@ const toyLane = defineLane({
 			case "effect":
 				return { state: { ...s, effect: true } };
 			case "effect_done":
+				if (s.ask === "reject fact") return { reject: "unexpected result" };
 				return {
 					state: {
 						...s,
@@ -133,7 +134,14 @@ const toyLane = defineLane({
 			case "effect_failed":
 				return { state: { ...s, facts: [...s.facts, String(e.error)] } };
 			case "agent_stalled":
-				return { state: { ...s, stalls: s.stalls + 1, notes: [String(e.cause)], turn: 0 } };
+				return {
+					state: {
+						...s,
+						stalls: s.stalls + 1,
+						notes: [String(e.cause)],
+						turn: 0,
+					},
+				};
 			case "publish":
 				return {
 					state: { ...s, publications: s.publications + 1, turn: 0 },
@@ -172,7 +180,8 @@ const toyLane = defineLane({
 		}
 	},
 	asks: (s, facts) =>
-		s.ask === null || (s.ask === "dependent" &&
+		s.ask === null ||
+		(s.ask === "dependent" &&
 			// @ts-expect-error a declaration cannot depend on another lane
 			!facts.view?.("shared")?.seen.length)
 			? []
@@ -185,7 +194,7 @@ const toyLane = defineLane({
 	agents: (s) =>
 		Array.from({ length: s.agents }, (_, i) => ({
 			key: agentKey(`worker/${i}`),
-			role: "worker",
+			role: s.ask === "designers" ? "designer" : "worker",
 			cwd: null,
 			paused: s.paused,
 			expects:
@@ -245,7 +254,9 @@ export async function toy({
 			}),
 		ctx,
 	);
-	const root = await harness.root(ctx, { agent: { cwd: "/projects/quant-engine" } });
+	const root = await harness.root(ctx, {
+		agent: { cwd: "/projects/quant-engine" },
+	});
 	const deliver = (lane: string, id: ConversationId | null, event: LaneEvent) =>
 		harness.commit(
 			(tx) =>
