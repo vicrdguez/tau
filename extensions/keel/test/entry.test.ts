@@ -9,12 +9,10 @@ import { entry, extension, options } from "../src/index.ts";
 // recovery; a toy or future lane tool advertises work Keel cannot perform.
 test("Keel registers exactly the four kernel tasks and no workflow tools yet", () => {
 	assert.equal(extension.name, "keel");
-	assert.deepEqual(extension.tasks?.map((task) => task.name).sort(), [
-		"keel.answer",
-		"keel.deliver",
-		"keel.effect",
-		"keel.stop",
-	]);
+	assert.deepEqual(
+		extension.tasks?.map((task) => task.definition.name).sort(),
+		["keel.answer", "keel.deliver", "keel.effect", "keel.stop"],
+	);
 	assert.deepEqual(extension.tools ?? [], []);
 });
 

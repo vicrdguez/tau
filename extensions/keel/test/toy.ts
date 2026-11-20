@@ -273,17 +273,20 @@ export async function toy({
 				throw Error(JSON.stringify(done.state.outcome));
 		}
 	};
-	return {
-		k,
+	// Preserve the public Store type rather than emitting the internal Harness type.
+	return Object.assign(
+		{
+			k,
+			store,
+			root,
+			provider,
+			send,
+			deliver,
+			state,
+			agents,
+			tasks,
+			finish,
+		},
 		store,
-		harness,
-		root,
-		provider,
-		send,
-		deliver,
-		state,
-		agents,
-		tasks,
-		finish,
-	};
+	);
 }

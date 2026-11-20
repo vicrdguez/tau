@@ -70,6 +70,15 @@ test("work documents keep only the latest version and forks start unbound", () =
 	assert.equal(stateDoc(records.ReceiptState).definition.scope, "task");
 });
 
+// Compile-time regression: absence must be explicit even in nested stored values.
+// @ts-expect-error optional stored properties would let an unversioned change compile
+defineState({
+	kind: "keel.optional",
+	version: 1,
+	scope: "session",
+	initial: (): { items: { hold?: string }[] } => ({ items: [] }),
+});
+
 test("a state upgrade cannot be defined without a migration", () => {
 	assert.throws(
 		() =>

@@ -75,6 +75,10 @@ test("four lane models suffice; every role and seat can independently override i
 			await options.set(tx, patch);
 			return options.read(tx);
 		}, ctx);
+	await assert.rejects(
+		read({ ...lanes, trunk: "main" }),
+		/trunk.*base|base.*trunk/i,
+	);
 	const defaults = await read(lanes);
 	assert.equal(defaults.trunk, "trunk");
 	assert.equal(defaults.base, "main");
@@ -143,6 +147,11 @@ test("configured agents see their coding tools and only their assigned Keel tool
 			ctx,
 		);
 		const agent = await conversation.agent(ctx);
+		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
+		if (role === "designer") {
+			assert.match(agent.instructions ?? "", /## Proof/);
+			assert.doesNotMatch(agent.instructions ?? "", /\{\{form\}\}/);
+		}
 		assert.deepEqual(agent.tools.map((t) => t.name).sort(), expected, role);
 		assert.deepEqual(
 			agent.extensions.map((e) => e.name).sort(),

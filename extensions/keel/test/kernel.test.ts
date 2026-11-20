@@ -157,6 +157,22 @@ test("an agent that answers without its hand-off gets one nudge and then a stall
 	assert.equal(x.provider.state.callCount, 2);
 	assert.equal((await x.state()).stalls, 1);
 });
+test("a failed generation still owes the hand-off: retry once, then notify the lane", async (t) => {
+	const x = await setup(t);
+	x.provider.setResponses(
+		Array.from({ length: 2 }, () =>
+			fauxAssistantMessage("", {
+				stopReason: "error",
+				errorMessage: "failed run",
+			}),
+		),
+	);
+	await x.send("agent");
+	x.harness.resume();
+	await x.finish("keel.deliver");
+	assert.equal(x.provider.state.callCount, 2);
+	assert.equal((await x.state()).stalls, 1);
+});
 for (const mode of ["closed", "foreign"] as const)
 	test(`agent tool admission rejects a ${mode} expectation`, async (t) => {
 		const x = await setup(t);
