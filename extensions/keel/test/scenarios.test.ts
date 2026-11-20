@@ -18,6 +18,7 @@ import { stateDoc } from "../src/kernel/state.ts";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openScenario } from "./fixtures/scenario.ts";
 import { fixture, git } from "./repo/fixture.ts";
+import { latch } from "./toy.ts";
 
 const child = fileURLToPath(
 	new URL("./fixtures/scenario-kill.ts", import.meta.url),
@@ -81,8 +82,8 @@ test("cancel from the idle designer desk while a worker creation is running: one
 	timeout: 15000,
 }, async (t) => {
 	const { root } = await fixture(t);
-	const materialized = Promise.withResolvers<string>();
-	const release = Promise.withResolvers<void>();
+	const materialized = latch<string>();
+	const release = latch<void>();
 	const s = await openScenario(
 		root,
 		new MemoryStorage(),
