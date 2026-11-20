@@ -691,6 +691,7 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			item: "full",
 			head,
 			...(kind==="integration"?{inheritedTrunk:sha}:{}),
+			direction:"choose two small probes",
 			threads: ["precision"],
 			evidence: "the tick grid changed",
 		});
@@ -698,6 +699,7 @@ test("full-set or trunk returns request a new correction on the merged head, not
 		assert.deepEqual(req.tools, ["publish_plan"]);
 		assert.match(req.text, /the tick grid changed/);
 		assert.match(req.text,/publish_plan/);
+		assert.match(req.text,/choose two small probes/);
 		if(kind==="integration") assert.ok(req.text.includes(sha));
 		assert.ok("reject" in b.tryEvent({ kind: "plan", items: [item] }));
 		b.send({
@@ -705,6 +707,7 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			items: [{ ...item, id: "correction", deps: ["fix"] }],
 		});
 		assert.match(b.request("coordinator").text, /precision/);
+		assert.doesNotMatch(b.request("coordinator").text,/choose two small probes/);
 		b.send({ kind: "brief", ...brief, item: "correction" });
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
