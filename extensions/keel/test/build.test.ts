@@ -264,7 +264,8 @@ test("approval notes require a numbered reply each; the first plan and its cited
 		"reject" in b.tryEvent({ kind: "brief", ...brief, nodes: ["tick-order"] }),
 	);
 	b.send({ kind: "brief", ...brief, nodes: ["cash-port", "port-api"] });
-	b.done({ kind: "worktree", base: repo.trunkHead });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	assert.match(b.request("worker").text, /Item: fix \(encode\)/);
 	assert.match(
 		b.request("worker").text,
 		/delegated[\s\S]*Choose tick order locally/i,
@@ -487,10 +488,17 @@ test("worker input passes the item's path fences and triggers a premise check on
 		...brief,
 		fences: "src/money/tick.ts\n\n tests/tie.ts ",
 	});
-	b.done({ kind: "worktree", base: repo.trunkHead });
+	const policy = [
+		{
+			name: "money",
+			body: "---\ndescription: Use whole cents.\n---\nPin cents at this base.",
+		},
+	];
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: policy });
 	const expectation = () => b.agent("worker").expects[0]!;
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	assert.notEqual(expectation().situation, "survived_fix");
+	assert.deepEqual(expectation().projectPrinciples, policy);
 	b.pub();
 	const back = {
 		kind: "rework",
@@ -503,6 +511,7 @@ test("worker input passes the item's path fences and triggers a premise check on
 	b.pub(undefined, ["tie"]);
 	b.send(back);
 	assert.equal(expectation().situation, "survived_fix");
+	assert.deepEqual(expectation().projectPrinciples, policy);
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	b.pub(undefined, ["tie"]);
 	b.send({ ...back, kind: "integration" });
