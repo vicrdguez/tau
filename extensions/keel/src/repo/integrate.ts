@@ -10,6 +10,7 @@ import {
 	moved,
 	occupied,
 	oid,
+	report,
 	success,
 } from "./git.ts";
 import type {
@@ -28,6 +29,7 @@ import {
 	freeBranch,
 	inspect,
 	ownedBranch,
+	registered,
 	touchedPaths,
 	zlist,
 } from "./worktrees.ts";
@@ -37,12 +39,11 @@ import {
  * a command or before its receipt is durable requires replay: checks cannot be
  * non-idempotent transactions against external systems. */
 async function check(
-	{ wt: g, admin }: { wt: Git; admin: string },
+	admin: string,
 	candidate: string,
 	index: number,
 	spec: Check,
-	published: boolean,
-	prepare: () => Promise<void>,
+	prepare: () => Promise<Git>,
 	verifyCheckout: () => Promise<ProofChanges | undefined>,
 ): Promise<{ report: CheckReport; changes: ProofChanges | undefined }> {
 	const { id, argv, timeoutMs } = spec;
@@ -77,9 +78,8 @@ async function check(
 		};
 	} catch (error) {
 		if (!hasCode(error, "ENOENT")) throw error;
-		if (published) occupied(g.cwd);
 	}
-	await prepare();
+	const g = await prepare();
 	const r = await g.exec(argv, g.cwd, { env: { ...process.env }, timeoutMs });
 	const result = { id, code: r.code, tail: (r.stdout + r.stderr).slice(-4096) };
 	const changes = await verifyCheckout();
@@ -117,7 +117,7 @@ export async function integrate(
 		}
 	}
 
-	if (at === op.expected) await freeBranch(g, into);
+	if (at === op.expected) await freeBranch(g, into, op.integration);
 	// Construct the candidate without ever attaching to the build branch,
 	// or leaving a half-applied merge in an index. Conflict is ordinary data.
 	const merge = await g.run(
@@ -156,9 +156,18 @@ export async function integrate(
 	} as const;
 	// Never recreate missing proof evidence on the strength of a branch update.
 	const published = at === candidate;
-	const owned = await ensureWorktree(g, repo, target, !published);
+	const opened = await report(() => ensureWorktree(g, repo, target, !published));
+	if ("kind" in opened && (published || opened.kind !== "occupied" || opened.path !== target.path))
+		return opened;
+	const owned = "kind" in opened ? null : opened;
+	async function damagedAdmin() {
+		const registration = await registered(g, repo, target, true);
+		if (!registration || registration.linked) occupied(target.path);
+		return registration.admin;
+	}
+	const admin = owned?.admin ?? await damagedAdmin();
 	async function changesIn(
-		still: typeof owned,
+		still: NonNullable<typeof owned>,
 	): Promise<ProofChanges | undefined> {
 		const headChanged = !still.detached || still.head !== candidate;
 		const paths = await dirt(still.wt, "proof");
@@ -184,28 +193,35 @@ export async function integrate(
 			? { paths: [...new Set(paths)].sort(), headChanged }
 			: undefined;
 	}
-	let before = await changesIn(owned);
+	let before = owned ? await changesIn(owned) : undefined;
 	const prepare = async () => {
-		if (!before) return;
+		if (!owned || published) occupied(target.path);
+		if (!before) return owned.wt;
 		// Forget skip-worktree/assume-unchanged bits as well as staged dirt.
 		// Checkout detached: reset --hard would move a proof-attached branch.
 		await owned.wt.output("read-tree", "--empty");
 		await owned.wt.output("checkout", "--force", "--detach", candidate);
 		before = undefined;
+		return owned.wt;
 	};
 	const verifyCheckout = async () => {
-		const still = await inspect(g, repo, target);
-		if (!still) occupied(op.integration);
+		const still = await report(() => inspect(g, repo, target));
+		if (!still) occupied(target.path);
+		if ("kind" in still) {
+			if (still.kind === "moved") moved(still.actual);
+			if (await damagedAdmin() !== admin) occupied(target.path);
+			// The checkout no longer resolves a HEAD; do not run Git there.
+			return {paths:[".git"], headChanged:true};
+		}
 		return changesIn(still);
 	};
 	const reports: CheckReport[] = [];
 	for (const [index, spec] of op.checks.entries()) {
 		const r = await check(
-			owned,
+			admin,
 			candidate,
 			index,
 			spec,
-			published,
 			prepare,
 			verifyCheckout,
 		);
@@ -221,6 +237,7 @@ export async function integrate(
 		if (r.report.code !== 0)
 			return { ...paths, kind: "checks_failed", sha: candidate, checks: reports };
 	}
+	if (!owned) occupied(target.path);
 	if (!published && before)
 		return {
 			...paths,
