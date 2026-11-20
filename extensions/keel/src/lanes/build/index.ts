@@ -4,7 +4,6 @@ import {
 	type EffectDecl,
 	type KernelEvent,
 	type Lane,
-	type Message,
 	type Reduction,
 	type StaticFacts,
 	type World,
@@ -14,15 +13,17 @@ import {
 	type PublishResult,
 	type RepoInfo,
 	type RepoResult,
-	type Sha,
 } from "../../repo/index.ts";
-import { type Mandate, mandateLabels } from "../design/public.ts";
+import { mandateLabels } from "../design/public.ts";
+import { fileHolding, type Resume } from "../queue/public.ts";
+import type { Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
-import type { Ruling } from "./public.ts";
+import type { BuildUpdate, Ruling } from "./public.ts";
 import {
 	type Brief,
 	type Build,
 	buildDoc,
+	buildView,
 	type Goal,
 	held,
 	type Item,
@@ -35,7 +36,8 @@ export { buildTools } from "./tools.ts";
 
 type Event =
 	| KernelEvent
-	| { kind: "bound"; mandate: Mandate }
+	| BuildUpdate
+	| Resume
 	| { kind: "plan"; items: Goal[] }
 	| ({ kind: "brief"; item: string } & Brief)
 	| { kind: "handoff"; summary: string; risk: string }
@@ -47,22 +49,7 @@ type Event =
 			addresses: string[];
 			facts: PublishResult;
 	  }
-	| { kind: "cancel" | "closed" }
-	| {
-			kind: "resume";
-			item: string | null;
-			cause: string;
-			direction: string;
-			evidence: string;
-	  }
-	| { kind: "merged"; item: string; head: Sha }
-	| {
-			kind: "integration" | "rework";
-			item: string;
-			head?: Sha;
-			threads: string[];
-			evidence: string;
-	  };
+	| { kind: "cancel" };
 
 function coordinator(
 	s: Build,
@@ -177,22 +164,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		return {
 			state,
 			send: [
-				{
-					lane: "queue",
-					work: null,
-					event: {
-						kind: "file",
-						work: w.work,
-						lane: "build",
-						item,
-						cause,
-						evidence,
-					},
-				},
+				fileHolding({ work: w.work!, lane: "build", item, cause, evidence }),
 			],
 		};
 	}
-	function verify(event: Message["event"]): Reduction<Build> {
+	function verify(event: Publication): Reduction<Build> {
 		return { state, send: [{ lane: "verify", work: w.work, event }] };
 	}
 	switch (e.kind) {
@@ -459,7 +435,7 @@ const build: Lane<Build> = {
 	state: buildDoc,
 	reduce: (s, e, w) => reduce(structuredClone(s), e as Event, w),
 	agents,
-	view: (s) => s,
+	view: buildView,
 	asks: () => [],
 	effects: (s, w) => plans(s, w).map((p) => p.effect),
 };

@@ -1,7 +1,7 @@
 import { arr, int, obj, oneOf, str } from "tau/schema";
 import { defineLaneTool } from "../../kernel/lane.ts";
 import { nodeExec, readPublishable } from "../../repo/index.ts";
-import { type Build, workerKey } from "./state.ts";
+import type { buildView } from "./state.ts";
 
 const text = str({ minLength: 1 });
 const texts = arr(text);
@@ -73,16 +73,9 @@ export const buildTools = [
 		parameters: obj({ summary: text, addresses: texts }),
 		terminate: true,
 		observe: async (_, self, _ctx, view) => {
-			const s = view("build") as Build;
-			const item = s.items.find((i) => workerKey(i) === self.agent);
-			if (!s.repo || !s.mandate || !item?.worker)
-				throw Error("No current worker checkout");
-			const f = await readPublishable(
-				nodeExec,
-				s.repo,
-				item.worker,
-				s.mandate.protectedPaths,
-			);
+			const build = view("build") as ReturnType<typeof buildView>;
+			const { repo, worker, protectedPaths } = build.publicationOf(self.agent);
+			const f = await readPublishable(nodeExec, repo, worker, protectedPaths);
 			if (f.kind === "dirty") return { ...f, files: [...f.files] };
 			if (f.kind === "ok") return { ...f, touched: [...f.touched] };
 			return f;

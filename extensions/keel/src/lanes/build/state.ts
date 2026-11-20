@@ -102,6 +102,17 @@ export const held = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
 export const workerKey = (i: Item) => `worker/${i.id}/${i.attempt}`;
 
+export function buildView(s: Build) {
+	return {
+		publicationOf(agent: string) {
+			const worker = s.items.find((i) => workerKey(i) === agent)?.worker;
+			if (!worker || !s.repo || !s.mandate)
+				throw Error("No current worker checkout");
+			return { repo: s.repo, worker, protectedPaths: s.mandate.protectedPaths };
+		},
+	};
+}
+
 export function validatePlan(existing: Item[], goals: Goal[]): string | null {
 	if (!goals.length) return "Name at least one item.";
 	const ids = new Set(existing.map((i) => i.id));

@@ -8,6 +8,8 @@ import {
 	prose,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
+import { toBuild } from "../build/public.ts";
+import { fileHolding } from "../queue/public.ts";
 import { type Mandate, mandateLabels } from "./public.ts";
 import { designV1 } from "./v1.ts";
 
@@ -153,13 +155,7 @@ export const design: Lane<State> = {
 						};
 						return {
 							state: { ...s, phase: "bound", mandate, reference },
-							send: [
-								{
-									lane: "build",
-									work: w.work,
-									event: { kind: "bound", mandate },
-								},
-							],
+							send: [toBuild(w.work!, { kind: "bound", mandate })],
 						};
 					}
 					case "precedent": {
@@ -222,18 +218,13 @@ export const design: Lane<State> = {
 				return {
 					state: { ...s, phase: "held", cause },
 					send: [
-						{
-							lane: "queue",
-							work: null,
-							event: {
-								kind: "file",
-								work: w.work,
-								lane: "design",
-								item: null,
-								cause,
-								evidence: [e.cause, e.lastWords].join(": "),
-							},
-						},
+						fileHolding({
+							work: w.work!,
+							lane: "design",
+							item: null,
+							cause,
+							evidence: [e.cause, e.lastWords].join(": "),
+						}),
 					],
 				};
 			}

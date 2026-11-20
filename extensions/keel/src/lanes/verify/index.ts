@@ -13,10 +13,11 @@ import {
 	type RepoResult,
 	type Sha,
 } from "../../repo/index.ts";
-import type { Ruling } from "../build/public.ts";
-import type { Mandate } from "../design/public.ts";
+import { toBuild } from "../build/public.ts";
+import { fileHolding, type Resume } from "../queue/public.ts";
 import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
+import type { Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
@@ -30,30 +31,11 @@ import { grounds } from "./tools.ts";
 
 export { verifyTools } from "./tools.ts";
 
-type Context = {
-	repo: RepoInfo;
-	mandate: Mandate;
-	head: Sha;
-	rulings: Ruling[];
-};
 type Event =
 	| KernelEvent
-	| ({
-			kind: "published";
-			item: string;
-			sha: Sha;
-			addresses: string[];
-			brief: string;
-	  } & Context)
-	| ({ kind: "handoff"; base: Sha; summary: string; risk: string } & Context)
+	| Publication
+	| Resume
 	| { kind: "slot_granted" | "cancel" }
-	| {
-			kind: "resume";
-			cause: string;
-			item: string;
-			direction: string;
-			evidence: string;
-	  }
 	| { kind: "reset_counts"; item: string }
 	| {
 			kind: "verdict";
@@ -84,10 +66,10 @@ export const verify: Lane<State> = {
 			send: Message[] = [],
 			notes: Note[] = [];
 		const work = world.work!;
-		const deliver = (lane: string, e: LaneEvent) =>
+		const deliver = (lane: "design" | "trunk", e: LaneEvent) =>
 			send.push({
 				lane,
-				work: lane === "trunk" || lane === "queue" ? null : work,
+				work: lane === "trunk" ? null : work,
 				event: e,
 			});
 		const note = (text: string) => notes.push({ agent: null, text });
@@ -118,14 +100,7 @@ export const verify: Lane<State> = {
 		function hold(item: string, evidence: string, job: string | null = null) {
 			const cause = key("hold");
 			s.holds.push({ cause, item, evidence, job });
-			deliver("queue", {
-				kind: "file",
-				work,
-				lane: "verify",
-				item,
-				cause,
-				evidence,
-			});
+			send.push(fileHolding({ work, lane: "verify", item, cause, evidence }));
 		}
 		function release() {
 			if (s.slot !== "none") deliver("trunk", { kind: "release_slot", work });
@@ -139,13 +114,9 @@ export const verify: Lane<State> = {
 		) {
 			c.phase = "returned";
 			if (c.scope !== "item") release();
-			deliver("build", {
-				kind,
-				item: c.item,
-				evidence,
-				threads,
-				head: s.head!,
-			});
+			send.push(
+				toBuild(work, { kind, item: c.item, evidence, threads, head: s.head! }),
+			);
 		}
 		function mergeReady() {
 			if (s.cancelled || s.jobs.some((j) => j.op.kind === "merge_item")) return;
@@ -263,7 +234,9 @@ export const verify: Lane<State> = {
 						if (op.kind === "merge_item" && r.kind === "merged") {
 							s.head = r.sha;
 							c.phase = "merged";
-							deliver("build", { kind: "merged", item: c.item, head: r.sha });
+							send.push(
+								toBuild(work, { kind: "merged", item: c.item, head: r.sha }),
+							);
 							break;
 						}
 						if (op.kind === "take_trunk" && r.kind === "combined") {
@@ -538,7 +511,7 @@ export const verify: Lane<State> = {
 					s.handover.missing =
 						e.choice === "reject" ? e.annotations.map((a) => a.text) : [];
 					deliver("design", { kind: "closed" });
-					deliver("build", { kind: "closed" });
+					send.push(toBuild(work, { kind: "closed" }));
 					break;
 				}
 			}

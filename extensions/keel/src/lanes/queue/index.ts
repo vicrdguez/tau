@@ -8,16 +8,12 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
+import type { Holding, Resume } from "./public.ts";
 
-type Finding = {
-	work: WorkId;
-	lane: "design" | "build" | "verify";
-	item: string | null;
-	cause: string;
-	evidence: string;
+type Finding = Holding & {
 	status: "open" | "resumed" | "cancelled";
 };
-type FileFinding = { kind: "file" } & Omit<Finding, "status">;
+type FileFinding = { kind: "file" } & Holding;
 type QueueState = { findings: Finding[] };
 
 const question = prose(
@@ -89,7 +85,13 @@ export const queueLane = defineLane(
 			send.push({
 				lane,
 				work,
-				event: { kind: "resume", cause, item, evidence, direction },
+				event: {
+					kind: "resume",
+					cause,
+					item,
+					evidence,
+					direction,
+				} satisfies Resume,
 			});
 			return {
 				state: {
