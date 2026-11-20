@@ -1,5 +1,6 @@
 import { defineState } from "../../kernel/state.ts";
 import type {
+	ProjectPrincipleFile,
 	ProtectedChange,
 	RepoInfo,
 	Sha,
@@ -35,6 +36,7 @@ export type Item = Goal & {
 		| "merged";
 	brief: Brief | null;
 	worker: Worker | null;
+	projectPrinciples: ProjectPrincipleFile[];
 	attempt: number;
 	seq: number;
 	retry: number;

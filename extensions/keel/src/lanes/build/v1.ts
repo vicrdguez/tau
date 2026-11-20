@@ -94,6 +94,7 @@ type V1 = {
 			nodes: string[];
 		} | null;
 		worker: WorkerV1 | null;
+		projectPrinciples: { name: string; body: string }[];
 		attempt: number;
 		seq: number;
 		retry: number;

@@ -96,6 +96,7 @@ function prepare(s: Build, i: Item, w: World) {
 	if (i.worker) s.abandoned.push(i.worker);
 	const attempt = ++i.attempt;
 	i.stage = "preparing";
+	i.projectPrinciples = [];
 	i.retry = 0;
 	i.worker = {
 		kind: "worktree",
@@ -277,6 +278,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				return { state };
 			}
 			if (i?.stage === "preparing" && result.kind === "worktree") {
+				i.projectPrinciples = [...result.principles];
 				i.stage = "building";
 				i.seq = ++s.seq;
 				break;
@@ -376,6 +378,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					stage: "planned",
 					brief: null,
 					worker: null,
+					projectPrinciples: [],
 					attempt: 0,
 					seq: 0,
 					retry: 0,

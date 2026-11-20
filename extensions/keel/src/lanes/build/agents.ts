@@ -72,6 +72,7 @@ const handoff = prose(dir, "../../prose/inputs/build/handoff.md", [
 ]);
 const brief = prose(dir, "../../prose/documents/build-brief.md", [
 	"id",
+	"kind",
 	"goal",
 	"evidence",
 	"fences",
@@ -144,6 +145,7 @@ function renderBrief(s: Build, i: Item) {
 	if (!i.brief) throw Error("Missing worker brief");
 	return brief({
 		id: i.id,
+		kind: i.kind,
 		...i.brief,
 		nodes: authority(s, i.brief.nodes),
 		reason: fullContext(s),
@@ -262,6 +264,7 @@ export function agents(s: Build): AgentDecl[] {
 							{
 								token: token("publish", i.seq),
 								tools: ["publish_build"],
+								projectPrinciples: i.projectPrinciples,
 								paths: i
 									.brief!.fences.split("\n")
 									.map((p) => p.trim())
