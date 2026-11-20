@@ -25,6 +25,7 @@ import {
 	inspect,
 	markdown,
 	materialize,
+	ownedBranch,
 	remove,
 	workerSpec,
 	zlist,
@@ -160,6 +161,9 @@ export function readPublishable(
 		if (files.length) return { kind: "dirty", files };
 		if (!(await g.ancestor(worker.base, owned.head)))
 			return { kind: "not_descendant" };
+		const build = await g.head(worker.from);
+		if (build === null) moved(null);
+		await ownedBranch(g, worker.from);
 		const paths = protectedGlobs?.map((glob) => ":(top,glob)" + glob);
 		const touched =
 			paths?.length === 0
@@ -173,7 +177,8 @@ export function readPublishable(
 							"--ignore-submodules=none",
 							"--name-only",
 							"-z",
-							worker.base,
+							"--merge-base",
+							build,
 							owned.head,
 							"--",
 							...(paths ?? []),
