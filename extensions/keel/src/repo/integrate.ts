@@ -199,7 +199,7 @@ export async function integrate(
 		if (!before) return owned.wt;
 		// Forget skip-worktree/assume-unchanged bits as well as staged dirt.
 		// Checkout detached: reset --hard would move a proof-attached branch.
-		await owned.wt.output("read-tree", "--empty");
+		await owned.wt.output("rm", "-rf", "--sparse", "--ignore-unmatch", "--", ".");
 		await owned.wt.output("checkout", "--force", "--detach", candidate);
 		before = undefined;
 		return owned.wt;
