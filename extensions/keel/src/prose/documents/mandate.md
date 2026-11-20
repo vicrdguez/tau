@@ -1,16 +1,11 @@
 ## Intent
 
-The goal, in the owner's words. The done predicate: one check that passes or fails.
-For each seam the work touches, who calls it now and who will later.
-
-## Seams
-
-What must hold at each boundary the work touches: signatures, ownership, allowed dependencies. Write the caller's usage first and derive the rest from it. Leave this section out when the work stays inside existing seams.
+Give the owner's goal and a falsifiable done predicate. Use the label `intent` for this node.
 
 ## Rules
 
-Each rule the work must keep, with the probe that would prove it false. Then what must never exist.
+Give each rule a distinct label. Pair it with the probe that would show it false.
 
 ## Proof
 
-The commands the verifier runs, and what each one establishes.
+Give each proof a distinct label in `id`, its command as an argument vector, and its positive timeout in milliseconds. Choose commands that can safely run again in a disposable checkout. List protected paths as top-level Git globs under the label `protectedPaths`.

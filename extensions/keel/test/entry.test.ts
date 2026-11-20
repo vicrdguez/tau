@@ -14,7 +14,16 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 		["keel.answer", "keel.deliver", "keel.effect", "keel.stop"],
 	);
 	const tools = extension.tools?.map((tool) => tool.name) ?? [];
-	for (const name of ["ground", "publish_plan", "brief_item", "record_ruling", "publish_build", "publish_verdict", "handoff_build"]) assert.ok(tools.includes(name), name);
+	for (const name of [
+		"ground",
+		"publish_plan",
+		"brief_item",
+		"record_ruling",
+		"publish_build",
+		"publish_verdict",
+		"handoff_build",
+	])
+		assert.ok(tools.includes(name), name);
 	assert.equal(tools.length, new Set(tools).size);
 });
 
