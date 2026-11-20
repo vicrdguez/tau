@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,12 @@ const child = fileURLToPath(
 	new URL("./fixtures/scenario-kill.ts", import.meta.url),
 );
 
-async function assertLanded(root: string, base: string, build: string) {
+async function assertLanded(
+	root: string,
+	base: string,
+	build: string,
+	checkouts: string[],
+) {
 	const trunk = git(root, "rev-parse", "trunk");
 	assert.notEqual(trunk, base);
 	assert.equal(git(root, "rev-parse", "main"), base);
@@ -38,6 +43,8 @@ async function assertLanded(root: string, base: string, build: string) {
 		/^detached$/m,
 		"no verifier or integration checkout remains",
 	);
+	for (const path of checkouts)
+		await assert.rejects(access(path), { code: "ENOENT" });
 	return trunk;
 }
 
@@ -47,8 +54,17 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 	t.after(() => s.store.harness.close(ctx));
 	await s.start();
 	await s.settle();
-	const trunk = await assertLanded(root, base, `keel/${s.root.id}/build`);
-	await s.assertHistory({ publishes: 2, reviews: 3, landings: 1 });
+	const checkouts = await s.assertHistory({
+		publishes: 2,
+		reviews: 3,
+		landings: 1,
+	});
+	const trunk = await assertLanded(
+		root,
+		base,
+		`keel/${s.root.id}/build`,
+		checkouts,
+	);
 	await s.accept(trunk);
 });
 
@@ -77,8 +93,13 @@ test("SQLite SIGKILL before first verifier and after trunk CAS: one durable publ
 	t.after(() => s.store.harness.close(ctx));
 	await s.assertHistory({ publishes: 1, reviews: 2, landings: 1 });
 	await s.settle();
+	const checkouts = await s.assertHistory({
+		publishes: 1,
+		reviews: 2,
+		landings: 1,
+	});
 	assert.equal(
-		await assertLanded(root, base, `keel/${s.root.id}/build`),
+		await assertLanded(root, base, `keel/${s.root.id}/build`, checkouts),
 		landedBeforeAck,
 	);
 	assert.equal(
@@ -91,6 +112,5 @@ test("SQLite SIGKILL before first verifier and after trunk CAS: one durable publ
 		0,
 		"the durable landing owed no second agent turn",
 	);
-	await s.assertHistory({ publishes: 1, reviews: 2, landings: 1 });
 	await s.accept(landedBeforeAck);
 });

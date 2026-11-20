@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
@@ -297,12 +296,6 @@ export async function openScenario(
 			Math.max(1, expected.reviews),
 			"exactly one durable checkout plan per published review",
 		);
-		if (expected.reviews > 0) {
-			for (const checkout of checkouts)
-				await assert.rejects(access(String(checkout?.path)), {
-					code: "ENOENT",
-				});
-		}
 		if (expected.reviews === 0)
 			assert.equal(
 				slots.filter((a) => a.role === "verifier").length,
@@ -317,6 +310,7 @@ export async function openScenario(
 				expected.reviews,
 				"one verifier turn per review",
 			);
+		return checkouts.map((op) => String(op?.path));
 	}
 	async function accept(trunk: string) {
 		assert.equal(
