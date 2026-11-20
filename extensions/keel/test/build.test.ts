@@ -445,6 +445,10 @@ test("stop holds the current turn, resume redelivers direction, and cancellation
 		stop();
 		b.send({ kind: "cancel" });
 		assert.deepEqual(b.agents(), []);
+		if (role === "worker") {
+			assert.equal((b.effect().spec.op as JsonObject).kind, "remove");
+			b.done({kind:"removed"});
+		}
 		assert.deepEqual(b.effects(), []);
 		b.send({
 			kind: "effect_done",
@@ -453,6 +457,70 @@ test("stop holds the current turn, resume redelivers direction, and cancellation
 		});
 		assert.deepEqual(b.agents(), []);
 	}
+});
+
+test("cancel gathers all worker cleanup outcomes into one completion, including held and in-flight attempts", () => {
+	const b = setup(2);
+	b.plan([item, { ...item,id:"second" }]);
+	b.send({kind:"brief", ...brief});
+	const held = b.effect();
+	b.send({kind:"effect_failed",key:held.key,error:"interrupted after worktree add"});
+	b.send({kind:"brief", ...brief,item:"second"});
+	const running = b.effect();
+	Object.assign(b.world, {runningEffect:(key:string)=>key===running.key});
+	assert.equal(b.send({kind:"cancel"}).send?.length ?? 0, 0);
+	assert.deepEqual(b.agents(),[]);
+	assert.equal(b.effects().length,1);
+	const op = b.effect().spec.op as JsonObject;
+	assert.equal(op.kind,"remove");
+	assert.deepEqual(op.target,held.spec.op);
+	assert.notEqual(op.merged,true);
+	assert.equal(b.done({kind:"kept",reason:"private",files:["scratch"]}).send?.length ?? 0,0);
+	assert.deepEqual(b.effects(),[]);
+	b.send({kind:"effect_done",key:running.key,result:{kind:"worktree",base:repo.trunkHead,principles:[]}});
+	assert.deepEqual((b.effect().spec.op as JsonObject).target,running.spec.op);
+	const final = b.send({kind:"effect_failed",key:b.effect().key,error:"lost registration"}).send!;
+	assert.equal(final.length,1);
+	assert.equal(final[0]!.lane,"design");
+	assert.equal(final[0]!.event.kind,"cleanup_finished");
+	assert.equal(final[0]!.event.lane,"build");
+	const kept = JSON.stringify(final[0]!.event.kept);
+	for(const evidence of ["worker-fix-1","scratch","worker-second-1","lost registration"]) assert.ok(kept.includes(evidence));
+	assert.deepEqual(b.effects(),[]);
+	assert.equal(b.send({kind:"cancel"}).send?.length ?? 0,0);
+});
+
+test("cancel without a worker acknowledges completion; unclaimed worktree creation never starts", () => {
+	const empty=setup();
+	assert.deepEqual(empty.send({kind:"cancel"}).send,[{lane:"design",work,event:{kind:"cleanup_finished",lane:"build",kept:[]}}]);
+	const b=setup();
+	b.prepare();
+	const pending=b.effect();
+	b.send({kind:"cancel"});
+	assert.ok(b.effects().every(e => e.key!==pending.key && (e.spec.op as JsonObject).kind==="remove"));
+});
+
+test("cancel drains an existing removal exactly once and includes an earlier kept worker", () => {
+	const b = setup(2);
+	b.plan([item,{...item,id:"other"}]);
+	b.send({kind:"brief",...brief});
+	b.done({kind:"worktree",base:repo.trunkHead,principles:[]});
+	b.pub();
+	b.send({kind:"merged",item:"fix",head:merged});
+	b.done({kind:"kept",reason:"private",files:["before-cancel"]});
+	b.send({kind:"brief",...brief,item:"other"});
+	b.done({kind:"worktree",base:merged,principles:[]});
+	b.pub();
+	b.send({kind:"merged",item:"other",head:sha});
+	const active=b.effect();
+	Object.assign(b.world,{runningEffect:(key:string)=>key===active.key});
+	b.send({kind:"cancel"});
+	const retried = b.effects().find(e=>e.key!==active.key)!;
+	assert.equal((retried.spec.op as JsonObject).mergedHead,merged);
+	b.send({kind:"effect_done",key:retried.key,result:{kind:"kept",reason:"private",files:["before-cancel"]}});
+	const completion=b.send({kind:"effect_done",key:active.key,result:{kind:"removed"}}).send![0]!.event;
+	assert.match(JSON.stringify(completion.kept), /before-cancel/);
+	assert.deepEqual(b.effects(),[]);
 });
 
 test("merge authorizes cleanup; kept private files are reported and the coordinator hands off the verified head", () => {
