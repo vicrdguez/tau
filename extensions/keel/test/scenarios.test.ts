@@ -93,6 +93,7 @@ test("reviewed Mandate: rework both annotated nodes, dispose each rider, redesig
 
 test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening stale riders or starting a build", async (t) => {
 	const { root } = await fixture(t);
+	await seedBookPolicy(root);
 	const file = join(root, ".git", "keel.sqlite");
 	const first = await openReview(root, await openNodeSqliteStorage(file), true);
 	const [review, rider] = await (async () => {

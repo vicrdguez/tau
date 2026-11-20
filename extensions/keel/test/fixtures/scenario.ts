@@ -91,7 +91,7 @@ export async function openScriptedWorkflow(
 		role: string,
 		name: string,
 		args: JsonObject,
-		...expectedInput: string[]
+		...expectedInput: (string | { tool: string; text: string })[]
 	): FauxResponseStep {
 		return (context, _, __, model) => {
 			if (model.id !== role)
@@ -99,14 +99,25 @@ export async function openScriptedWorkflow(
 			const latest = JSON.stringify(
 				context.messages.filter((m) => m.role === "user").at(-1),
 			);
-			for (const part of expectedInput)
-				if (!latest?.includes(part))
+			const last = context.messages.at(-1);
+			for (const part of expectedInput) {
+				if (typeof part === "string") {
+					if (!latest?.includes(part))
+						errors.push(
+							`${name}: latest input did not include ${part}: ${latest}`,
+						);
+				} else if (
+					last?.role !== "toolResult" ||
+					last.toolName !== part.tool ||
+					!JSON.stringify(last.content).includes(part.text)
+				) {
 					errors.push(
-						`${name}: latest input did not include ${part}: ${latest}`,
+						`${name}: expected ${part.tool} to return ${part.text}; got ${JSON.stringify(last)}`,
 					);
-			for (const m of context.messages)
-				if (m.role === "toolResult" && m.isError)
-					errors.push(`${m.toolName}: ${JSON.stringify(m.content)}`);
+				}
+			}
+			if (last?.role === "toolResult" && last.isError)
+				errors.push(`${last.toolName}: ${JSON.stringify(last.content)}`);
 			return fauxAssistantMessage([fauxToolCall(name, args)], {
 				stopReason: "toolUse",
 			});

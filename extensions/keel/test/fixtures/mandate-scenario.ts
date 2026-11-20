@@ -118,7 +118,25 @@ const finalDraft = {
 	riders: riders.slice(0, 2),
 };
 
+const encodeCommand = String.raw`cat > book-check.sh <<'SH'
+set -eu
+. ./book.sh
+test -f book
+p=$(mktemp)
+trap 'rm -f "$p"' EXIT
+write_book "$p" probe
+if write_book "$p" ''; then exit 1; fi
+printf 'probe\n' | cmp - "$p"
+[ "$(read_book "$p")" = probe ]
+SH
+cat > book.sh <<'SH'
+read_book() { cat "$1"; }
+write_book() { [ -n "$2" ] && printf '%s\n' "$2" > "$1"; }
+SH
+git add book.sh book-check.sh && sh book-check.sh && git commit -m 'encode book contract'`;
+
 export async function seedBookPolicy(cwd: string) {
+	await writeFile(join(cwd, "book-check.sh"), "test -f book\n");
 	await mkdir(join(cwd, ".keel", "principles"), { recursive: true });
 	await writeFile(
 		join(cwd, ".keel", "principles", `${projectName}.md`),
@@ -227,10 +245,10 @@ export async function openReview(
 				"publish_mandate",
 				{
 					draft: second,
-					replies: revisionNotes.map((_, i) => ({
+					replies: [laterReader, settlement].map((reason, i) => ({
 						n: i + 1,
 						status: "acted_on",
-						reason: [laterReader, settlement][i]!,
+						reason,
 					})),
 				},
 				...revisionNotes,
@@ -308,16 +326,21 @@ export async function openReview(
 				nodes: ["read-book", "write-book", "empty-input", "stdout"],
 			}),
 			turn("worker", "principle", { name: projectName }, "empty-input"),
-			turn("worker", "record_ruling", {
-				what: ruling,
-				why: "Preserve prior bytes.",
-				cost: "A failed write loses data.",
-				rank: 1,
-				follows: "empty-input",
-				principles: [projectName],
-			}),
+			turn(
+				"worker",
+				"record_ruling",
+				{
+					what: ruling,
+					why: "Preserve prior bytes.",
+					cost: "A failed write loses data.",
+					rank: 1,
+					follows: "empty-input",
+					principles: [projectName],
+				},
+				{ tool: "principle", text: body },
+			),
 			turn("worker", "bash", {
-				command: `cat > book.sh <<'SH'\nread_book() { cat "$1"; }\nwrite_book() { [ -n "$2" ] && printf '%s\\n' "$2" > "$1"; }\nSH\ncat > book-check.sh <<'SH'\nset -eu\n. ./book.sh\np=$(mktemp)\ntrap 'rm -f "$p"' EXIT\nwrite_book "$p" probe\nif write_book "$p" ''; then exit 1; fi\nprintf 'probe\\n' | cmp - "$p"\n[ "$(read_book "$p")" = probe ]\nSH\ngit add book.sh book-check.sh && sh book-check.sh && git commit -m 'encode book contract'`,
+				command: encodeCommand,
 			}),
 			turn("worker", "publish_build", { summary: encode, addresses: [] }),
 			turn("verifier", "bash", { command: check }, description),
