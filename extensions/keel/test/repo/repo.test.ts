@@ -62,6 +62,17 @@ test("start pins base through both trunk/build CAS boundaries; worker and verifi
 	assert.equal(git(f.checkout.path, "rev-parse", "HEAD"), f.base);
 	assert.equal(git(f.root, "rev-parse", "main"), main);
 });
+test("an existing trunk is the build base even when the owner's main has advanced", async (t) => {
+	const f = await fixture(t);
+	git(f.root, "branch", "trunk", f.base);
+	git(f.root, "commit", "--allow-empty", "-m", "not yet on trunk");
+	const repo = await readRepo(nodeExec, f.root);
+	assert.notEqual(repo.baseHead, repo.trunkHead);
+	const result = await converge(nodeExec, repo, f.start);
+	assert.deepEqual(result, { kind: "started", base: f.base });
+	assert.deepEqual(await converge(nodeExec, repo, f.start), result);
+	assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+});
 test("discovery from a linked checkout uses its toplevel but the shared repository layout", async (t) => {
 	const f = await fixture(t);
 	const linked = join(f.root, "linked space");
@@ -81,11 +92,29 @@ test("ref-prefix collisions are occupied, not a reason to delete a ref", async (
 	git(f.root, "branch", "keel/42", f.base);
 	is(await f.run(f.start), "occupied");
 	assert.equal(git(f.root, "rev-parse", "keel/42"), f.base);
+	git(f.root, "branch", "-d", "keel/42");
+	git(f.root, "branch", f.branch + "/child", f.base);
+	is(await f.run(f.start), "occupied");
+	assert.equal(git(f.root, "rev-parse", f.branch + "/child"), f.base);
+	assert.equal((await readRepo(nodeExec, f.root)).trunkHead, null);
+});
+test("a revision alias cannot stand in for an absent trunk branch", async (t) => {
+	const f = await fixture(t);
+	git(f.root, "tag", "refs/heads/trunk", f.base);
+	const repo = await readRepo(nodeExec, f.root);
+	assert.equal(repo.trunkHead, null);
+	is(await converge(nodeExec, repo, f.start), "started");
+	assert.equal(
+		git(f.root, "show-ref", "--verify", "--hash", "refs/heads/trunk"),
+		f.base,
+	);
 });
 test("trunk equal to base, reserved branch aliases and escaping layout names are refused", async (t) => {
 	const f = await fixture(t);
+	git(f.root, "branch", "stable", f.base);
 	for (const opts of [
 		{ base: "main", trunk: "main" },
+		{ base: "stable", trunk: "main" },
 		{ base: f.branch, trunk: "trunk" },
 		{ trunk: "keel/42/trunk" },
 	])
@@ -173,6 +202,49 @@ test("dirty worker (including ignored files) retained at removal; clean worker r
 	);
 	assert.equal(git(f.root, "rev-parse", f.worker.branch), merge.item);
 });
+test("a worker's index cannot hide local edits at publish or forced removal", async (t) => {
+	const f = await fixture(t);
+	await f.item();
+	const file = join(f.worker.path, "book");
+	await writeFile(file, "keep my edits");
+	for (const flag of ["assume-unchanged", "skip-worktree"]) {
+		git(f.worker.path, "update-index", "--" + flag, "book");
+		assert.equal((await f.publish()).kind, "dirty");
+		is(await f.run({ kind: "remove", key: "drop", target: f.worker }), "kept");
+		assert.equal(await readFile(file, "utf8"), "keep my edits");
+		git(f.worker.path, "update-index", "--no-" + flag, "book");
+	}
+});
+test("worker removal does not discard private files inside a checked-out submodule", async (t) => {
+	const f = await fixture(t);
+	await f.item();
+	const dep = join(f.worker.path, "dep");
+	git(
+		f.worker.path,
+		"-c",
+		"protocol.file.allow=always",
+		"submodule",
+		"add",
+		"-b",
+		"main",
+		f.root,
+		"dep",
+	);
+	git(f.worker.path, "commit", "-m", "add submodule");
+	await writeFile(
+		git(
+			dep,
+			"rev-parse",
+			"--path-format=absolute",
+			"--git-path",
+			"info/exclude",
+		),
+		"private\n",
+	);
+	await writeFile(join(dep, "private"), "keep");
+	is(await f.run({ kind: "remove", key: "drop", target: f.worker }), "kept");
+	assert.equal(await readFile(join(dep, "private"), "utf8"), "keep");
+});
 test("worker creation refuses a pre-existing item branch checked out elsewhere, even at the planned base", async (t) => {
 	const f = await fixture(t);
 	is(await f.run(f.start), "started");
@@ -213,6 +285,53 @@ test("moved build, item or pinned trunk is reported, never rewound", async (t) =
 	is(await f.run({ ...f.start, branch: layout.buildBranch("43") }), "moved");
 	for (const ref of [f.branch, f.worker.branch, "trunk"])
 		assert.equal(git(f.root, "rev-parse", ref), merge.item);
+});
+test("a foreign branch at exactly the planned tip is not an interrupted keel creation", async (t) => {
+	const f = await fixture(t);
+	git(f.root, "branch", f.branch, f.base);
+	is(await f.run(f.start), "occupied");
+	git(f.root, "branch", "-d", f.branch);
+	is(await f.run(f.start), "started");
+	git(f.root, "branch", f.worker.branch, f.base);
+	is(await f.run(f.worker), "occupied");
+	await assert.rejects(access(f.worker.path));
+});
+test("a recreated build ref at the expected head is not keel's to advance", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	git(f.root, "branch", "-D", f.branch);
+	git(f.root, "branch", f.branch, op.expected);
+	is(await f.run(op), "occupied");
+	assert.equal(git(f.root, "rev-parse", f.branch), op.expected);
+	await assert.rejects(access(op.integration));
+});
+test("a worker lock does not authorize publishing a replacement item ref", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	git(f.root, "update-ref", "-d", "refs/heads/" + f.worker.branch);
+	git(f.root, "update-ref", "refs/heads/" + f.worker.branch, op.item);
+	assert.equal((await f.publish()).kind, "occupied");
+	assert.equal(git(f.worker.path, "rev-parse", "HEAD"), op.item);
+});
+test("landing cannot advance trunk underneath a worktree rebasing it", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	const other = join(f.root, "in rebase");
+	git(f.root, "worktree", "add", other, "trunk");
+	await writeFile(join(other, "book"), "trunk\n");
+	git(other, "commit", "-am", "on trunk");
+	const trunk = (await readRepo(nodeExec, f.root)).trunkHead!;
+	assert.throws(() => git(other, "rebase", op.item));
+	assert.equal(git(other, "branch", "--show-current"), "");
+	const p = {
+		key: "land",
+		expectedTrunk: trunk,
+		combined: trunk,
+		message: "squash",
+	};
+	const target = await prepareLanding(nodeExec, f.repo, p);
+	is(await f.run({ ...p, kind: "land", target }), "occupied");
+	assert.equal(git(f.root, "rev-parse", "trunk"), trunk);
 });
 test("a foreign checkout of the build or trunk prevents CAS even at the expected commit", async (t) => {
 	const f = await fixture(t);
@@ -410,6 +529,7 @@ test("conflict reports the path, and creates no conflict state on the build bran
 	const expected = (await readRepo(nodeExec, f.root, { base: "inspection" }))
 		.baseHead;
 	const result = await f.run({ ...op, expected });
+	assert.deepEqual(await f.run({ ...op, expected }), result);
 	is(result, "conflict");
 	assert.deepEqual(result.paths, ["book"]);
 	assert.equal(git(f.root, "rev-parse", f.branch), expected);
@@ -423,12 +543,14 @@ for (const [name, script] of [
 		async (t) => {
 			const f = await fixture(t);
 			const op = await f.item();
-			const result = await f.run({
+			const plan = {
 				...op,
 				checks: [
 					{ id: "run", argv: [process.execPath, "-e", script], timeoutMs: 500 },
 				],
-			});
+			};
+			const result = await f.run(plan);
+			assert.deepEqual(await f.run(plan), result);
 			is(result, "checks_failed");
 			assert.equal(result.checks[0]!.id, "run");
 			assert.notEqual(result.checks[0]!.code, 0);
