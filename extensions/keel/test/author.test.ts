@@ -372,6 +372,8 @@ test("registration requires a fixture at the state version", () => {
 		type Contract = typeof lane;
 		// @ts-expect-error facts are delivered, never refused
 		const reject: Contract["onFact"] = () => ({ reject: "not now" });
+		// @ts-expect-error returning state alongside a rejection still refuses the fact
+		const both: Contract["onFact"] = (state) => ({ state, reject: "stale" });
 		const needsViews = (
 			_: ReturnType<typeof plan.initial>,
 			w: World,
@@ -384,7 +386,7 @@ test("registration requires a fixture at the state version", () => {
 		const agents: Contract["agents"] = needsViews;
 		// @ts-expect-error declarations cannot require views or a clock
 		const effects: Contract["effects"] = needsViews;
-		void [reject, asks, agents, effects];
+		void [reject, both, asks, agents, effects];
 		// @ts-expect-error an older fixture missing a field cannot pin this state
 		defineLane(lane, {
 			version: 1,
