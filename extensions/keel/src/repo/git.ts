@@ -32,18 +32,26 @@ export const nodeExec: Exec = (argv, cwd, { env, timeoutMs }) =>
 				if (!hasCode(error, "ESRCH")) reject(error);
 			}
 		}
+		let exited = false;
+		let drainTimer: ReturnType<typeof setTimeout> | undefined;
+		function stopWaiting() {
+			timedOut = true;
+			if (!exited) killProofGroup();
+			child.stdout.destroy();
+			child.stderr.destroy();
+		}
 		const timer = proof
-			? setTimeout(() => {
-					timedOut = true;
-					killProofGroup();
-				}, timeoutMs)
+			? setTimeout(stopWaiting, timeoutMs)
 			: undefined;
 		// "close" waits for inherited pipes. Stop any surviving group members
 		// when the command exits, before waiting for its trailing output.
 		if (proof)
 			child.once("exit", () => {
-				clearTimeout(timer);
-				if (!timedOut) killProofGroup();
+				exited = true;
+				if (!timedOut) {
+					killProofGroup();
+					drainTimer = setTimeout(stopWaiting, 250);
+				}
 			});
 		function collect(parts: Buffer[], bytes: Buffer) {
 			if (!proof) parts.push(bytes);
@@ -60,6 +68,7 @@ export const nodeExec: Exec = (argv, cwd, { env, timeoutMs }) =>
 			else reject(error);
 		});
 		child.on("close", (code) => {
+			clearTimeout(drainTimer);
 			clearTimeout(timer);
 			try {
 				resolve({
