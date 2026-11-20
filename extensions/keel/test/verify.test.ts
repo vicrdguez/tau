@@ -31,6 +31,7 @@ const repo = {
 };
 const mandate = {
 	reviewed: false,
+	delegated: [],
 	encodeRequired: false,
 	approvalNotes: [],
 	intent: "Balance every ledger.",
@@ -299,7 +300,7 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	const diagnosis = x.agent("diagnoser");
 	const exp = diagnosis.expects[0]!;
 	const request = principleInputs.render(
-		{role: diagnosis.role, cwd: diagnosis.cwd!, situation: exp.situation},
+		{ role: diagnosis.role, cwd: diagnosis.cwd!, situation: exp.situation },
 		exp.input!(),
 	).text;
 	assert.match(request, /# Fix Root Causes/);

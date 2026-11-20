@@ -123,6 +123,10 @@ test("Ground requires an audit and unique observations before opening the design
 	])
 		assert.ok("reject" in x.reduce({ ...start, audit: invalid }));
 	x.act(start);
+	assert.equal(
+		design.agents(x.state(), world)[0]?.expects[0]?.situation,
+		"shape",
+	);
 	assert.deepEqual(x.asks(), []);
 	for (const value of [
 		audit.exists,
@@ -191,8 +195,13 @@ test("one annotatable Mandate shows Ground rulings, usage before signatures, det
 });
 test("approving with outstanding riders cannot bind; acceptance and delegation settle only their own rider", () => {
 	const x = review();
+	const anchor = x.asks()[0]!.basis.indexOf(rule.probe);
 	const approved = x.answer("mandate/1", "approve", [
-		note(1, "Use exact counts."),
+		{
+			n: 1,
+			text: "Use exact counts.",
+			range: { start: anchor, end: anchor + rule.probe.length },
+		},
 	]);
 	assert.equal(approved.send?.length ?? 0, 0);
 	assert.equal(x.state().mandate, null);
@@ -204,7 +213,16 @@ test("approving with outstanding riders cannot bind; acceptance and delegation s
 	const m = x.state().mandate!;
 	assert.equal(m.reviewed, true);
 	assert.equal(m.encodeRequired, true);
-	assert.deepEqual(m.approvalNotes, ["Use exact counts."]);
+	assert.deepEqual(m.approvalNotes, [`Use exact counts.\n> ${rule.probe}`]);
+	assert.deepEqual(m.delegated, [{ label: "B", text: "Sort imports." }]);
+	assert.deepEqual(
+		m.nodes.find((n) => n.label === "R1"),
+		rule,
+	);
+	const s = m.nodes.find((n) => n.label === "S1");
+	assert.ok(
+		s && "section" in s && s.section === "Seam" && s.body.includes(seam.usage),
+	);
 	const labels = mandateLabels(m);
 	for (const l of ["S1", "R1", "A", "C", "G1", "C1"])
 		assert.ok(labels.includes(l));
@@ -269,10 +287,12 @@ test("a redesigned rider and changed node need approval again; unchanged nodes a
 	);
 	assert.deepEqual([...x.state().rounds[1]!.labels].sort(), ["C", "S1"]);
 	assert.ok(x.asks()[0]!.basis.includes("Native IR"));
+	assert.match(x.asks()[0]!.basis, /A \(evidence; accept\)/);
+	assert.match(x.asks()[0]!.basis, /B \(incidental; leave_open\)/);
 	x.answer("mandate/2", "approve", [note(1, "New approval note.")]);
 	assert.deepEqual(x.state().mandate!.approvalNotes, [
-		"Old approval note.",
-		"New approval note.",
+		"Old approval note.\n> ppr",
+		"New approval note.\n> ppr",
 	]);
 });
 test("a changed rider needs a fresh disposition; a delegated or pending rider cannot silently become a binding node", () => {

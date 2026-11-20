@@ -61,6 +61,7 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 				kind: "bound",
 				mandate: {
 					...mandate,
+					delegated: [],
 					reviewed: false,
 					encodeRequired: false,
 					approvalNotes: [],
@@ -72,6 +73,7 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 	assert.equal(state.reference, bound.reference);
 	assert.deepEqual(state.mandate, {
 		...mandate,
+		delegated: [],
 		reviewed: false,
 		encodeRequired: false,
 		approvalNotes: [],
@@ -100,6 +102,7 @@ test("Ground under prompt authority never grants a self-declared Mandate review"
 	});
 	assert.deepEqual(state.mandate, {
 		...mandate,
+		delegated: [],
 		reviewed: false,
 		encodeRequired: false,
 		approvalNotes: [],
