@@ -3,7 +3,6 @@ import { link, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	buildWork,
-	environment,
 	type Git,
 	hasCode,
 	hash,
@@ -81,7 +80,7 @@ async function check(
 		if (published) occupied(g.cwd);
 	}
 	await prepare();
-	const r = await g.exec(argv, g.cwd, { env: environment(), timeoutMs });
+	const r = await g.exec(argv, g.cwd, { env: { ...process.env }, timeoutMs });
 	const result = { id, code: r.code, tail: (r.stdout + r.stderr).slice(-4096) };
 	const changes = await verifyCheckout();
 	const tmp = file + "-" + randomUUID();
