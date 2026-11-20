@@ -68,7 +68,7 @@ export async function fixture(t: TestContext) {
 	async function prepare(plan: Landing) {
 		const result = await run({
 			kind: "prepare_landing",
-			key: "prepare:" + plan.key,
+			key: `prepare:${plan.key}`,
 			landing: plan,
 		});
 		is(result, "prepared");

@@ -225,10 +225,10 @@ export async function integrate(
 export async function landingCommit(g: Git, plan: Landing) {
 	if (!(await g.ancestor(plan.expectedTrunk, plan.combined)))
 		throw new TypeError("combined build does not include expected trunk");
-	const tree = await g.output("rev-parse", oid(plan.combined) + "^{tree}");
+	const tree = await g.output("rev-parse", `${oid(plan.combined)}^{tree}`);
 	const trunkTree = await g.output(
 		"rev-parse",
-		oid(plan.expectedTrunk) + "^{tree}",
+		`${oid(plan.expectedTrunk)}^{tree}`,
 	);
 	if (tree === trunkTree) return plan.expectedTrunk;
 	return g.commit(tree, [plan.expectedTrunk], plan.key, plan.message);

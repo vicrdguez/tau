@@ -661,7 +661,7 @@ test("proof exit terminates children holding the output pipe, pass or fail", asy
 	const f = await fixture(t);
 	const results = await Promise.all(
 		[0, 7].map((code) =>
-			nodeExec(["sh", "-c", "sleep 10 & exit " + code], f.root, {
+			nodeExec(["sh", "-c", `sleep 10 & exit ${code}`], f.root, {
 				env: { PATH: process.env.PATH },
 				timeoutMs: 1000,
 			}),
@@ -715,41 +715,36 @@ for (const [name, script, paths, headChanged] of [
 	],
 	["empty proof commit", "git commit --allow-empty -m moved", [], true],
 ] as const) {
-	test(
-		name + " fails proof with candidate and paths, on first run and replay",
-		async (t) => {
-			const f = await fixture(t);
-			const op = await f.item();
-			const plan = {
-				...op,
-				checks: [
-					{ id: "mutates", argv: ["sh", "-c", script], timeoutMs: 5000 },
-				],
-			};
-			const result = await f.run(plan);
-			is(result, "checks_failed");
-			assert.deepEqual(result.changes, { paths, headChanged });
-			assert.equal(result.checks[0]!.code, 0);
-			assert.equal(git(f.root, "rev-parse", result.sha + "^2"), op.item);
-			assert.equal(git(f.root, "show", result.sha + ":book"), "new");
-			assert.deepEqual(await f.run(plan), result);
-			assert.equal(git(f.root, "rev-parse", f.branch), f.base);
-			is(
-				await f.run({
-					kind: "remove",
-					key: "drop",
-					target: {
-						kind: "checkout",
-						key: op.key,
-						path: op.integration,
-						sha: result.sha,
-					},
-				}),
-				"removed",
-			);
-			await assert.rejects(access(op.integration));
-		},
-	);
+	test(`${name} fails proof with candidate and paths, on first run and replay`, async (t) => {
+		const f = await fixture(t);
+		const op = await f.item();
+		const plan = {
+			...op,
+			checks: [{ id: "mutates", argv: ["sh", "-c", script], timeoutMs: 5000 }],
+		};
+		const result = await f.run(plan);
+		is(result, "checks_failed");
+		assert.deepEqual(result.changes, { paths, headChanged });
+		assert.equal(result.checks[0]?.code, 0);
+		assert.equal(git(f.root, "rev-parse", `${result.sha}^2`), op.item);
+		assert.equal(git(f.root, "show", `${result.sha}:book`), "new");
+		assert.deepEqual(await f.run(plan), result);
+		assert.equal(git(f.root, "rev-parse", f.branch), f.base);
+		is(
+			await f.run({
+				kind: "remove",
+				key: "drop",
+				target: {
+					kind: "checkout",
+					key: op.key,
+					path: op.integration,
+					sha: result.sha,
+				},
+			}),
+			"removed",
+		);
+		await assert.rejects(access(op.integration));
+	});
 }
 test("untracked proof output does not change the candidate or prevent replay and cleanup", async (t) => {
 	const f = await fixture(t);
