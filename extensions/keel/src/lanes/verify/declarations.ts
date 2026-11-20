@@ -6,9 +6,9 @@ import {
 	prose,
 } from "../../kernel/lane.ts";
 import type { Ruling } from "../build/public.ts";
-import type { Review, State } from "./state.ts";
+import { cleaning, type Review, type State } from "./state.ts";
 
-const dir = import.meta.dirname + "/../../prose";
+const dir = `${import.meta.dirname}/../../prose`;
 const inputs = Object.fromEntries(
 	["item", "rework", "integration", "full", "landing"].map((name) => [
 		name,
@@ -127,7 +127,8 @@ export function effects(s: State): EffectDecl[] {
 		.filter(
 			(j) =>
 				(!s.cancelled || j.op.kind === "land" || j.op.kind === "remove") &&
-				!s.holds.some((h) => h.job === j.key),
+				!s.holds.some((h) => h.job === j.key) &&
+				(j.op.kind === "remove" || !cleaning(s, j.item)),
 		)
 		.map(({ key, op }) => ({
 			key: effectKey(key),

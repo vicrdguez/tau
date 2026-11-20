@@ -19,7 +19,7 @@ import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
 import {
 	type Block,
-	type Job,
+	cleaning,
 	type Op,
 	type Review,
 	type State,
@@ -150,7 +150,10 @@ export const verify: Lane<State> = {
 		function mergeReady() {
 			if (s.cancelled || s.jobs.some((j) => j.op.kind === "merge_item")) return;
 			const c = s.checks.find(
-				(c) => c.phase === "ready" && !s.holds.some((h) => h.item === c.item),
+				(c) =>
+					c.phase === "ready" &&
+					!cleaning(s, c.item) &&
+					!s.holds.some((h) => h.item === c.item),
 			);
 			if (!c) return;
 			const k = key("merge");
@@ -163,7 +166,7 @@ export const verify: Lane<State> = {
 				expected: s.head!,
 				item: c.sha,
 				checks: s.mandate!.checks,
-				message: c.brief,
+				message: `Merge item ${c.item}`,
 			});
 		}
 		function cas() {
@@ -259,7 +262,6 @@ export const verify: Lane<State> = {
 						}
 						if (op.kind === "merge_item" && r.kind === "merged") {
 							s.head = r.sha;
-							s.lastMerged = c.item;
 							c.phase = "merged";
 							deliver("build", { kind: "merged", item: c.item, head: r.sha });
 							break;
@@ -349,7 +351,7 @@ export const verify: Lane<State> = {
 								...new Set(
 									s.verdicts
 										.slice(previousFull + 1)
-										.filter((v) => v.scope === "item" && v.outcome === "pass")
+										.filter((v) => v.scope === "item")
 										.flatMap((v) => v.addresses),
 								),
 							]
@@ -421,10 +423,6 @@ export const verify: Lane<State> = {
 					if (e.outcome === "pass") {
 						retire(c);
 						c.phase = c.scope === "item" ? "ready" : "passed";
-						if (c.scope === "full") {
-							s.slot = "waiting";
-							deliver("trunk", { kind: "take_slot", work });
-						} else if (c.scope === "landing") cas();
 						break;
 					}
 					let diagnose = false;
@@ -544,6 +542,19 @@ export const verify: Lane<State> = {
 				}
 			}
 		mergeReady();
+		const full = find("full");
+		if (
+			full?.phase === "passed" &&
+			!s.cancelled &&
+			!s.handover &&
+			!s.jobs.length &&
+			!s.holds.length
+		) {
+			if (full.scope === "full" && s.slot === "none") {
+				s.slot = "waiting";
+				deliver("trunk", { kind: "take_slot", work });
+			} else if (full.scope === "landing" && s.slot === "held") cas();
+		}
 		return { state: s, send, notes };
 	},
 };

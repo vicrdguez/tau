@@ -80,7 +80,6 @@ export type State = {
 		id: string;
 		survived: number;
 	}[];
-	lastMerged: string | null;
 	handoff: {
 		base: Sha;
 		summary: string;
@@ -97,6 +96,15 @@ export type State = {
 		missing: string[];
 	} | null;
 };
+/** Finish the preceding removal before acting on its successor. The full build depends on all items. */
+export function cleaning(s: State, item: string) {
+	return s.jobs.some(
+		(j) =>
+			j.op.kind === "remove" &&
+			(j.item === item || j.item === "full" || item === "full"),
+	);
+}
+
 export const VerifyDoc = defineState<State>({
 	kind: "keel.verify",
 	scope: "conversation",
@@ -112,7 +120,6 @@ export const VerifyDoc = defineState<State>({
 		holds: [],
 		verdicts: [],
 		threads: [],
-		lastMerged: null,
 		handoff: null,
 		slot: "none",
 		plan: null,
