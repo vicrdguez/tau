@@ -29,6 +29,7 @@ const repo = {
 	trunkHead: "base",
 };
 const mandate = {
+	reviewed: false,
 	intent: "Balance every ledger.",
 	nodes: [{ label: "sums", rule: "Sums match", probe: "compare totals" }],
 	checks: [{ id: "totals", argv: ["run", "proof"], timeoutMs: 10 }],
