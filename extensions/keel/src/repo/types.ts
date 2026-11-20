@@ -78,6 +78,7 @@ export type RepoOp =
 	| Checkout
 	| Remove
 	| Integrate
+	| (Landing & Readonly<{ kind: "prepare_landing" }>)
 	| (Landing & Readonly<{ kind: "land"; target: Sha }>);
 
 export type Obstruction =
@@ -99,6 +100,8 @@ export type RepoResult =
 			checks: readonly CheckReport[];
 			changes?: ProofChanges;
 	  }
+	| { kind: "prepared"; sha: Sha }
+	| { kind: "unchanged"; sha: Sha }
 	| { kind: "landed"; sha: Sha };
 
 export type PublishResult =

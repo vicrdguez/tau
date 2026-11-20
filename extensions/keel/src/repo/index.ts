@@ -11,7 +11,6 @@ import {
 } from "./git.ts";
 import { integrate, landingCommit } from "./integrate.ts";
 import type {
-	Landing,
 	PublishResult,
 	RepoInfo,
 	RepoOp,
@@ -38,10 +37,10 @@ function roles(base: string, trunk: string) {
 	if (
 		branch(base).toLowerCase() === branch(trunk).toLowerCase() ||
 		trunk.toLowerCase() === "main" ||
-		[base, trunk].some((s) => /^keel(?:\/|$)/i.test(s))
+		[base, trunk].some((s) => /^(?:HEAD$|(?:refs|keel)(?:\/|$))/i.test(s))
 	)
 		throw new TypeError(
-			"trunk cannot be main; base, trunk and the keel branch namespace must be disjoint",
+			"base and trunk must be distinct short branch names outside keel; trunk cannot be main",
 		);
 }
 
@@ -70,13 +69,6 @@ export async function readRepo(
 		baseHead,
 		trunkHead: await g.head(branch(trunk)),
 	};
-}
-
-/** Given a persisted key and spec, materialize an unreferenced candidate.
- * Persist its result as land.target before the CAS. If trunk moved, verify THIS
- * sha while holding the landing slot: land cannot substitute a tree. */
-export function prepareLanding(exec: Exec, repo: RepoInfo, plan: Landing) {
-	return landingCommit(new Git(exec, repo.commonDir), plan);
 }
 
 /** The kernel serializes operations for a build, and does not cancel an in-flight land. */
@@ -130,13 +122,23 @@ export function converge(
 			case "merge_item":
 			case "take_trunk":
 				return integrate(g, repo, op);
+			case "prepare_landing": {
+				const sha = await landingCommit(g, op);
+				if (sha !== op.expectedTrunk) return { kind: "prepared", sha };
+				const at = await g.head(repo.trunk);
+				if (at !== sha) moved(at);
+				return { kind: "unchanged", sha };
+			}
 			case "land": {
 				const at = await g.head(repo.trunk);
-				if (at === op.target) return { kind: "landed", sha: at };
+				if (at === op.target && at !== op.expectedTrunk)
+					return { kind: "landed", sha: at };
 				if (at !== op.expectedTrunk) moved(at);
 				const target = await landingCommit(g, op);
 				if (target !== op.target)
 					throw new TypeError("stored target does not match landing plan");
+				if (target === op.expectedTrunk)
+					return { kind: "unchanged", sha: target };
 				await advance(g, repo.trunk, op.expectedTrunk, target, op.key);
 				return { kind: "landed", sha: target };
 			}
