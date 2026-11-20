@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { decision, eventLog } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import { MemoryStorage, openNodeSqliteStorage } from "tau/durable";
+import {
+	type JsonObject,
+	MemoryStorage,
+	openNodeSqliteStorage,
+} from "tau/durable";
+import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { ProjectState } from "../src/kernel/records.ts";
+import { stateDoc } from "../src/kernel/state.ts";
+import { runRepoEffect } from "../src/workflow.ts";
 import { openScenario } from "./fixtures/scenario.ts";
 import { fixture, git } from "./repo/fixture.ts";
 
@@ -66,6 +75,91 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 		checkouts,
 	);
 	await s.accept(trunk);
+});
+
+test("cancel from the idle designer desk while a worker creation is running: one decision, one final inventory, no abort of the desk", {
+	timeout: 15000,
+}, async (t) => {
+	const { root } = await fixture(t);
+	const materialized = Promise.withResolvers<string>();
+	const release = Promise.withResolvers<void>();
+	const s = await openScenario(
+		root,
+		new MemoryStorage(),
+		"through-publish",
+		async (input, ctx, owner) => {
+			const result = await runRepoEffect(input, ctx, owner);
+			const op = input.spec.op as JsonObject | undefined;
+			if (op?.kind === "worktree" && result.kind === "worktree") {
+				materialized.resolve(String(op.path));
+				await release.promise;
+			}
+			return result;
+		},
+	);
+	const { harness } = s.store;
+	t.after(async () => {
+		release.resolve();
+		await harness.close(ctx);
+	});
+	harness.resume();
+	await s.start();
+	const path = await materialized.promise;
+	await writeFile(join(path, "owner-draft"), "Do not discard this");
+	s.provider.setResponses([
+		fauxAssistantMessage([fauxToolCall("request_cancel", {})], {
+			stopReason: "toolUse",
+		}),
+	]);
+	await (
+		await s.root.submit(
+			{ type: "input", content: "Cancel this work, please." },
+			ctx,
+		)
+	).wait(ctx);
+	const slots = Object.values(
+		(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
+	);
+	assert.equal(slots.length, 1);
+	const ask = await harness.commit(
+		(tx) => decision(tx, slots[0]!.decision),
+		ctx,
+	);
+	assert.ok(ask?.status === "open");
+	assert.deepEqual(ask.choices, ["cancel", "continue"]);
+	const result = await fauxAnswer(s.store, ask.id, {
+		basis: ask.basis,
+		choice: "cancel",
+		annotations: [],
+	});
+	assert.equal(result.kind, "answered");
+	const answer = (
+		await harness.commit((tx) => tx.scanTasks({ kind: "keel.answer" }, 10), ctx)
+	).items[0];
+	assert.ok(answer);
+	await harness.waitForTask(answer.id, ctx);
+	release.resolve();
+	await s.settle();
+	const events = await harness.commit(
+		async (tx) => tx.scanEntries({ conversationId: await eventLog(tx) }, 100),
+		ctx,
+	);
+	const inventory = events.items
+		.filter((e) => e.kind === "keel.event")
+		.map((e) => String((e.data as JsonObject).text))
+		.filter((text) => text.includes("Cancellation cleanup finished"));
+	assert.equal(inventory.length, 1);
+	for (const part of [path, "owner-draft", `keel/${s.root.id}/`])
+		assert.ok(inventory[0]!.includes(part), inventory[0]);
+	assert.match(inventory[0]!, /branch/i);
+	assert.equal(
+		await readFile(join(path, "owner-draft"), "utf8"),
+		"Do not discard this",
+	);
+	const stops = (
+		await harness.commit((tx) => tx.scanTasks({ kind: "keel.stop" }, 100), ctx)
+	).items;
+	assert.ok(stops.every((t) => t.conversationId !== s.root.id));
 });
 
 test("SQLite SIGKILL before first verifier and after trunk CAS: one durable publication, one review per scope, one landing and hand-over", async (t) => {
