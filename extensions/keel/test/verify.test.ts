@@ -246,12 +246,23 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 		x.publish(`fix${i}`, ["totals"]);
 		x.clean();
 		x.checkout();
-		const r = x.fail();
+		const r =
+			i === 0
+				? x.fail()
+				: x.call({
+						kind: "verdict",
+						outcome: "fail",
+						text: "two independent problems",
+						blocks: [block("new-defect"), block("totals")],
+						notes: [],
+					});
 		if (i === 0) assert.equal(r.send?.[0]?.event.kind, "rework");
 		else assert.ok(!r.send?.length);
 	}
 	const a = x.agent("diagnoser");
-	assert.match(a.expects[0]!.input!(), /negative balance/);
+	const request = a.expects[0]!.input!();
+	assert.match(request, /negative balance/);
+	assert.match(request, /Threads that survived two claimed fixes: totals/);
 	const r = x.call(
 		{
 			kind: "diagnosis",
@@ -264,6 +275,7 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	const file = r.send?.find((m) => m.lane === "queue")?.event;
 	assert.ok(file);
 	assert.equal(file.item, "bug");
+	assert.match(String(file.evidence), /Two claimed fixes failed on totals/);
 	assert.match(String(file.evidence), /not exact/);
 	assert.equal(x.agents().length, 0);
 	const back = x.apply(resume(file));
