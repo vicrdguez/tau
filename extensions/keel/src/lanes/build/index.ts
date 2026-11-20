@@ -10,6 +10,7 @@ import {
 	type World,
 } from "../../kernel/lane.ts";
 import {
+	isPolicyPath,
 	layout,
 	type PublishResult,
 	protectedViolations,
@@ -452,7 +453,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					s,
 					w,
 					i.id,
-					protectedViolations(violations, true).length ? "policy" : "protected",
+					violations.some((c) => isPolicyPath(c.path)) ? "policy" : "protected",
 					`Protected changes in ${i.id} at ${f.sha}: ${violations.map((c) => `${c.kind}: ${c.path}`).join(", ")}`,
 				);
 			return publish(i, false);
