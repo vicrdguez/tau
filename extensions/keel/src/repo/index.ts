@@ -95,9 +95,9 @@ export function converge(
 					moved(at);
 				if (
 					repo.trunkHead === null &&
-					!(await creation(g, repo.trunk, base, op.key))
+					!(await creation(g, repo.trunk, base))
 				)
-					await advance(g, repo.trunk, null, base, op.key);
+					await advance(g, repo.trunk, null, base, op.key, true);
 				await advance(g, op.branch, null, base, op.key);
 				return { kind: "started", base };
 			}

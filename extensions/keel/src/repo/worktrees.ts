@@ -156,14 +156,15 @@ export async function creation(
 	g: Git,
 	name: BranchName,
 	target: Sha,
-	effect: string,
+	effect?: string,
 ) {
 	const ref = "refs/heads/" + name,
 		at = await g.head(name);
 	if (at !== null) {
 		if (at !== target) moved(at);
 		const log = await g.output("reflog", "show", "-1", "--format=%gs", ref);
-		if (log !== creationPrefix(name) + effect + "\n") occupied(ref);
+		if (effect === undefined ? !log.startsWith(creationPrefix(name)) : log !== creationPrefix(name) + effect + "\n")
+			occupied(ref);
 		return true;
 	}
 	const refs = (
@@ -182,6 +183,7 @@ export async function advance(
 	old: Sha | null,
 	to: Sha,
 	effect: string,
+	sharedCreation = false,
 ) {
 	const ref = "refs/heads/" + branch(name);
 	await freeBranch(g, name);
@@ -198,7 +200,7 @@ export async function advance(
 	if (r.code !== 0) {
 		const actual = await g.head(name);
 		if (actual === to) {
-			if (old === null) await creation(g, name, to, effect);
+			if (old === null) await creation(g, name, to, sharedCreation ? undefined : effect);
 			return;
 		}
 		if (actual !== old) moved(actual);
