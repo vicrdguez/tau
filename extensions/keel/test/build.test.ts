@@ -295,6 +295,7 @@ test("rework and integration reach the original worker with fresh expectations; 
 	assert.equal(first.event.sha, sha);
 	assert.equal(first.event.head, repo.trunkHead);
 	assert.match(String(first.event.brief), /works at ties/);
+	assert.match(String(first.event.brief), /patched/);
 	let prev = worker.expects[0]!.token;
 	for (const [kind, evidence] of [
 		["rework", "wrong rounding"],
@@ -489,7 +490,35 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			kind: "plan",
 			items: [{ ...item, id: "correction", deps: ["fix"] }],
 		});
+		assert.match(b.request("coordinator").text, /precision/);
 		b.send({ kind: "brief", ...brief, item: "correction" });
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
+		b.done({ kind: "worktree", base: head, principles: [] });
+		assert.match(b.request("worker").text, /precision/);
+		assert.deepEqual(
+			b.pub(undefined, ["precision"]).send![0]!.event.addresses,
+			["precision"],
+		);
+		b.send({
+			kind: "rework",
+			item: "correction",
+			evidence: "item probe failed",
+			threads: ["negative"],
+		});
+		assert.match(b.request("worker").text, /precision/);
+		assert.ok(
+			"reject" in
+				b.tryEvent({
+					kind: "publish",
+					agent: b.agent("worker").key,
+					summary: "invented",
+					addresses: ["invented"],
+					facts: { kind: "ok", sha, touched: [] },
+				}),
+		);
+		assert.deepEqual(
+			b.pub(undefined, ["precision", "negative"]).send![0]!.event.addresses,
+			["precision", "negative"],
+		);
 	}
 });

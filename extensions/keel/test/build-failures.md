@@ -12,6 +12,8 @@
 - Stopping a worker or coordinator holds its turn. Stale releases do not unblock it. Resume redelivers the owner's direction; cancel retires agents and ignores late effects.
 - Only a confirmed merge moves the head, authorizes worker cleanup and enables dependent briefs and handoff. Kept private files are reported.
 - A full-set failure or trunk conflict after handoff reaches the coordinator as a new correction plan, preserving merged history.
+- The verifier sees the worker's publication summary along with the brief, so it can challenge false claims.
+- A full-set thread reaches the correction brief and worker. The worker can still claim that thread after an item-level rework, but cannot invent a claim.
 - The shipped Build document matches its independent version-1 fixture.
 
 The scripted real-repository scenarios cover the tool-to-git boundary, authenticated model roles, durable publication and recovery. Kernel and repo suites cover retry timing, stale decisions, lock evidence, and exact path matching. Lane tests exercise the decisions above without filesystem or model scheduling.
