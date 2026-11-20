@@ -431,21 +431,20 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				direction: e.direction,
 				evidence: h.evidence,
 			});
-			if (e.item === null) {
-				s.coordinator.direction = [s.coordinator.direction, direction]
-					.filter(Boolean)
-					.join("\n");
+			const i = s.items.find((item) => item.id === e.item);
+			// Cleanup has no worker. Its finding accompanies the coordinator's next turn.
+			const recipient = i && i.stage !== "cleaning" ? i : s.coordinator;
+			recipient.direction = [recipient.direction, direction]
+				.filter(Boolean)
+				.join("\n");
+			if (!i) {
 				s.coordinator.seq = ++s.seq;
 				if (s.phase === "discover" || s.phase === "start") s.setupRetry++;
-			} else {
-				const i = s.items.find((i) => i.id === e.item)!;
-				i.direction = [i.direction, direction].filter(Boolean).join("\n");
-				if (!held(s, i.id)) {
-					if (i.stage === "preparing" && h.obstruction === "occupied")
-						prepare(s, i, w);
-					else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
-					else i.seq = ++s.seq;
-				}
+			} else if (!held(s, i.id)) {
+				if (i.stage === "preparing" && h.obstruction === "occupied")
+					prepare(s, i, w);
+				else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
+				else i.seq = ++s.seq;
 			}
 			break;
 		}
