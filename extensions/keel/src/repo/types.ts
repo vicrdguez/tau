@@ -71,6 +71,7 @@ export type Remove = Readonly<{
 	key: string;
 	target: Worker | (Omit<Checkout, "sha"> & { readonly sha?: Sha });
 	merged?: boolean;
+	mergedHead?: Sha;
 }>;
 export type RepoOp =
 	| Readonly<{ kind: "start_build"; key: string; branch: BranchName }>

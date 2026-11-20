@@ -377,38 +377,25 @@ export async function materialize(
 export async function remove(
 	g: Git,
 	repo: RepoInfo,
-	{ target, merged }: Remove,
+	{ target, merged, mergedHead }: Remove,
 ) {
-	if (target.kind === "worktree") workerSpec(repo, target);
-	const owned =
-		target.kind === "checkout"
-			? await registered(g, repo, target)
-			: await inspect(g, repo, target);
-	if (owned) {
-		if (target.kind === "worktree") {
-			const files = await dirt(
-				owned.wt,
-				merged === true ? "remove_merged" : "remove",
-			);
-			if (files.length)
-				return {
-					kind: "kept",
-					reason:
-						"worker has changes or files Git cannot certify are disposable",
-					files,
-				} as const;
-		}
-		// One force permits a dirty disposable verifier; two are required for
-		// a locked registration. Do not unlock first (that loses the proof).
-		await g.output(
-			"worktree",
-			"remove",
-			"--force",
-			"--force",
-			"--",
-			target.path,
-		);
-	}
+	if (target.kind === "worktree") {
+		workerSpec(repo, target);
+		const owned = await inspect(g, repo, target);
+		if (!owned) return { kind: "removed" } as const;
+		if (merged === true && mergedHead !== undefined && !(await g.ancestor(owned.head!, mergedHead)))
+			return { kind: "kept", reason: "worker HEAD is not included in mergedHead", files: [] } as const;
+		const files = await dirt(owned.wt, merged === true ? "remove_merged" : "remove");
+		if (files.length)
+			return {
+				kind: "kept",
+				reason: "worker has changes or files Git cannot certify are disposable",
+				files,
+			} as const;
+	} else if (!(await registered(g, repo, target))) return { kind: "removed" } as const;
+	// One force permits a dirty disposable verifier; two are required for
+	// a locked registration. Do not unlock first (that loses the proof).
+	await g.output("worktree", "remove", "--force", "--force", "--", target.path);
 	return { kind: "removed" } as const;
 }
 
