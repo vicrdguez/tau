@@ -649,7 +649,7 @@ for (const cause of ["failed", "stopped", "unfulfilled"])
 		assert.notEqual(b.expects[0]!.token, a.expects[0]!.token);
 		assert.match(b.expects[0]!.input!(), /test the premise/);
 	});
-test("cancel withdraws waiting slot and ignores a late grant; an already declared landing finishes under the slot and is reported", () => {
+test("cancel withdraws waiting slot and ignores a late grant; an already running landing finishes under the slot and is reported", () => {
 	const x = flow();
 	x.full();
 	assert.ok(
@@ -777,8 +777,13 @@ test("full verifier sees the protected files each merge actually changed, distin
 });
 test("a second stopped turn receives the new direction, not a replay of instructions already delivered", () => {
 	const x = flow();
-	x.publish();
+	x.publish("one", [], "bug", "base", {
+		allowed: true,
+		protectedChanges: [change("tests/check")],
+		direction: "Waiver instruction: inspect this test",
+	});
 	x.checkout();
+	assert.match(x.agent().expects[0]!.input!(), /Waiver instruction/);
 	function stop() {
 		const a = x.agent();
 		const f = x.apply({
@@ -793,6 +798,7 @@ test("a second stopped turn receives the new direction, not a replay of instruct
 	}
 	x.apply({ ...resume(stop()), direction: "inspect rounding" });
 	assert.match(x.agent().expects[0]!.input!(), /inspect rounding/);
+	assert.doesNotMatch(x.agent().expects[0]!.input!(), /Waiver instruction/);
 	x.apply({ ...resume(stop()), direction: "inspect carries" });
 	const next = x.agent().expects[0]!.input!();
 	assert.match(next, /inspect carries/);
