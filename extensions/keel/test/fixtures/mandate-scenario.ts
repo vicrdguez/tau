@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Annotation, decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import type { Storage } from "tau/durable";
+import type { Conversation, Harness, Storage } from "tau/durable";
 import { fauxAnswer } from "tau/testing";
 import { ProjectState } from "../../src/kernel/records.ts";
 import { stateDoc } from "../../src/kernel/state.ts";
@@ -152,11 +152,26 @@ export async function seedBookPolicy(cwd: string) {
 	return git(cwd, "rev-parse", "main");
 }
 
+type Review = {
+	decision: NonNullable<Awaited<ReturnType<typeof decision>>>;
+	text: string;
+};
 export async function openReview(
 	cwd: string,
 	storage: Storage,
 	first: boolean,
-) {
+): Promise<{
+	root: Conversation;
+	harness: Harness;
+	start(): Promise<void>;
+	review(subject: string): Promise<Review>;
+	subjects(): Promise<string[]>;
+	rework(): Promise<void>;
+	scriptRevision(): void;
+	settle(): Promise<void>;
+	disposeRiders(): Promise<void>;
+	approveAndBuild(): Promise<void>;
+}> {
 	const { store, root, provider, turn, settle } = await openScriptedWorkflow(
 		cwd,
 		storage,
@@ -171,7 +186,7 @@ export async function openReview(
 	async function subjects() {
 		return (await asks()).map((a) => a.local).sort();
 	}
-	async function review(subject: string) {
+	async function review(subject: string): Promise<Review> {
 		const open = await asks();
 		const slot = open.find((a) => a.local === subject);
 		assert.ok(slot, `Expected ${subject}; open: ${open.map((a) => a.local)}`);
