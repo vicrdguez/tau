@@ -27,6 +27,7 @@ export type Ledger = {
 };
 
 export type ProjectState = {
+	root: string | null;
 	anchor: ConversationId | null;
 	works: WorkId[];
 	asks: Record<string, AskSlot>;
@@ -48,7 +49,7 @@ export const ProjectState = defineState<ProjectState>({
 	kind: "keel.project",
 	version: 1,
 	scope: "session",
-	initial: () => ({ anchor: null, works: [], asks: {}, ledger: emptyLedger() }),
+	initial: () => ({ root: null, anchor: null, works: [], asks: {}, ledger: emptyLedger() }),
 });
 export const WorkState = defineState<WorkState>({
 	kind: "keel.work",

@@ -23,6 +23,7 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 	// for its own lane: a later routed rejection must discard the entire chain.
 	let state: S = JSON.parse(JSON.stringify(draft));
 	const notes: Note[] = [];
+	const facts = Object.freeze({ work: world.work, options: world.options, root: world.root });
 	return {
 		lane: lane.name,
 		work: world.work,
@@ -42,9 +43,9 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 			Object.assign(draft, state);
 		},
 		declarations: () => ({
-			asks: lane.asks(state, world),
-			agents: lane.agents(state, world),
-			effects: lane.effects(state, world),
+			asks: lane.asks(state, facts),
+			agents: lane.agents(state, facts),
+			effects: lane.effects(state, facts),
 		}),
 	};
 }
@@ -57,6 +58,7 @@ export async function route(
 	first: Delivery,
 	now: number,
 	options: KeelOptions,
+	root: string,
 ): Promise<{ reject: string } | { frames: Frame[]; reply: string | null }> {
 	const scopes = new Map<WorkId | null, Map<string, Frame>>();
 	async function loadScope(work: WorkId | null) {
@@ -67,6 +69,7 @@ export async function route(
 			work,
 			now,
 			options,
+			root,
 			view(name, id = lanes.get(name)?.scope === "session" ? null : work) {
 				return scopes.get(id)?.get(name)?.view() ?? null;
 			},

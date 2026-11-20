@@ -64,7 +64,7 @@ export async function reconcile(
 							.id;
 			await configure(tx, conversation, {
 				...settings(agent.role),
-				cwd: agent.cwd,
+				cwd: agent.cwd ?? p.root,
 			});
 			(await tx.doc(stateDoc(BindingState), conversation)).binding = {
 				...address,
@@ -85,7 +85,7 @@ export async function reconcile(
 			throw new Error(`Role changed for stable agent ${key}`);
 		if (agent.paused && slot.status === "active") await stop(agent.key, slot);
 		slot.status = agent.paused ? "paused" : "active";
-		slot.cwd = agent.cwd;
+		slot.cwd = agent.cwd ?? p.root;
 		const open: AgentSlot["open"] = [];
 		for (const exp of agent.paused ? [] : agent.expects) {
 			if (open.some((e) => e.token === exp.token))
@@ -168,7 +168,7 @@ export async function reconcile(
 	for (const effect of effects) {
 		const key = slotKey(lane, effect.key);
 		planned.add(key);
-		if (slots.effects[key]) continue;
+		if (slots.effects[key] && slots.effects[key].status !== "cancelled") continue;
 		const task = await tx.createTask(
 			tasks.effect,
 			{ ...address, ...effect },

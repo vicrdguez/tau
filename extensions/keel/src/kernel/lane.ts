@@ -27,6 +27,7 @@ export type KernelEvent =
 			kind: "agent_stalled";
 			agent: AgentKey;
 			tokens: Token[];
+			cause: "failed" | "stopped" | "unfulfilled";
 			lastWords: string;
 	  };
 export type LaneEvent = JsonObject & { kind: string };
@@ -64,10 +65,13 @@ export type Reduction<S> =
 			reply?: string;
 	  };
 
-export interface World {
+export interface StaticFacts {
 	readonly work: WorkId | null;
-	readonly now: number;
+	readonly root: string;
 	readonly options: Readonly<KeelOptions>;
+}
+export interface World extends StaticFacts {
+	readonly now: number;
 	/** Detached view; null for a work not in hand. Project lanes use null. */
 	view(lane: string, work?: WorkId | null): unknown;
 }
@@ -78,9 +82,9 @@ export interface Lane<S extends JsonObject> {
 	state: Exclude<StateDef<S>, { scope: "task" }>;
 	reduce(state: S, event: LaneEvent, world: World): Reduction<S>;
 	view(state: S): unknown;
-	asks(state: S, world: World): readonly Ask[];
-	agents(state: S, world: World): readonly AgentDecl[];
-	effects(state: S, world: World): readonly EffectDecl[];
+	asks(state: S, facts: StaticFacts): readonly Ask[];
+	agents(state: S, facts: StaticFacts): readonly AgentDecl[];
+	effects(state: S, facts: StaticFacts): readonly EffectDecl[];
 }
 
 /** Keep each reducer paired with its own document type in a heterogeneous registry. */

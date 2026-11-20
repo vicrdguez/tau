@@ -9,6 +9,7 @@ import {
 	LiveDoc,
 	type SubmissionDraft,
 	type TaskRuntime,
+	type TaskId,
 	type Tx,
 } from "tau/durable";
 import type { RoleName } from "../roles/index.ts";
@@ -227,11 +228,33 @@ export function makeTasks(hooks: Hooks) {
 					throw new Error(`Missing Keel conversation ${input.conversation}`);
 				// submit + watch checkpoint were atomic. This only reacquires the admitted submission.
 				const submission = await handle.submit(draft(input, attempt), ctx);
+				// A failed run can leave follow-ups queued forever. Wait for the
+				// blocking generation, not merely for placement of the follow-up.
+				while ((await submission.status(ctx)).status === "queued") {
+					let blocker: TaskId | undefined;
+					let stranded = false;
+					await runtime.commit(async tx => {
+						if ((await tx.submissionByRequest(input.conversation, draft(input, attempt).requestId!))?.status !== "queued")
+							return;
+						blocker = (await tx.doc(LiveDoc, input.conversation)).run?.taskId;
+						if (blocker !== undefined) return;
+						stranded = true;
+						if (!(await openAgent(tx, input))) return completed;
+						if (attempt === "first") {
+							await handle.submit(tx, draft(input, "continue"));
+							return { status: "running", checkpoint: { phase: "watch", attempt: "continue" } };
+						}
+						await apply(tx, input, { kind: "agent_stalled", agent: input.key, tokens: [input.token], cause: "failed", lastWords: "" }, runtime.now());
+						return completed;
+					}, ctx);
+					if (stranded) return;
+					if (blocker !== undefined) await runtime.waitForTask(blocker, ctx);
+				}
 				const settled = await submission.wait(ctx);
 				await runtime.commit(async (tx) => {
-					if (settled.reason === "aborted" || !(await openAgent(tx, input)))
+					if (!(await openAgent(tx, input)))
 						return completed;
-					if (attempt === "first")
+					if (attempt === "first" && settled.reason !== "aborted")
 						return {
 							status: "running",
 							checkpoint: {
@@ -261,6 +284,7 @@ export function makeTasks(hooks: Hooks) {
 							kind: "agent_stalled",
 							agent: input.key,
 							tokens: [input.token],
+							cause: settled.reason === "aborted" ? "stopped" : settled.status === "unanswered" ? "failed" : "unfulfilled",
 							lastWords,
 						},
 						runtime.now(),

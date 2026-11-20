@@ -1,6 +1,7 @@
 import type { Context } from "tau/chord";
 import {
 	type AgentChange,
+	AgentDoc,
 	defineExtension,
 	type Extension,
 	type JsonObject,
@@ -61,9 +62,13 @@ export function createKernel(config: {
 		now: number,
 	): Promise<Result> {
 		const opts = Object.freeze(await options.read(tx));
-		const result = await route(tx, lanes, delivery, now, opts);
-		if ("reject" in result) return result;
 		const p = await project(tx);
+		// Tau configures the entry conversation with the project cwd before its first input.
+		if (p.root === null && delivery.work !== null)
+			p.root = (await tx.doc(AgentDoc, delivery.work)).cwd ?? null;
+		if (!p.root) throw new Error("No project working directory on the entry conversation");
+		const result = await route(tx, lanes, delivery, now, opts, p.root);
+		if ("reject" in result) return result;
 		for (const frame of result.frames) {
 			frame.save();
 			if (frame.work !== null && !p.works.includes(frame.work))
