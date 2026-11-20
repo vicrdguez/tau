@@ -1,4 +1,4 @@
-import { arr, int, obj, oneOf, opt, str } from "tau/schema";
+import { arr, obj, oneOf, opt } from "tau/schema";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
 	type Ask,
@@ -10,24 +10,42 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
 import { fileHolding, resumption } from "../queue/public.ts";
-import { type Mandate, mandateLabels } from "./public.ts";
+import {
+	type Audit,
+	type Draft,
+	type Reply,
+	auditSchema,
+	reviewedDraft,
+	repliesSchema,
+	smallDraft,
+	text,
+	validAudit,
+	validSmall,
+	paths,
+} from "./draft.ts";
+import { type Mandate } from "./public.ts";
+import {
+	type Round,
+	answered,
+	openRound,
+	binding,
+	reviewAsks,
+	designerInput,
+	declineText,
+} from "./rounds.ts";
 import { designV1 } from "./v1.ts";
 
-const text = str({ minLength: 1 });
-const draft = obj({
-	intent: text,
-	nodes: arr(obj({ label: text, rule: text, probe: text })),
-	checks: arr(
-		obj({
-			id: text,
-			argv: arr(str(), { minItems: 1 }),
-			timeoutMs: int({ minimum: 1, maximum: 2147483647 }),
-		}),
-		{ minItems: 1 },
-	),
-	protectedPaths: arr(text),
-});
 export const designTools = [
+	defineLaneTool({
+		lane: "design",
+		roles: ["designer"],
+		name: "publish_mandate",
+		description:
+			"Publish the complete labelled Mandate and reply by number to the annotations on the preceding rework or design answer.",
+		parameters: obj({ draft: reviewedDraft, replies: repliesSchema }),
+		terminate: true,
+		event: (args) => ({ kind: "publish_mandate", ...args }),
+	}),
 	defineLaneTool({
 		lane: "design",
 		roles: ["designer"],
@@ -45,11 +63,12 @@ export const designTools = [
 		name: "ground",
 		gate: "adopt",
 		description:
-			"Classify the request under its approved reference. Supply a Mandate for follow, or two readings for ambiguous.",
+			"Classify the request under its approved reference. Supply a small Mandate for follow, a neutral audit for precedent, or two readings for ambiguous.",
 		parameters: obj({
 			route: oneOf(["follow", "precedent", "ambiguous"]),
 			reference: text,
-			mandate: opt(draft),
+			mandate: opt(smallDraft),
+			audit: opt(auditSchema),
 			readings: opt(arr(text, { minItems: 2, maxItems: 2 })),
 		}),
 		terminate: true,
@@ -57,6 +76,7 @@ export const designTools = [
 			kind: "ground",
 			route: args.route,
 			reference: args.reference,
+			...(args.audit && { audit: args.audit }),
 			...(args.mandate && { mandate: args.mandate }),
 			...(args.readings && { readings: args.readings }),
 		}),
@@ -71,13 +91,16 @@ type State = {
 		| "resumed"
 		| "held"
 		| "bound"
-		| "precedent"
+		| "drafting"
+		| "review"
 		| "closed"
 		| "cancelled";
 	cancelRequested: boolean;
 	cleanup: { build: string[] | null; verify: string[] | null } | null;
 	reference: string;
 	mandate: Mandate | null;
+	audit: Audit | null;
+	rounds: Round[];
 	readings: string[];
 	direction: string;
 	cause: string | null;
@@ -93,6 +116,8 @@ const doc = defineState<State>({
 		cleanup: null,
 		reference: "",
 		mandate: null,
+		audit: null,
+		rounds: [],
 		readings: [],
 		direction: "",
 		cause: null,
@@ -104,11 +129,6 @@ const ground = prose(import.meta.dirname, "../../prose/documents/ground.md", [
 	"first",
 	"second",
 ]);
-const unavailable = prose(
-	import.meta.dirname,
-	"../../prose/documents/design-unavailable.md",
-	["reference"],
-);
 const directed = prose(
 	import.meta.dirname,
 	"../../prose/inputs/design/directed.md",
@@ -131,24 +151,12 @@ const cleanupNote = prose(
 );
 const goal = (s: State) => s.mandate?.intent ?? s.reference;
 
-function invalid(m: Mandate) {
-	const labels = mandateLabels(m);
-	return (
-		!m.intent.trim() ||
-		new Set(labels).size !== labels.length ||
-		labels.some((l) => !l.trim() || l !== l.trim()) ||
-		m.nodes.some((n) => !n.rule.trim() || !n.probe.trim()) ||
-		!m.checks.length ||
-		m.checks.some(
-			(c) =>
-				!c.argv[0]?.trim() ||
-				c.argv.some((a) => a.includes("\0")) ||
-				!Number.isSafeInteger(c.timeoutMs) ||
-				c.timeoutMs <= 0 ||
-				c.timeoutMs > 2147483647,
-		) ||
-		m.protectedPaths.some((p) => !p.trim() || p.includes("\0"))
-	);
+function draftTurn(s: State) {
+	return {
+		token: token("draft", s.seq),
+		tools: ["publish_mandate"],
+		input: () => designerInput(s.audit!, s.reference, s.rounds, s.direction),
+	};
 }
 
 export const design: Lane<State> = {
@@ -191,6 +199,25 @@ export const design: Lane<State> = {
 					],
 				};
 			}
+			case "publish_mandate": {
+				if (s.phase !== "drafting" || !s.audit)
+					return { reject: "There is no open Mandate draft turn." };
+				const result = openRound(
+					s.audit,
+					s.rounds,
+					e.draft as Draft,
+					e.replies as Reply[],
+				);
+				if ("reject" in result) return result;
+				return {
+					state: {
+						...s,
+						rounds: [...s.rounds, result.round],
+						phase: "review",
+						direction: "",
+					},
+				};
+			}
 			case "ground": {
 				if (!["entry", "directed", "resumed"].includes(s.phase))
 					return { reject: "Ground has no open turn." };
@@ -202,19 +229,19 @@ export const design: Lane<State> = {
 				switch (e.route) {
 					case "follow": {
 						const proposed = e.mandate as Mandate | undefined;
-						if (!proposed || invalid(proposed) || e.readings)
+						if (!proposed || !validSmall(proposed) || e.readings || e.audit)
 							return {
 								reject:
 									"Give distinct rule labels and check IDs; intent and protectedPaths are reserved. Each rule needs a probe and each proof a timed command.",
 							};
 						const mandate = {
 							reviewed: false,
+							encodeRequired: false,
+							approvalNotes: [],
 							intent: proposed.intent,
 							nodes: proposed.nodes,
 							checks: proposed.checks,
-							protectedPaths: [
-								...new Set([...proposed.protectedPaths, ".keel/**"]),
-							],
+							protectedPaths: paths(proposed),
 						};
 						return {
 							state: {
@@ -228,21 +255,27 @@ export const design: Lane<State> = {
 						};
 					}
 					case "precedent": {
-						if (e.mandate || e.readings)
+						const audit = e.audit as Audit | undefined;
+						if (e.mandate || e.readings || !audit || !validAudit(audit))
 							return {
-								reject: "Report the decision that sets precedent on its own.",
+								reject:
+									"Report what exists and label each Ground gap or contradiction once.",
 							};
-						const notice = unavailable({ reference });
 						return {
-							state: { ...s, phase: "precedent", reference },
-							notes: [{ agent: null, text: notice }],
-							reply: notice,
+							state: {
+								...s,
+								phase: "drafting",
+								reference,
+								audit,
+								seq: s.seq + 1,
+							},
 						};
 					}
 					case "ambiguous": {
 						const readings = e.readings as string[] | undefined;
 						if (
 							e.mandate ||
+							e.audit ||
 							!readings ||
 							readings.length !== 2 ||
 							readings.some((x) => !x.trim()) ||
@@ -271,7 +304,7 @@ export const design: Lane<State> = {
 				return {
 					state: {
 						...s,
-						phase: "resumed",
+						phase: s.audit ? "drafting" : "resumed",
 						seq: s.seq + 1,
 						cause: null,
 						direction: [e.evidence, e.direction].filter(Boolean).join("\n"),
@@ -321,6 +354,31 @@ export const design: Lane<State> = {
 							: [],
 				};
 			}
+			if (s.phase === "review") {
+				const outcome = answered(s.rounds, e);
+				if (!outcome) return { state: s };
+				const next = { ...s, ...outcome };
+				switch (outcome.phase) {
+					case "bound": {
+						const mandate = binding(s.audit!, outcome.rounds);
+						return {
+							state: { ...next, mandate },
+							send: [toBuild(w.work!, { kind: "bound", mandate })],
+						};
+					}
+					case "closed":
+						return {
+							state: { ...next, cancelRequested: false },
+							notes: [
+								{ agent: null, text: declineText(outcome.rounds.at(-1)!) },
+							],
+						};
+					case "drafting":
+						return { state: { ...next, seq: s.seq + 1 } };
+					default:
+						return { state: next };
+				}
+			}
 			if (s.phase !== "ambiguous" || e.subject !== subject("ground/" + s.seq))
 				return { state: s };
 			if (e.choice === "decline")
@@ -334,11 +392,13 @@ export const design: Lane<State> = {
 		}
 		if (
 			e.kind === "agent_stalled" &&
-			(s.phase === "directed" || s.phase === "resumed") &&
+			(s.phase === "directed" ||
+				s.phase === "resumed" ||
+				s.phase === "drafting") &&
 			e.agent === agentKey("designer") &&
-			e.tokens.includes(token("ground", s.seq))
+			e.tokens.includes(token(s.audit ? "draft" : "ground", s.seq))
 		) {
-			const cause = "ground/" + s.seq;
+			const cause = (s.audit ? "draft/" : "ground/") + s.seq;
 			return {
 				state: { ...s, phase: "held", direction: "", cause },
 				send: [
@@ -357,7 +417,8 @@ export const design: Lane<State> = {
 		return { state: s };
 	},
 	asks(s) {
-		const result: Ask[] = [];
+		const result: Ask[] =
+			s.phase === "review" ? reviewAsks(s.audit!, s.reference, s.rounds) : [];
 		if (s.phase === "ambiguous") {
 			const basis = ground({
 				reference: s.reference,
@@ -392,18 +453,20 @@ export const design: Lane<State> = {
 						cwd: null,
 						paused: false,
 						expects:
-							s.phase === "directed" || s.phase === "resumed"
-								? [
-										{
-											token: token("ground", s.seq),
-											tools: ["ground"],
-											input: () =>
-												(s.phase === "resumed" ? resumed : directed)({
-													direction: s.direction,
-												}),
-										},
-									]
-								: [],
+							s.phase === "drafting"
+								? [draftTurn(s)]
+								: s.phase === "directed" || s.phase === "resumed"
+									? [
+											{
+												token: token("ground", s.seq),
+												tools: ["ground"],
+												input: () =>
+													(s.phase === "resumed" ? resumed : directed)({
+														direction: s.direction,
+													}),
+											},
+										]
+									: [],
 					},
 				],
 };

@@ -6,4 +6,4 @@ After Ground, stay available as the owner's desk. When the owner asks to cancel 
 
 {{form}}
 
-If two defensible readings would give different results, state both results. If a new rule or seam needs the owner's approval, state which one. Finish by calling `ground` with the matching route.
+If two defensible readings would give different results, state both results. New direction, a stack choice, a seam or crossing, a domain rule or the first of a kind sets precedent when no approved reference determines it. Audit the code and documents against the owner's stated intent. Report what exists. Label each gap and each contradiction separately. Present the evidence neutrally. The owner decides which gaps matter. Call `ground` with the matching route. For precedent, include the audit.

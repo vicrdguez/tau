@@ -1,0 +1,251 @@
+import { arr, int, obj, oneOf, str } from "tau/schema";
+import { prose } from "../../kernel/lane.ts";
+import type { Mandate } from "./public.ts";
+
+export const text = str({ minLength: 1 });
+const observation = obj({ label: text, text });
+export const auditSchema = obj({
+	exists: text,
+	gaps: arr(observation),
+	contradictions: arr(observation),
+});
+const common = {
+	intent: text,
+	nodes: arr(obj({ label: text, rule: text, probe: text })),
+	checks: arr(
+		obj({
+			id: text,
+			argv: arr(str(), { minItems: 1 }),
+			timeoutMs: int({ minimum: 1, maximum: 2147483647 }),
+		}),
+		{ minItems: 1 },
+	),
+	protectedPaths: arr(text),
+};
+export const smallDraft = obj(common);
+export const reviewedDraft = obj({
+	...common,
+	done: text,
+	seams: arr(
+		obj({
+			label: text,
+			callersNow: text,
+			callersLater: text,
+			usage: text,
+			signature: text,
+			owner: text,
+			dependencies: text,
+		}),
+	),
+	never: text,
+	tradeoffs: text,
+	alternatives: text,
+	settlements: arr(obj({ label: text, ruling: text })),
+	riders: arr(
+		obj({
+			label: text,
+			text,
+			origin: oneOf(["evidence", "incidental", "seeded"]),
+		}),
+	),
+	references: arr(obj({ label: text, source: text })),
+});
+export const repliesSchema = arr(
+	obj({
+		n: int({ minimum: 1 }),
+		status: oneOf(["acted_on", "considered", "dismissed"]),
+		reason: text,
+	}),
+);
+export type Observation = { label: string; text: string };
+export type Audit = {
+	exists: string;
+	gaps: Observation[];
+	contradictions: Observation[];
+};
+export type Draft = Pick<
+	Mandate,
+	"intent" | "nodes" | "checks" | "protectedPaths"
+> & {
+	done: string;
+	seams: {
+		label: string;
+		callersNow: string;
+		callersLater: string;
+		usage: string;
+		signature: string;
+		owner: string;
+		dependencies: string;
+	}[];
+	never: string;
+	tradeoffs: string;
+	alternatives: string;
+	settlements: { label: string; ruling: string }[];
+	riders: (Observation & { origin: "evidence" | "incidental" | "seeded" })[];
+	references: { label: string; source: string }[];
+};
+export type Reply = {
+	n: number;
+	status: "acted_on" | "considered" | "dismissed";
+	reason: string;
+};
+const dir = import.meta.dirname + "/../../prose/documents";
+const seamText = prose(dir, "seam.md", [
+	"callersNow",
+	"callersLater",
+	"usage",
+	"signature",
+	"owner",
+	"dependencies",
+]);
+const rulingText = prose(dir, "ground-ruling.md", ["observation", "ruling"]);
+const proofText = prose(dir, "proof-command.md", ["argv", "timeout"]);
+const validText = (s: string) => !!s.trim();
+const unique = (xs: string[]) => new Set(xs).size === xs.length;
+export function validLabels(xs: string[]) {
+	return (
+		unique(xs) &&
+		xs.every((l) => validText(l) && l === l.trim() && !/[\r\n]/.test(l))
+	);
+}
+export const issueLabels = (a: Audit) =>
+	[...a.gaps, ...a.contradictions].map((n) => n.label);
+export function validAudit(a: Audit) {
+	return (
+		validText(a.exists) &&
+		validLabels([...reserved, ...issueLabels(a)]) &&
+		[...a.gaps, ...a.contradictions].every((n) => validText(n.text))
+	);
+}
+const reserved = [
+	"intent",
+	"protectedPaths",
+	"never",
+	"tradeoffs",
+	"alternatives",
+];
+export const paths = (d: Pick<Draft, "protectedPaths">) => [
+	...new Set([...d.protectedPaths, ".keel/**"]),
+];
+export function validSmall(
+	d: Pick<Draft, "intent" | "nodes" | "checks" | "protectedPaths">,
+) {
+	return (
+		validText(d.intent) &&
+		validLabels([
+			"intent",
+			"protectedPaths",
+			...d.nodes.map((n) => n.label),
+			...d.checks.map((c) => c.id),
+		]) &&
+		d.nodes.every((n) => validText(n.rule) && validText(n.probe)) &&
+		d.checks.length > 0 &&
+		d.checks.every(
+			(c) =>
+				c.argv[0]?.trim() &&
+				c.argv.every((a) => !a.includes("\0")) &&
+				Number.isSafeInteger(c.timeoutMs) &&
+				c.timeoutMs > 0 &&
+				c.timeoutMs <= 2147483647,
+		) &&
+		d.protectedPaths.every((p) => validText(p) && !p.includes("\0"))
+	);
+}
+export function draftError(d: Draft, a: Audit) {
+	const labels = [
+		...reserved,
+		...d.seams.map((n) => n.label),
+		...d.nodes.map((n) => n.label),
+		...d.checks.map((n) => n.id),
+		...d.settlements.map((n) => n.label),
+	];
+	if (
+		!validSmall(d) ||
+		!validLabels([...labels, ...d.riders.map((r) => r.label)])
+	)
+		return "Use distinct labels, rules paired with probes and usable timed commands.";
+	if (![d.done, d.never, d.tradeoffs, d.alternatives].every(validText))
+		return "Give a done predicate, anti-criteria, tradeoffs and alternatives.";
+	const fenced = (v: string) =>
+		/^```[^\s`]+\n[\s\S]*\S[\s\S]*\n```$/u.test(v.trim());
+	if (
+		d.seams.some(
+			(s) =>
+				!Object.values(s).every(validText) ||
+				!fenced(s.usage) ||
+				!fenced(s.signature),
+		)
+	)
+		return "Give both callers, fenced caller code and signatures in the project language, ownership and allowed dependencies for each seam.";
+	const issues = issueLabels(a);
+	if (
+		issues.length !== d.settlements.length ||
+		d.settlements.some((s) => !issues.includes(s.label) || !validText(s.ruling))
+	)
+		return "Propose one ruling under each Ground gap or contradiction label.";
+	if (
+		!unique(d.references.map((r) => r.label)) ||
+		d.references.some(
+			(r) =>
+				!labels.includes(r.label) ||
+				issues.includes(r.label) ||
+				!validText(r.source),
+		)
+	)
+		return "Cite one approved reference per determined node. Ground rulings belong to the owner.";
+	if (
+		d.riders.some(
+			(r) =>
+				!validText(r.text) ||
+				!["evidence", "incidental", "seeded"].includes(r.origin),
+		)
+	)
+		return "State each rider and its origin.";
+	return null;
+}
+export type Node = {
+	label: string;
+	section: string;
+	body: string;
+	probe: string;
+};
+export function nodes(d: Draft, a: Audit): Node[] {
+	const node = (label: string, section: string, body: string, probe = "") => ({
+		label,
+		section,
+		body,
+		probe,
+	});
+	return [
+		node("intent", "Intent", d.intent, d.done),
+		...d.settlements.map((s) => {
+			const gap = a.gaps.find((g) => g.label === s.label);
+			return node(
+				s.label,
+				gap ? "Ground gap" : "Ground contradiction",
+				rulingText({
+					observation: (
+						gap ?? a.contradictions.find((i) => i.label === s.label)!
+					).text,
+					ruling: s.ruling,
+				}).trim(),
+			);
+		}),
+		...d.seams.map((s) => node(s.label, "Seam", seamText(s).trim())),
+		...d.nodes.map((n) => node(n.label, "Rule", n.rule, n.probe)),
+		node("never", "Anti-criteria", d.never),
+		...d.checks.map((c) =>
+			node(
+				c.id,
+				"Proof",
+				proofText({
+					argv: JSON.stringify(c.argv),
+					timeout: String(c.timeoutMs),
+				}).trim(),
+			),
+		),
+		node("protectedPaths", "Protected paths", paths(d).join("\n")),
+		node("tradeoffs", "Tradeoffs accepted", d.tradeoffs),
+		node("alternatives", "Alternatives considered", d.alternatives),
+	];
+}

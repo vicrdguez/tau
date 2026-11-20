@@ -12,6 +12,8 @@ type RepoV1 = {
 type ProofV1 = { id: string; argv: string[]; timeoutMs: number };
 type MandateV1 = {
 	reviewed: boolean;
+	encodeRequired: boolean;
+	approvalNotes: string[];
 	intent: string;
 	nodes: { label: string; rule: string; probe: string }[];
 	checks: ProofV1[];
@@ -23,6 +25,7 @@ type RulingV1 = {
 	cost: string;
 	rank: number;
 	follows: string;
+	principles: string[];
 };
 type CheckoutV1 = { kind: "checkout"; key: string; path: string; sha: Sha };
 type PlanV1 = {
