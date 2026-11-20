@@ -61,6 +61,7 @@ export type AgentDecl = {
 export type EffectDecl = { key: EffectKey; spec: JsonObject };
 export type Note = { text: string; agent: AgentKey | null };
 export type Accepted<S> = {
+	reject?: never;
 	state: S;
 	send?: readonly Message[];
 	notes?: readonly Note[];
