@@ -157,7 +157,10 @@ test("configured agents see their coding tools and only their assigned Keel tool
 				/reserved[^\n]*`intent`[^\n]*`protectedPaths`/i,
 			);
 			assert.match(agent.instructions ?? "", /share[^\n]*label/i);
-			assert.match(agent.instructions ?? "", /request_cancel/);
+			assert.match(
+				agent.instructions ?? "",
+				/tell the owner[^\n]*confirmation[^\n]*call `request_cancel`/i,
+			);
 			assert.doesNotMatch(agent.instructions ?? "", /\{\{form\}\}/);
 		}
 		assert.deepEqual(agent.tools.map((t) => t.name).sort(), expected, role);

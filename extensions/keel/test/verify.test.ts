@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
+import { design } from "../src/lanes/design/index.ts";
 import { verify } from "../src/lanes/verify/index.ts";
 import { principleInputs } from "../src/principles/index.ts";
 import { drive } from "./fixtures/drive.ts";
@@ -735,6 +736,25 @@ function pendingMerge() {
 	x.clean();
 	return x;
 }
+test("review the worker's revised publication, not an authorized merge candidate, after a merge conflict", () => {
+	const x = pendingMerge();
+	x.done("merge_item", {
+		kind: "conflict",
+		paths: ["ledger"],
+		against: "base",
+	});
+	x.clean();
+	x.publish("corrected");
+	x.checkout();
+	const input = x.agent().expects[0]!.input!();
+	assert.match(input, /worker revised/i);
+	assert.match(input, /corrected/);
+	assert.doesNotMatch(
+		input,
+		/owner-authorized protected change|authorized merge candidate/i,
+	);
+});
+
 test("guard the merge before proofs or ref advance; allowing a merge-only change reviews its pinned candidate before retry", () => {
 	const x = pendingMerge();
 	const merge = x.effect("merge_item");
@@ -754,7 +774,13 @@ test("guard the merge before proofs or ref advance; allowing a merge-only change
 	x.apply({ ...resume(file), kind: "allow" });
 	assert.equal(x.effect("checkout").op.sha, "candidate");
 	x.checkout();
-	assert.match(x.agent().expects[0]!.input!(), /tests\/other/);
+	const candidateInput = x.agent().expects[0]!.input!();
+	assert.match(candidateInput, /tests\/other/);
+	assert.match(candidateInput, /review this merge candidate/i);
+	assert.doesNotMatch(
+		candidateInput,
+		/integration failure|failed integration/i,
+	);
 	assert.match(x.agent().expects[0]!.input!(), /owner allowed/i);
 	assert.ok(!x.effects().length);
 	x.pass();
@@ -787,11 +813,26 @@ test("policy files cannot be waived at merge even for Encode; resume returns evi
 	const result = x.apply(resume(f));
 	const back = result.send?.find((m) => m.lane === "build")?.event;
 	assert.equal(back?.kind, "integration");
+	assert.equal(back?.protectedCandidate, true);
 	assert.match(String(back?.evidence), /\.keel\/policy/);
 	assert.match(String(back?.direction), /test the premise/);
 	assert.doesNotMatch(String(back?.evidence), /test the premise/);
 	x.clean();
 	assert.deepEqual(x.effects(), []);
+});
+test("item verifier distinguishes an ordinary protected addition from a waiver in the same publication", () => {
+	const x = flow();
+	x.publish("worker", [], "bug", "base", {
+		allowed: true,
+		protectedChanges: [
+			change("tests/balance"),
+			{ ...change("tests/new"), kind: "added" },
+		],
+	});
+	x.checkout();
+	const input = x.agent().expects[0]!.input!();
+	assert.match(input, /tests\/balance[^\n]*owner allowed/i);
+	assert.match(input, /tests\/new[^\n]*no waiver (?:needed|required)/i);
 });
 test("full verifier sees the protected files each merge actually changed, distinguishing an owner waiver from an ordinary addition", () => {
 	const x = pendingMerge();
@@ -807,7 +848,7 @@ test("full verifier sees the protected files each merge actually changed, distin
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
 	assert.match(input, /tests\/balance[^\n]*owner allowed/i);
-	assert.match(input, /tests\/new[^\n]*no owner waiver/i);
+	assert.match(input, /tests\/new[^\n]*no waiver (?:needed|required)/i);
 });
 test("a second stopped turn receives the new direction, not a replay of instructions already delivered", () => {
 	const x = flow();
@@ -837,6 +878,78 @@ test("a second stopped turn receives the new direction, not a replay of instruct
 	const next = x.agent().expects[0]!.input!();
 	assert.match(next, /inspect carries/);
 	assert.doesNotMatch(next, /inspect rounding/);
+});
+test("hand-over lists unannotated publication and merge permissions even when the candidate supersedes the publication", () => {
+	const x = pendingMerge();
+	const changes = [
+		change("tests/other"),
+		{ ...change("tests/new"), kind: "added" },
+	];
+	const f = x.done("merge_item", {
+		...protectedResult("tests/other"),
+		protectedChanges: changes,
+	}).send?.[0]?.event;
+	assert.ok(f);
+	x.apply({ ...resume(f), kind: "allow", direction: "" });
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.done("merge_item", {
+		kind: "merged",
+		sha: "merged",
+		checks: [],
+		protectedChanges: changes,
+	});
+	x.clean();
+	x.handoff();
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.prepare();
+	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const basis = x.asks()[0]!.basis;
+	assert.match(basis, /bug[^\n]*worker[^\n]*modified: tests\/balance/);
+	assert.match(basis, /bug[^\n]*candidate[^\n]*modified: tests\/other/);
+	assert.doesNotMatch(basis, /tests\/new/);
+});
+test("hand-over retains the chosen ambiguity reading and numbered annotations from Ground", () => {
+	const x = flow();
+	const readings = ["Use the venue minimum.", "Use the exchange minimum."];
+	const grounded = design.reduce(
+		design.state.initial(),
+		{
+			kind: "ground",
+			route: "ambiguous",
+			reference: "Lot size varies by venue.",
+			readings,
+		},
+		world,
+	);
+	assert.ok("state" in grounded);
+	const result = drive(
+		design,
+		grounded.state,
+		{
+			kind: "answered",
+			subject: design.asks(grounded.state, world)[0]!.subject,
+			choice: "second",
+			annotations: [
+				{ n: 1, text: "Include auctions." },
+				{ n: 2, text: "Keep the open market separate." },
+			],
+		},
+		world,
+	);
+	assert.ok("state" in result);
+	for (const m of result.send ?? [])
+		if (m.lane === "verify" && m.work === world.work) x.apply(m.event);
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const basis = x.asks()[0]!.basis;
+	assert.ok(basis.includes(readings[1]!));
+	assert.match(basis, /1\. Include auctions\./);
+	assert.match(basis, /2\. Keep the open market separate\./);
 });
 test("all finding directions survive handoff, including answers before the first publication", () => {
 	const x = flow();

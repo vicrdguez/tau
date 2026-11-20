@@ -273,6 +273,8 @@ test("a standing desk request asks once without cancelling; only a current confi
 	const [ask] = design.asks(requested.state, world);
 	assert.ok(ask);
 	assert.ok(ask.basis.includes(mandate.intent));
+	assert.match(ask.title, /\?$/);
+	assert.doesNotMatch(ask.title, /[.!?]\?$/);
 	assert.deepEqual(ask.choices, ["cancel", "continue"]);
 	assert.deepEqual(
 		design.asks(
@@ -325,6 +327,7 @@ test("cancel collects worker and verification cleanup exactly once in the work's
 	);
 	assert.equal(second.notes?.length, 1);
 	const text = second.notes[0]!.text;
+	assert.match(text, /kept[^\n]*:\s*\/worker/i);
 	for (const part of [
 		mandate.intent,
 		"/integration: registration occupied",

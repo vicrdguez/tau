@@ -165,6 +165,26 @@ function setup(max_workers = 1, reviewed = false) {
 	});
 }
 
+test("a worker revises a protected change returned from the merge candidate instead of fixing a failed integration", () => {
+	const b = setup();
+	b.working();
+	b.pub();
+	b.send({
+		kind: "integration",
+		protectedCandidate: true,
+		item: "fix",
+		head: repo.trunkHead,
+		evidence: "modified: tests/rounding",
+		direction: "Keep the existing oracle.",
+		threads: [],
+	});
+	const input = b.request("worker").text;
+	assert.match(input, /protected change/i);
+	assert.match(input, /tests\/rounding/);
+	assert.match(input, /Keep the existing oracle/);
+	assert.doesNotMatch(input, /integration[^\n]*fail/i);
+});
+
 test("Build v1 discovers the repo and starts the build before opening planning", () => {
 	const b = setup();
 	assert.deepEqual(b.identity, ["keel.build", 1, "conversation"]);
