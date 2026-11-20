@@ -18,6 +18,7 @@ const askBrief = prose(dir, "../../prose/inputs/build/brief-request.md", [
 	"goal",
 	"head",
 	"deps",
+	"reason",
 	"mandate",
 	"direction",
 ]);
@@ -32,6 +33,7 @@ const brief = prose(dir, "../../prose/documents/build-brief.md", [
 	"goal",
 	"evidence",
 	"fences",
+	"reason",
 	"nodes",
 ]);
 const initial = prose(dir, "../../prose/inputs/build/brief.md", [
@@ -60,8 +62,39 @@ export const ownerDirection = prose(
 	["evidence", "direction"],
 );
 
-export const renderBrief = (i: Item) =>
-	brief({ id: i.id, ...i.brief!, nodes: i.brief!.nodes.join(", ") });
+const fullReview = prose(dir, "../../prose/documents/build-full-review.md", [
+	"evidence",
+	"threads",
+]);
+const trunkFailure = prose(
+	dir,
+	"../../prose/documents/build-trunk-failure.md",
+	["evidence", "threads"],
+);
+const report = prose(dir, "../../prose/documents/build-report.md", [
+	"brief",
+	"summary",
+]);
+function fullContext(s: Build) {
+	const reason = s.coordinator.reason;
+	if (!reason) return "";
+	const render = reason.kind === "rework" ? fullReview : trunkFailure;
+	return render({
+		evidence: reason.evidence,
+		threads: reason.threads.join(", "),
+	});
+}
+function renderBrief(s: Build, i: Item) {
+	if (!i.brief) throw Error("Missing worker brief");
+	return brief({
+		id: i.id,
+		...i.brief,
+		nodes: i.brief.nodes.join(", "),
+		reason: fullContext(s),
+	});
+}
+export const renderReport = (s: Build, i: Item, summary: string) =>
+	report({ brief: renderBrief(s, i), summary });
 function coordInput(s: Build) {
 	const c = s.coordinator;
 	const facts = {
@@ -82,7 +115,7 @@ function coordInput(s: Build) {
 	switch (c.tool) {
 		case "publish_plan":
 			return c.reason
-				? correction({ ...facts, plan: planRecord(), reason: c.reason })
+				? correction({ ...facts, plan: planRecord(), reason: fullContext(s) })
 				: plan(facts);
 		case "brief_item": {
 			const i = s.items.find((i) => i.id === c.item)!;
@@ -91,6 +124,7 @@ function coordInput(s: Build) {
 				id: i.id,
 				goal: i.goal,
 				deps: i.deps.join(", "),
+				reason: fullContext(s),
 				head: s.head!,
 			});
 		}
@@ -103,7 +137,7 @@ function coordInput(s: Build) {
 function workerInput(s: Build, i: Item) {
 	const w = i.worker!;
 	const common = {
-		brief: renderBrief(i),
+		brief: renderBrief(s, i),
 		direction: i.direction,
 		threads: i.threads.join(", "),
 		evidence: i.evidence,

@@ -1,6 +1,7 @@
 Item {{id}} is ready to start at build head {{head}}.
 Goal: {{goal}}
 Dependencies: {{deps}}
+{{reason}}
 
 Bound Mandate:
 {{mandate}}

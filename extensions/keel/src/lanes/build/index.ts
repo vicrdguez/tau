@@ -17,7 +17,7 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { type Mandate, mandateLabels } from "../design/public.ts";
-import { agents, ownerDirection, renderBrief } from "./agents.ts";
+import { agents, ownerDirection, renderReport } from "./agents.ts";
 import type { Ruling } from "./public.ts";
 import {
 	type Brief,
@@ -158,6 +158,7 @@ function plans(
 }
 function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	const state = s;
+	if (s.phase === "cancelled" || s.phase === "closed") return { state };
 	if (e.kind === "cancel") {
 		s.phase = "cancelled";
 		return { state };
@@ -166,7 +167,6 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		s.phase = "closed";
 		return { state };
 	}
-	if (s.phase === "cancelled" || s.phase === "closed") return { state };
 	function hold(
 		item: string | null,
 		obstruction: string,
@@ -332,7 +332,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				);
 			if (
 				new Set(e.addresses).size !== e.addresses.length ||
-				e.addresses.some((id) => !i.threads.includes(id))
+				e.addresses.some(
+					(id) =>
+						!i.threads.includes(id) &&
+						!s.coordinator.reason?.threads.includes(id),
+				)
 			)
 				return {
 					reject: "Name only distinct thread IDs returned to this worker.",
@@ -351,7 +355,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				repo: s.repo!,
 				head: s.head!,
 				mandate: s.mandate!,
-				brief: renderBrief(i),
+				brief: renderReport(s, i, e.summary),
 				rulings: i.rulings,
 			});
 		}
@@ -360,11 +364,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (e.item === "full" && s.phase === "handed_off") {
 				s.phase = "active";
 				s.head = e.head ?? s.head;
-				s.coordinator.reason = JSON.stringify({
+				s.coordinator.reason = {
 					kind: e.kind,
 					evidence: e.evidence,
 					threads: e.threads,
-				});
+				};
 				coordinator(s, "publish_plan");
 				return { state };
 			}

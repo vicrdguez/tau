@@ -56,7 +56,11 @@ export type Build = {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
-		reason: string;
+		reason: {
+			kind: "integration" | "rework";
+			evidence: string;
+			threads: string[];
+		} | null;
 		direction: string;
 	};
 	items: Item[];
@@ -82,7 +86,13 @@ export const buildDoc = defineState({
 		seq: 0,
 		setupSeq: 0,
 		setupRetry: 0,
-		coordinator: { tool: null, item: null, seq: 0, reason: "", direction: "" },
+		coordinator: {
+			tool: null,
+			item: null,
+			seq: 0,
+			reason: null,
+			direction: "",
+		},
 		items: [],
 		holds: [],
 	}),

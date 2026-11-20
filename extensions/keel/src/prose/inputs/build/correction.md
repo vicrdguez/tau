@@ -1,5 +1,3 @@
-Full-set verification or trunk integration returned the build for correction.
-
 {{reason}}
 
 Bound Mandate:
