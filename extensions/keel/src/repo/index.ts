@@ -71,7 +71,7 @@ export async function readRepo(
 	};
 }
 
-/** The kernel serializes operations for a build, and does not cancel an in-flight land. */
+/** The caller serializes conflicting ref updates; see README.md. */
 export function converge(
 	exec: Exec,
 	repo: RepoInfo,
