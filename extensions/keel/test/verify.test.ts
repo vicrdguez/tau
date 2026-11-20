@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { verify } from "../src/lanes/verify/index.ts";
+import { principleInputs } from "../src/principles/index.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const world: World = {
@@ -294,7 +295,13 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	assert.ok(stall);
 	x.apply({ kind: "reset_counts", item: "bug" });
 	x.apply({ ...resume(stall), direction: "Diagnoser only: inspect floats" });
-	const request = x.agent("diagnoser").expects[0]!.input!();
+	const diagnosis = x.agent("diagnoser");
+	const exp = diagnosis.expects[0]!;
+	const request = principleInputs.render(
+		{role: diagnosis.role, cwd: diagnosis.cwd!, situation: exp.situation},
+		exp.input!(),
+	).text;
+	assert.match(request, /# Fix Root Causes/);
 	assert.match(request, /# Attack the Premise/);
 	assert.doesNotMatch(request, /description:|\]\([^)]+\.md\)/);
 	assert.match(request, /negative balance/);
