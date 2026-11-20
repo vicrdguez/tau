@@ -9,6 +9,8 @@ const inputs: Record<string, string> = {
 		"route reference readings audit.exists audit.gaps.label audit.gaps.text audit.contradictions.label audit.contradictions.text mandate.intent mandate.nodes.label mandate.nodes.rule mandate.nodes.probe mandate.checks.id mandate.checks.argv mandate.checks.timeoutMs mandate.protectedPaths",
 	publish_mandate:
 		"draft.intent draft.done draft.seams.label draft.seams.callersNow draft.seams.callersLater draft.seams.usage draft.seams.signature draft.seams.owner draft.seams.dependencies draft.nodes.label draft.nodes.rule draft.nodes.probe draft.never draft.tradeoffs draft.alternatives draft.settlements.label draft.settlements.ruling draft.checks.id draft.checks.argv draft.checks.timeoutMs draft.protectedPaths draft.riders.label draft.riders.text draft.riders.origin draft.references.label draft.references.source replies.n replies.status replies.reason",
+	file_finding: "text report nodes blocking source edgeCase.failure edgeCase.likelihood edgeCase.cost",
+	report_investigation: "finding classification nodes evidence size recommendation cause batchWith duplicateOf reference",
 	principle: "name",
 	publish_plan:
 		"items.id items.kind items.goal items.deps replies.n replies.status replies.reason",
@@ -39,7 +41,7 @@ function fields(schema: Schema, path: string): string[] {
 		return fields(schema.items, path);
 	}
 	assert.ok(
-		schema.type === "string" || schema.type === "integer" || schema.enum,
+		schema.type === "string" || schema.type === "integer" || schema.type === "boolean" || schema.enum,
 		`unreviewed parameter: ${path}`,
 	);
 	return [path];

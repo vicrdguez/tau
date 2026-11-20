@@ -22,6 +22,8 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 		"publish_plan",
 		"brief_item",
 		"record_ruling",
+		"file_finding",
+		"report_investigation",
 		"publish_build",
 		"publish_verdict",
 		"handoff_build",
@@ -62,6 +64,7 @@ test("the public workflow entry starts a designer with its own model and coding 
 	assert.deepEqual(agent.model, { provider: "designer", modelId: "chosen" });
 	assert.deepEqual(agent.tools.map((tool) => tool.name).sort(), [
 		"bash",
+		"file_finding",
 		"ground",
 		"principle",
 		"publish_mandate",

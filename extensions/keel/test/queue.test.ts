@@ -253,8 +253,8 @@ test("cancelling a waiting landing drops its request; an active landing keeps it
 	assert.deepEqual(trunk.send(release(c)), []);
 });
 
-test("queue and trunk are version-one project records and have no agent tools", () => {
-	assert.deepEqual(queueTools, []);
+test("queue and trunk are initially quiet version-one project records; only intake is standing", () => {
+	assert.deepEqual(queueTools.map(t => [t.name,t.gate]), [["file_finding","standing"],["report_investigation","expectation"]]);
 	for (const entry of [queueLane, trunkLane])
 		entry.use((lane) => {
 			assert.equal(lane.state.version, 1);
