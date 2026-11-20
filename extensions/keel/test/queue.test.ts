@@ -254,7 +254,7 @@ test("cancelling a waiting landing drops its request; an active landing keeps it
 });
 
 test("queue and trunk are initially quiet version-one project records; only intake is standing", () => {
-	assert.deepEqual(queueTools.map(t => [t.name,t.gate]), [["file_finding","standing"],["report_investigation","expectation"]]);
+	assert.deepEqual(Array.from(queueTools, (t: {name:string;gate?:string}) => [t.name,t.gate]), [["file_finding","standing"],["report_investigation","expectation"]]);
 	for (const entry of [queueLane, trunkLane])
 		entry.use((lane) => {
 			assert.equal(lane.state.version, 1);
