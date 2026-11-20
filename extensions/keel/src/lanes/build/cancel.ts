@@ -9,7 +9,7 @@ import type { Sha, Worker } from "../../repo/index.ts";
 import type { Build } from "./state.ts";
 
 function completion(state: Build, w: World): Accepted<Build> {
-	return state.cleanup.length
+	return state.waitingSetup || state.cleanup.length
 		? { state }
 		: {
 				state,
@@ -32,6 +32,11 @@ export function cancel(
 	plans: { item: string | null; effect: EffectDecl }[],
 ) {
 	s.phase = "cancelled";
+	function claimed(item: string | null) {
+		const effect = plans.find((p) => p.item === item)?.effect;
+		return effect && w.runningEffect?.(effect.key) ? effect.key : null;
+	}
+	s.waitingSetup = claimed(null);
 	function collect(
 		worker: Worker,
 		mergedHead: Sha | null,
@@ -43,8 +48,7 @@ export function cancel(
 	for (const worker of s.abandoned) collect(worker, null, null);
 	for (const i of s.items) {
 		if (!i.worker) continue;
-		const effect = plans.find((p) => p.item === i.id)?.effect;
-		const running = effect && w.runningEffect?.(effect.key) ? effect.key : null;
+		const running = claimed(i.id);
 		// Once claimed, a creation can still write its path. Do not race it with removal.
 		// A held or interrupted creation may already have left a checkout there.
 		collect(
@@ -79,6 +83,10 @@ export function settleCleanup(
 ): Accepted<Build> {
 	if (e.kind !== "effect_done" && e.kind !== "effect_failed")
 		return { state: s };
+	if (s.waitingSetup === e.key) {
+		s.waitingSetup = null;
+		return completion(s, w);
+	}
 	const j = s.cleanup.find((j) => j.wait === e.key || j.key === e.key);
 	if (!j) return { state: s };
 	if (j.wait === e.key) {

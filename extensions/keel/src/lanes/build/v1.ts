@@ -50,6 +50,7 @@ type V1 = {
 		key: string;
 	}[];
 	kept: string[];
+	waitingSetup: string | null;
 	coordinator: {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
@@ -135,6 +136,7 @@ export const buildV1 = {
 		abandoned: [],
 		cleanup: [],
 		kept: [],
+		waitingSetup: null,
 		coordinator: {
 			tool: null,
 			item: null,
