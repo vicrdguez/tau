@@ -437,12 +437,25 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 		(op.target as JsonObject).path,
 		"/repo/.git/keel/32/worker-fix-1",
 	);
+	const obstruction = b.done({ kind: "occupied", path: "private path" })
+		.send![0]!.event;
+	assert.equal(b.agent("coordinator").expects.length, 0);
+	assert.deepEqual(b.effects(), []);
+	b.send({
+		kind: "resume",
+		cause: obstruction.cause!,
+		item: "fix",
+		evidence: obstruction.evidence!,
+		direction: "leave my notes intact",
+	});
+	assert.deepEqual(b.effect().spec.op, op);
 	assert.match(
 		JSON.stringify(
 			b.done({ kind: "kept", files: ["private"], reason: "untracked" }).notes,
 		),
 		/private/,
 	);
+	assert.match(b.request("coordinator").text, /leave my notes intact/);
 	const h = b.send({
 		kind: "handoff",
 		summary: "price repaired",
