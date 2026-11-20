@@ -26,8 +26,8 @@ import {
 	materialize,
 	ownedBranch,
 	remove,
+	touchedPaths,
 	workerSpec,
-	zlist,
 } from "./worktrees.ts";
 
 export { type Exec, layout, nodeExec } from "./git.ts";
@@ -167,26 +167,7 @@ export function readPublishable(
 		const build = await g.head(worker.from);
 		if (build === null) moved(null);
 		await ownedBranch(g, worker.from);
-		const paths = protectedGlobs?.map((glob) => ":(top,glob)" + glob);
-		const touched =
-			paths?.length === 0
-				? []
-				: zlist(
-						await g.output(
-							"diff",
-							"--no-ext-diff",
-							"--no-textconv",
-							"--no-renames",
-							"--ignore-submodules=none",
-							"--name-only",
-							"-z",
-							"--merge-base",
-							build,
-							owned.head,
-							"--",
-							...(paths ?? []),
-						),
-					);
+		const touched = await touchedPaths(g, build, owned.head, protectedGlobs, true);
 		const at = await g.head(worker.branch);
 		if (at !== owned.head) moved(at);
 		return { kind: "ok", sha: owned.head, touched };

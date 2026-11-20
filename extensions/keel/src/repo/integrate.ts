@@ -29,6 +29,7 @@ import {
 	freeBranch,
 	inspect,
 	ownedBranch,
+	touchedPaths,
 	zlist,
 } from "./worktrees.ts";
 
@@ -113,7 +114,7 @@ export async function integrate(
 		const trunk = await g.head(repo.trunk);
 		if (trunk !== other) moved(trunk);
 		if (await g.ancestor(other, op.expected)) {
-			return { kind: "combined", sha: at, trunk, checks: [] };
+			return { kind: "combined", sha: at, trunk, checks: [], ...(op.protectedGlobs ? { touched: [] } : {}) };
 		}
 	}
 
@@ -145,6 +146,9 @@ export async function integrate(
 		taking ? "Take trunk" : op.message,
 	);
 	if (at !== op.expected && at !== candidate) moved(at);
+	const paths = op.protectedGlobs
+		? { touched: await touchedPaths(g, op.expected, candidate, op.protectedGlobs) }
+		: {};
 	const target = {
 		kind: "checkout",
 		key: op.key,
@@ -209,16 +213,18 @@ export async function integrate(
 		reports.push(r.report);
 		if (r.changes)
 			return {
+				...paths,
 				kind: "checks_failed",
 				sha: candidate,
 				checks: reports,
 				changes: r.changes,
 			};
 		if (r.report.code !== 0)
-			return { kind: "checks_failed", sha: candidate, checks: reports };
+			return { ...paths, kind: "checks_failed", sha: candidate, checks: reports };
 	}
 	if (!published && before)
 		return {
+			...paths,
 			kind: "checks_failed",
 			sha: candidate,
 			checks: reports,
@@ -226,8 +232,8 @@ export async function integrate(
 		};
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
-		? { kind: "combined", sha: candidate, trunk: other, checks: reports }
-		: { kind: "merged", sha: candidate, checks: reports };
+		? { ...paths, kind: "combined", sha: candidate, trunk: other, checks: reports }
+		: { ...paths, kind: "merged", sha: candidate, checks: reports };
 }
 
 export async function landingCommit(g: Git, plan: Landing) {

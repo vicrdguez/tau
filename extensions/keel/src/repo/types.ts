@@ -46,7 +46,7 @@ export type Landing = Readonly<{
 	combined: Sha;
 	message: string;
 }>;
-export type Integrate =
+export type Integrate = { readonly protectedGlobs?: readonly string[] } & (
 	| Readonly<{
 			kind: "merge_item";
 			key: string;
@@ -65,7 +65,7 @@ export type Integrate =
 			expected: Sha;
 			trunk: Sha;
 			checks: readonly Check[];
-	  }>;
+	  }>);
 export type Remove = Readonly<{
 	kind: "remove";
 	key: string;
@@ -91,11 +91,12 @@ export type RepoResult =
 	| { kind: "checkout"; playbook: string | null }
 	| { kind: "removed" }
 	| { kind: "kept"; reason: string; files: readonly string[] }
-	| { kind: "merged"; sha: Sha; checks: readonly CheckReport[] }
-	| { kind: "combined"; sha: Sha; trunk: Sha; checks: readonly CheckReport[] }
+	| { kind: "merged"; touched?: readonly string[]; sha: Sha; checks: readonly CheckReport[] }
+	| { kind: "combined"; touched?: readonly string[]; sha: Sha; trunk: Sha; checks: readonly CheckReport[] }
 	| { kind: "conflict"; paths: readonly string[]; against: Sha }
 	| {
 			kind: "checks_failed";
+			touched?: readonly string[];
 			sha: Sha;
 			checks: readonly CheckReport[];
 			changes?: ProofChanges;
