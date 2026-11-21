@@ -299,6 +299,7 @@ export function validateDependencies(
 	goals: Goal[],
 	plan: Goal[],
 	releasing: string[] = [],
+	keepFilers = false,
 ) {
 	const byId = new Map(plan.map((g) => [g.id, g]));
 	const deps = new Set(goals.flatMap((g) => g.deps));
@@ -309,8 +310,10 @@ export function validateDependencies(
 			item.stage !== "merged" &&
 			item.stage !== "cleaning" &&
 			(repoHeld(s, id) ||
-				s.queueHolds.some(
-					(h) => !releasing.includes(h.cause) && queueMatches(h, item),
+				s.queueHolds.some((h) =>
+					releasing.includes(h.cause)
+						? keepFilers && h.items.includes(id)
+						: queueMatches(h, item),
 				))
 		)
 			return `Do not depend on held item ${id}.`;

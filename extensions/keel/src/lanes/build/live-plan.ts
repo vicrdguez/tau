@@ -83,6 +83,7 @@ export function releaseQueueHold(
 	cause: string,
 	direction: string | undefined,
 	w: World,
+	keepFilers = false,
 ): Message[] {
 	const h = s.queueHolds.find((h) => h.cause === cause);
 	if (!h) return [];
@@ -90,14 +91,24 @@ export function releaseQueueHold(
 		direction: direction ?? "",
 		evidence: h.evidence,
 	});
+	const kept = keepFilers ? h.items : [];
 	for (const i of s.items) {
-		if (!queueMatches(h, i) || i.stage === "cleaning" || i.stage === "merged")
+		if (
+			kept.includes(i.id) ||
+			!queueMatches(h, i) ||
+			i.stage === "cleaning" ||
+			i.stage === "merged"
+		)
 			continue;
 		addDirection(i, guidance);
 		if (i.input === "brief" && i.stage === "building") i.input = "resume";
 	}
-	s.queueHolds = s.queueHolds.filter((hold) => hold !== h);
-	return h.forwarded.length
+	const releaseForwarded = h.forwarded.some((id) => !kept.includes(id));
+	if (kept.length) {
+		h.nodes = [];
+		h.forwarded = h.forwarded.filter((id) => kept.includes(id));
+	} else s.queueHolds = s.queueHolds.filter((hold) => hold !== h);
+	return releaseForwarded
 		? [
 				{
 					lane: "verify",
@@ -105,6 +116,7 @@ export function releaseQueueHold(
 					event: {
 						kind: "queue_release",
 						cause,
+						...(kept.length && { except: kept }),
 						...(direction === undefined ? {} : { direction }),
 					},
 				},
@@ -123,18 +135,21 @@ function replacementPlan(
 ) {
 	if (!repliesCover(p?.mandate.approvalNotes.length ?? 0, replies))
 		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
+	const byId = new Map(goals.map((g) => [g.id, g]));
+	const old = new Map(s.items.map((i) => [i.id, i]));
+	const newGoals = goals.filter((g) => !old.has(g.id));
+	const releasing = p ? [...p.causes, revisionPlanHold] : [];
+	const addedDeps = goals.map((g) => ({
+		...g,
+		deps: g.deps.filter((d) => !old.get(g.id)?.deps.includes(d)),
+	}));
 	const graph =
 		validateGraph([], goals) ??
-		validateDependencies(
-			s,
-			goals,
-			goals,
-			p ? [...p.causes, revisionPlanHold] : [],
-		);
+		validateDependencies(s, goals, goals, releasing) ??
+		(p && newGoals.length
+			? validateDependencies(s, addedDeps, goals, releasing, true)
+			: null);
 	if (graph) return graph;
-	const byId = new Map(goals.map((g) => [g.id, g]));
-	const oldIds = new Set(s.items.map((i) => i.id));
-	const newGoals = goals.filter((g) => !oldIds.has(g.id));
 	const labels = new Set(mandateLabels(p?.mandate ?? s.mandate!));
 	for (const i of s.items) {
 		const removed = i.brief?.nodes.find((n) => !labels.has(n));
@@ -148,8 +163,11 @@ function replacementPlan(
 		const depsChanged =
 			g.deps.length !== i.deps.length ||
 			g.deps.some((id, n) => id !== i.deps[n]);
-		if (depsChanged && (record(i) || !affected || !queueHeld(s, i)))
-			return `Keep the dependencies of ${i.id}. Only a held, affected item that has not been verified can change dependencies.`;
+		const filer = s.queueHolds.some(
+			(h) => p?.causes.includes(h.cause) && h.items.includes(i.id),
+		);
+		if (depsChanged && (record(i) || (!affected && !filer) || !queueHeld(s, i)))
+			return `Keep the dependencies of ${i.id}. Only a held filer or a held, affected item can change dependencies before verification.`;
 		if (
 			p &&
 			affected &&
@@ -257,8 +275,21 @@ export function applyRevision(
 			},
 		},
 	];
-	for (const cause of [...p.causes, revisionPlanHold])
-		send.push(...releaseQueueHold(s, cause, undefined, w));
+	const newItems = goals.filter((g) => !old.has(g.id)).map((g) => g.id);
+	for (const cause of [...p.causes, revisionPlanHold]) {
+		const hold = s.queueHolds.find((h) => h.cause === cause);
+		const fixing = !!hold?.items.length && newItems.length > 0;
+		if (fixing)
+			s.findings.push({
+				kind: "plan_finding",
+				cause,
+				text: hold.evidence,
+				reference: "Mandate revision",
+				nodes: p.nodes,
+				items: newItems,
+			});
+		send.push(...releaseQueueHold(s, cause, undefined, w, fixing));
+	}
 	send.push({
 		lane: "design",
 		work: w.work,

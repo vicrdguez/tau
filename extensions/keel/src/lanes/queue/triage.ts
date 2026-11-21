@@ -144,7 +144,9 @@ function plan(
 		text,
 		reference: reference ?? "Current Mandate",
 		nodes: reportedNodes(findings),
-		...(reference === null && { cause: cause(first) }),
+		...((reference === null || findings.some((f) => f.intake.blocking)) && {
+			cause: cause(first),
+		}),
 	});
 }
 function seed(
@@ -521,7 +523,10 @@ export function classify(
 	}
 
 	const live = context(world, work);
-	if (earlier?.status === "defect") {
+	if (
+		earlier?.status === "defect" &&
+		earlier.investigation?.classification !== "determined"
+	) {
 		if (
 			i.classification !== "defect_in_scope" ||
 			work !== earlier.intake.work ||
@@ -670,7 +675,13 @@ export function onFact(
 	const active = context(world, first.intake.work).active;
 	const building = fact.choice === "build";
 	const revising = building && active && i.classification === "mandate_wrong";
-	const defect = building && active && i.classification === "defect_in_scope";
+	const defect = i.classification === "defect_in_scope";
+	const planning =
+		building &&
+		active &&
+		!first.intake.missingCheck &&
+		(defect || i.classification === "determined");
+	const fixing = planning && (defect || related.some((f) => f.intake.blocking));
 	const pattern = ["bless", "revoke"].includes(fact.choice)
 		? first.intake.pattern
 		: null;
@@ -688,7 +699,7 @@ export function onFact(
 			if (related.includes(entry)) {
 				const next = revising
 					? { ...close(outcome), status: "revision" as const }
-					: defect
+					: fixing
 						? { ...close(outcome), status: "defect" as const, group: first.id }
 						: close(outcome);
 				return {
@@ -723,18 +734,23 @@ export function onFact(
 				revision(related, text),
 			],
 		};
-	if (defect) return { state, send: [plan(first, related, text, null)] };
+	if (planning)
+		return {
+			state,
+			send: [
+				...related
+					.filter((f) => f !== first && f.intake.blocking)
+					.flatMap((f) => [hold(f, [], cause(first)), release(f)]),
+				plan(first, related, text, defect ? null : i.reference!),
+			],
+		};
 
 	const send: Message[] = [];
 	if (building) {
 		if (first.intake.missingCheck)
 			send.push(seed("follow", text, i.reference!, [first.id]));
 		else if (i.classification === "determined")
-			send.push(
-				active
-					? plan(first, related, text, i.reference!)
-					: seed("follow", text, i.reference),
-			);
+			send.push(seed("follow", text, i.reference));
 		else if (first.revisits.length) {
 			const owed = q.entries
 				.filter(

@@ -739,7 +739,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 						...releaseQueueHold(
 							s,
 							f.cause,
-							"The defect plan merged. Start from the new build head.",
+							"The planned fix merged. Start from the new build head.",
 							w,
 						),
 					);
@@ -748,7 +748,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 					closeFindings(
 						w.work!,
 						[f.cause],
-						`defect fixed (${f.items.join(", ")} merged)`,
+						`${f.reference === "Current Mandate" ? "defect fixed" : "planned fix applied"} (${f.items.join(", ")} merged)`,
 					),
 				);
 				s.findings = s.findings.filter((other) => other !== f);

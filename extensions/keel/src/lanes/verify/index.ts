@@ -72,7 +72,12 @@ type Event =
 	| { kind: "reset_counts"; item: string }
 	| { kind: "queue_hold"; item: string; cause: string }
 	| { kind: "defect_fixed"; item: string; evidence: string }
-	| { kind: "queue_release"; cause: string; direction?: string }
+	| {
+			kind: "queue_release";
+			cause: string;
+			direction?: string;
+			except?: string[];
+	  }
 	| {
 			kind: "mandate_revised";
 			mandate: Mandate;
@@ -607,10 +612,10 @@ function transition(prev: State, world: World) {
 				}
 				break;
 			case "queue_release": {
-				const items = s.queueHolds
-					.filter((h) => h.cause === e.cause)
-					.map((h) => h.item);
-				s.queueHolds = s.queueHolds.filter((h) => h.cause !== e.cause);
+				const released = (h: (typeof s.queueHolds)[number]) =>
+					h.cause === e.cause && !e.except?.includes(h.item);
+				const items = s.queueHolds.filter(released).map((h) => h.item);
+				s.queueHolds = s.queueHolds.filter((h) => !released(h));
 				for (const item of items) {
 					const c = find(item);
 					if (!c || !["verify", "diagnose", "nonconvergent"].includes(c.phase))

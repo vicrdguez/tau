@@ -137,7 +137,9 @@ export function disposition(f: Finding): string {
 		case "revision":
 			return "build: awaiting Mandate revision";
 		case "defect":
-			return "open: awaiting defect fix";
+			return f.investigation?.classification === "determined"
+				? "open: awaiting planned fix"
+				: "open: awaiting defect fix";
 		case "closed":
 			return f.disposition!;
 	}
