@@ -621,17 +621,9 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: nextRevision(amend(state, index, { phase: "declined" })),
-							send: [
-								{
-									lane: "queue",
-									work: null,
-									event: {
-										kind: "revision_declined",
-										work: w.work!,
-										causes: revision.causes,
-									},
-								},
-							],
+							send: revision.causes.map((cause) =>
+								toBuild(w.work!, { kind: "queue_release", cause }),
+							),
 							notes: [{ agent: null, text: declinedRevision(answer) }],
 						};
 					case "approve":
