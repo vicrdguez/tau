@@ -1,9 +1,8 @@
 Investigate finding #{{id}} and report it with `report_investigation`.
 
-{{finding}}
-{{direction}}
+{{finding}}{{direction}}
 
-## Affected work at filing
+## Current work
 
 {{context}}
 
@@ -11,6 +10,6 @@ Investigate finding #{{id}} and report it with `report_investigation`.
 
 {{queue}}
 
-## Approved patterns
+## Pattern rulings
 
 {{patterns}}

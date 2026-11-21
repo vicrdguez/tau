@@ -36,8 +36,10 @@ const investigateInput = prose(
 );
 const triageDocument = prose(documents, "triage.md", [
 	"cause",
+	"work",
 	"choices",
 	"findings",
+	"impact",
 ]);
 const stallDocument = prose(documents, "triage-stall.md", [
 	"id",
@@ -83,9 +85,9 @@ function reportText(f: Finding) {
 		filingText(f),
 		i && `Investigation: ${i.evidence}`,
 		i?.duplicateOf && `Duplicate of #${i.duplicateOf}.`,
-		i?.reference && `Reference: ${i.reference}`,
+		i?.classification === "determined" && `Reference: ${i.reference}`,
 		i?.classification === "mandate_wrong" &&
-			`Held nodes: ${i.nodes.join(", ")}.`,
+			`Nodes under review: ${i.nodes.join(", ")}.`,
 		i && `Size: ${i.size}. Recommendation: ${i.recommendation}.`,
 	]
 		.filter(Boolean)
@@ -93,8 +95,7 @@ function reportText(f: Finding) {
 }
 const evidence = (findings: readonly Finding[]) =>
 	findings.map(reportText).join("\n\n");
-const batchSubject = (findings: readonly Finding[]) =>
-	subject(`triage/${findings.map((f) => f.id).join("-")}`);
+const batchSubject = (finding: Finding) => subject(`triage/${finding.batch}`);
 const members = (q: Queue, batch: Finding[]) =>
 	[...batch, ...duplicates(q, batch)].sort((a, b) => a.id - b.id);
 
@@ -108,7 +109,8 @@ function hold(f: Finding, nodes: string[]): Message {
 	});
 }
 const hasHold = (f: Finding) =>
-	f.intake.blocking || f.investigation?.classification === "mandate_wrong";
+	!f.intake.edgeCase &&
+	(f.intake.blocking || f.investigation?.classification === "mandate_wrong");
 function releases(findings: readonly Finding[], direction?: string): Message[] {
 	return findings.flatMap((f) =>
 		f.intake.work !== null && hasHold(f)
@@ -139,6 +141,7 @@ function plan(
 		text,
 		reference,
 		nodes: reportedNodes(findings),
+		...(first.intake.blocking && { cause: cause(first) }),
 	});
 }
 function seed(
@@ -185,7 +188,8 @@ export function intake(
 				"Only a worker or verifier's own item can block. File an unlikely edge case without blocking.",
 		};
 	const pattern = e.pattern?.trim() || null;
-	if (pattern && q.patterns.some((p) => p.name === pattern))
+	const precedent = q.patterns.find((p) => p.name === pattern);
+	if (precedent?.status === "blessed")
 		return {
 			state: q,
 			reply: `Approved reference: ${pattern}. No finding filed.`,
@@ -210,12 +214,37 @@ export function intake(
 	const f: Finding = {
 		id: q.entries.length + 1,
 		intake: input,
-		context: context(world, e.work),
+		basis: null,
 		status: "filed",
 		investigation: null,
 		batch: null,
 		disposition: null,
 	};
+	if (
+		precedent?.status === "revoked" &&
+		f.intake.work !== null &&
+		context(world, f.intake.work).active
+	) {
+		const text = `Rework this ruling: the owner revoked ${pattern}.\n\n${filingText(f)}`;
+		return {
+			state: {
+				...q,
+				entries: [
+					...q.entries,
+					{
+						...f,
+						status: "routed",
+						disposition: "revoked pattern: defect for rework",
+					},
+				],
+			},
+			send: [
+				...(input.blocking ? [hold(f, [])] : []),
+				plan(f, [f], text, "Current Mandate"),
+			],
+			reply: `Pattern ${pattern} was revoked. Finding #${f.id} goes to rework.`,
+		};
+	}
 	return {
 		state: { ...q, entries: [...q.entries, f] },
 		send: input.blocking ? [hold(f, [])] : [],
@@ -223,10 +252,10 @@ export function intake(
 	};
 }
 
-function sameDecision(f: Finding, i: Investigation, other: Finding) {
+function shareDecision(f: Finding, i: Investigation, other: Finding) {
 	if (
 		i.classification !== other.investigation?.classification ||
-		i.cause !== other.investigation.cause
+		other.batch === null
 	)
 		return false;
 	switch (i.classification) {
@@ -235,7 +264,7 @@ function sameDecision(f: Finding, i: Investigation, other: Finding) {
 		case "determined":
 			return (
 				other.intake.work === f.intake.work &&
-				other.investigation.reference === i.reference
+				i.reference === other.investigation.reference
 			);
 		case "unapproved_pattern":
 			return other.intake.pattern === f.intake.pattern;
@@ -246,6 +275,19 @@ function sameDecision(f: Finding, i: Investigation, other: Finding) {
 	}
 }
 
+function revision(findings: Finding[], text: string): Message {
+	return {
+		lane: "design",
+		work: findings[0]!.intake.work,
+		event: {
+			kind: "revise_mandate",
+			causes: findings.map(cause),
+			nodes: distinct(findings.flatMap((f) => f.investigation?.nodes ?? [])),
+			text,
+		},
+	};
+}
+
 export function classify(
 	q: Queue,
 	e: Investigated,
@@ -254,26 +296,32 @@ export function classify(
 	const f = pending(q);
 	if (!f || q.stall || f.id !== e.finding)
 		return { reject: "Report the finding assigned in your current input." };
-	if (
-		!classes.includes(e.classification) ||
-		!e.evidence.trim() ||
-		!e.size.trim() ||
-		!e.cause.trim()
-	)
+	const named =
+		e.sameAs == null
+			? undefined
+			: q.entries.find((entry) => entry.id === e.sameAs && entry.id < f.id);
+	const linked = named?.investigation?.duplicateOf
+		? q.entries.find((entry) => entry.id === named.investigation!.duplicateOf)
+		: named;
+	if (e.sameAs != null && !linked)
 		return {
-			reject:
-				"Name the class, evidence, estimated size and the cause that takes one decision.",
+			reject: "Name an earlier finding with the same cause and decision.",
 		};
 	const i: Investigation = {
 		classification: e.classification,
 		nodes: distinct(e.nodes),
 		evidence: e.evidence.trim(),
 		size: e.size.trim(),
-		cause: e.cause.trim(),
+		cause: linked?.investigation?.cause ?? e.cause.trim(),
 		recommendation: e.recommendation,
-		reference: e.reference?.trim() || null,
+		reference: e.reference?.trim() || linked?.investigation?.reference || null,
 		duplicateOf: e.duplicateOf ?? null,
 	};
+	if (!classes.includes(i.classification) || !i.evidence || !i.size || !i.cause)
+		return {
+			reject:
+				"Name the class, evidence, estimated size and the decision cause or earlier finding.",
+		};
 	if (!choices(i.classification).some((c) => c === i.recommendation))
 		return { reject: "Recommend a choice available for this class." };
 	if (i.classification === "determined" && !i.reference)
@@ -288,19 +336,25 @@ export function classify(
 			reject:
 				"Use the unapproved pattern class only when the filing names a pattern.",
 		};
+	if (linked && !shareDecision(f, i, linked))
+		return {
+			reject:
+				"Name a finding with the same decision, authority and destination.",
+		};
+
 	const event = { ...f, investigation: i };
+	const live = context(world, f.intake.work);
 	if (i.classification === "duplicate") {
 		const earlier = q.entries.find(
 			(entry) => entry.id === i.duplicateOf && entry.id < f.id,
 		);
-		if (!earlier || e.batchWith.length)
+		if (!earlier || linked)
 			return { reject: "Name an earlier duplicate instead of a batch." };
-		const original =
-			earlier.investigation?.duplicateOf === null || !earlier.investigation
-				? earlier
-				: q.entries.find(
-						(entry) => entry.id === earlier.investigation?.duplicateOf,
-					)!;
+		const original = earlier.investigation?.duplicateOf
+			? q.entries.find(
+					(entry) => entry.id === earlier.investigation!.duplicateOf,
+				)!
+			: earlier;
 		if (
 			original.investigation?.classification === "mandate_wrong" &&
 			original.intake.work !== f.intake.work
@@ -308,69 +362,120 @@ export function classify(
 			return { reject: "The original finding concerns a different Mandate." };
 		if (original.intake.pattern !== f.intake.pattern)
 			return { reject: "The original finding names a different pattern." };
-		return {
-			state: update(q, f, {
-				status: "duplicate",
-				investigation: { ...i, duplicateOf: original.id },
-			}),
-			send: original.status === "triage" ? [] : releases([event]),
-		};
+		const state = update(q, f, {
+			...event,
+			status: "duplicate",
+			investigation: { ...i, duplicateOf: original.id },
+		});
+		if (original.status === "deferred" && original.investigation) {
+			const batch = q.entries.filter(
+				(entry) =>
+					entry.batch === original.batch && entry.status === "deferred",
+			);
+			const primary = batch[0] ?? original;
+			const current = context(world, primary.intake.work);
+			return {
+				state: {
+					...state,
+					entries: state.entries.map((entry) =>
+						batch.includes(entry)
+							? {
+									...entry,
+									status: "triage",
+									batch: f.id,
+									basis:
+										entry === primary
+											? triageBasis(primary, members(state, batch), current)
+											: null,
+								}
+							: entry,
+					),
+				},
+				send:
+					current.active &&
+					primary.investigation?.classification === "mandate_wrong"
+						? batch
+								.filter((entry) => !entry.intake.edgeCase)
+								.map((entry) => hold(entry, entry.investigation!.nodes))
+						: [],
+			};
+		}
+		if (original.status === "triage") return joined(state, original, event);
+		return { state, send: releases([event]) };
 	}
 	if (i.duplicateOf !== null)
 		return { reject: "Only a duplicate names an original finding." };
-	const live = context(world, f.intake.work);
+	if (i.classification === "no_action") {
+		if (f.intake.blocking || i.nodes.length)
+			return {
+				reject:
+					"No action is for an observation that has no hold and changes no binding node.",
+			};
+		return {
+			state: update(q, f, {
+				status: "no_action",
+				investigation: i,
+				disposition: `no action: ${i.evidence}`,
+			}),
+		};
+	}
 	if (i.classification === "defect_in_scope") {
-		if (e.batchWith.length || !live.active)
+		if (!live.active)
 			return {
 				reject: "An in-scope defect must go directly to an active build.",
 			};
-		const text = reportText(event);
 		return {
 			state: update(q, f, { status: "routed", investigation: i }),
-			send: [plan(f, [event], text, "Current Mandate"), ...releases([event])],
+			send: [plan(f, [event], reportText(event), "Current Mandate")],
 		};
 	}
 	if (i.classification === "mandate_wrong") {
 		const labels = live.mandate ? mandateLabels(live.mandate) : [];
-		if (
-			!live.active ||
-			!i.nodes.length ||
-			i.nodes.some((n) => !labels.includes(n))
-		)
-			return {
-				reject: "Name binding nodes of the current Mandate in an active build.",
-			};
+		if (!i.nodes.length || i.nodes.some((n) => !labels.includes(n)))
+			return { reject: "Name binding nodes of the current Mandate." };
 	}
-	const groups = new Set<number>();
-	for (const id of e.batchWith) {
-		const other = q.entries.find((entry) => entry.id === id);
-		if (
-			!other ||
-			other.status !== "triage" ||
-			other.batch === null ||
-			!sameDecision(f, i, other)
-		)
-			return {
-				reject:
-					"Batch only open findings with the same cause, authority and destination.",
-			};
-		groups.add(other.batch);
+	const send =
+		live.active && i.classification === "mandate_wrong" && !f.intake.edgeCase
+			? [hold(event, i.nodes)]
+			: [];
+	if (linked) {
+		const state = update(q, f, {
+			...event,
+			batch: linked.batch,
+			status: linked.status,
+			disposition: linked.disposition,
+		});
+		if (linked.status === "triage") return joined(state, linked, event, send);
+		if (linked.status === "revision_pending" && live.active)
+			return { state, send: [...send, revision([event], reportText(event))] };
+		return { state, send: releases([event]) };
 	}
-	const batch = Math.min(f.id, ...groups);
 	return {
-		state: {
-			...q,
-			entries: q.entries.map((entry) =>
-				entry === f
-					? { ...event, status: "triage", batch }
-					: entry.batch !== null &&
-							groups.has(entry.batch) &&
-							entry.status === "triage"
-						? { ...entry, batch }
-						: entry,
-			),
-		},
-		send: i.classification === "mandate_wrong" ? [hold(event, i.nodes)] : [],
+		state: update(q, f, {
+			...event,
+			status: "triage",
+			batch: f.id,
+			basis: triageBasis(event, [event], live),
+		}),
+		send,
+	};
+}
+
+function joined(
+	state: Queue,
+	linked: Finding,
+	event: Finding,
+	send: Message[] = [],
+): Accepted<Queue> {
+	return {
+		state,
+		send,
+		notes: [
+			{
+				agent: null,
+				text: `New report for ${batchSubject(linked)}. Your answer also covers this finding.\n\n${reportText(event)}`,
+			},
+		],
 	};
 }
 
@@ -430,9 +535,7 @@ export function onFact(
 			};
 		return { state: q };
 	}
-	const batch = batches(q).find(
-		(b) => batchSubject(members(q, b)) === fact.subject,
-	);
+	const batch = batches(q).find((b) => batchSubject(b[0]!) === fact.subject);
 	const first = batch?.[0];
 	const i = first?.investigation;
 	if (
@@ -452,6 +555,9 @@ export function onFact(
 	]
 		.filter(Boolean)
 		.join("\n\n");
+	const active = context(world, first.intake.work).active;
+	const revising =
+		fact.choice === "build" && i.classification === "mandate_wrong" && active;
 	const status =
 		fact.choice === "drop"
 			? "dropped"
@@ -459,42 +565,45 @@ export function onFact(
 				? "deferred"
 				: fact.choice === "bless"
 					? "blessed"
-					: "routed";
-	const pattern = fact.choice === "bless" ? first.intake.pattern : null;
+					: revising
+						? "revision_pending"
+						: "routed";
+	const pattern = ["bless", "revoke"].includes(fact.choice)
+		? first.intake.pattern
+		: null;
 	const settled = pattern
 		? q.entries.filter(
 				(f) =>
 					f.intake.pattern === pattern &&
-					(f.status === "filed" || f.status === "triage"),
+					["filed", "triage"].includes(f.status),
 			)
 		: batch;
 	const state: Queue = {
 		...q,
 		entries: q.entries.map((entry) =>
-			settled.includes(entry) ? { ...entry, status } : entry,
+			settled.includes(entry)
+				? {
+						...entry,
+						status,
+						disposition: fact.choice === "revoke" ? "pattern revoked" : null,
+					}
+				: entry,
 		),
 		stall: f && settled.includes(f) ? null : q.stall,
 		patterns: pattern
-			? [...q.patterns, { name: pattern, finding: first.id, evidence: text }]
+			? [
+					...q.patterns,
+					{
+						name: pattern,
+						finding: first.id,
+						evidence: text,
+						status: fact.choice === "bless" ? "blessed" : "revoked",
+					},
+				]
 			: q.patterns,
 	};
-	if (fact.choice === "build" && i.classification === "mandate_wrong") {
-		return {
-			state,
-			send: [
-				{
-					lane: "design",
-					work: first.intake.work,
-					event: {
-						kind: "revise_mandate",
-						causes: related.filter(hasHold).map(cause),
-						nodes: distinct(batch.flatMap((f) => f.investigation?.nodes ?? [])),
-						text,
-					},
-				},
-			],
-		};
-	}
+	if (revising) return { state, send: [revision(related, text)] };
+
 	const send: Message[] = [];
 	if (fact.choice === "build") {
 		if (i.classification === "determined")
@@ -524,27 +633,72 @@ function actions(classification: Investigation["classification"]) {
 		case "determined":
 			return "Build adds work to the related active build or starts new work under the approved reference. Defer parks it. Drop closes it.";
 		case "mandate_wrong":
-			return "Build asks this work's designer to propose a revision; affected items stay held. Defer or drop releases these holds without changing the Mandate.";
+			return "Build asks the designer to propose a revision. Defer releases holds and lets a later duplicate reopen the decision. Drop releases holds and closes the issue.";
 		case "unapproved_pattern":
 			return "Bless makes this an approved reference. Revoke starts work to make the pattern fail structurally. Defer parks the finding.";
 		default:
 			return "Build starts new work with design and Mandate review. Defer parks it. Drop closes it.";
 	}
 }
+function triageBasis(
+	first: Finding,
+	related: Finding[],
+	live: ReturnType<typeof context>,
+) {
+	const i = first.investigation!;
+	const nodes =
+		i.classification === "mandate_wrong" ? reportedNodes(related) : [];
+	const held = live.active
+		? live.plan.filter((item) =>
+				related.some(
+					(f) =>
+						!f.intake.edgeCase &&
+						((f.intake.blocking && f.intake.item === item.id) ||
+							(f.investigation?.classification === "mandate_wrong" &&
+								f.investigation.nodes.some((node) =>
+									item.nodes.includes(node),
+								))),
+				),
+			)
+		: [];
+	const waiting = new Set(held.map((i) => i.id));
+	for (let count = -1; count !== waiting.size; ) {
+		count = waiting.size;
+		for (const item of live.plan)
+			if (item.deps.some((id) => waiting.has(id))) waiting.add(item.id);
+	}
+	const list = (items: typeof live.plan) =>
+		items.map((i) => i.id).join(", ") || "None.";
+	return triageDocument({
+		cause: i.cause,
+		work: live.mandate?.intent.split("\n", 1)[0] || "the project queue",
+		choices:
+			i.classification === "mandate_wrong" && !live.active
+				? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
+				: actions(i.classification),
+		findings: evidence(related),
+		impact: live.mandate
+			? [
+					`Held items: ${list(held)}`,
+					`Waiting on held dependencies: ${list(live.plan.filter((i) => waiting.has(i.id) && !held.includes(i)))}`,
+					`Keeps running: ${list(live.plan.filter((i) => !waiting.has(i.id) && !["cleaning", "merged"].includes(i.stage)))}`,
+					nodes.length ? renderMandate(live.mandate, nodes) : "",
+				]
+					.filter(Boolean)
+					.join("\n\n")
+			: "",
+	});
+}
+
 export function asks(q: Queue): Ask[] {
 	const out: Ask[] = batches(q).map((batch) => {
-		const i = batch[0]!.investigation!;
-		const related = members(q, batch);
-		const basis = triageDocument({
-			cause: i.cause,
-			choices: actions(i.classification),
-			findings: evidence(related),
-		});
+		const first = batch[0]!;
+		const basis = first.basis!;
 		return {
-			subject: batchSubject(related),
+			subject: batchSubject(first),
 			title: basis.split("\n", 1)[0]!,
 			basis,
-			choices: choices(i.classification),
+			choices: choices(first.investigation!.classification),
 		};
 	});
 	const f = pending(q);
@@ -563,12 +717,13 @@ export function asks(q: Queue): Ask[] {
 	}
 	return out;
 }
-function investigationText(q: Queue, f: Finding) {
-	const { mandate, plan, reference } = f.context;
-	return investigateInput({
-		id: String(f.id),
-		finding: filingText(f),
-		direction: q.direction ? `Owner direction:\n${q.direction}` : "",
+export function begin(q: Queue, world: World): Queue {
+	const f = pending(q);
+	if (!f) return { ...q, context: "" };
+	const { mandate, plan, reference } = context(world, f.intake.work);
+	return {
+		...q,
+		direction: "",
 		context: [
 			reference && `Reference: ${reference}.`,
 			mandate && renderMandate(mandate),
@@ -577,20 +732,30 @@ function investigationText(q: Queue, f: Finding) {
 					(item) =>
 						`- ${item.id} (${item.stage}): ${item.goal}; nodes: ${item.nodes.join(", ") || "none"}; dependencies: ${item.deps.join(", ") || "none"}`,
 				)
-				.join("\n") || "No plan items at filing.",
+				.join("\n") || "No plan items.",
 		]
 			.filter(Boolean)
 			.join("\n\n"),
+	};
+}
+function investigationText(q: Queue, f: Finding) {
+	return investigateInput({
+		id: String(f.id),
+		finding: filingText(f),
+		direction: q.direction ? `\n\nOwner direction:\n${q.direction}` : "",
+		context: q.context,
 		queue:
 			q.entries
 				.filter((other) => other !== f)
 				.map(
-					(other) => `- #${other.id} (${other.status}): ${other.intake.text}`,
+					(other) =>
+						`- #${other.id} (${[other.status, other.investigation?.classification, other.investigation?.cause].filter(Boolean).join(" / ")}): ${other.intake.text}`,
 				)
 				.join("\n") || "None.",
 		patterns:
-			q.patterns.map((p) => `- ${p.name} (finding #${p.finding})`).join("\n") ||
-			"None.",
+			q.patterns
+				.map((p) => `- ${p.name} (${p.status}, finding #${p.finding})`)
+				.join("\n") || "None.",
 	});
 }
 
@@ -623,11 +788,12 @@ export function workFor(
 	e: LaneEvent | KernelEvent,
 ): Finding["intake"]["work"] {
 	if (e.kind === "intake" && "work" in e) return e.work as Intake["work"];
-	if (e.kind === "investigated") return pending(q)?.intake.work ?? null;
+	if (e.kind === "investigated" || e.kind === "begin_investigation")
+		return pending(q)?.intake.work ?? null;
 	if (e.kind === "answered" && "subject" in e)
 		return (
-			batches(q).find((b) => batchSubject(members(q, b)) === e.subject)?.[0]
-				?.intake.work ?? null
+			batches(q).find((b) => batchSubject(b[0]!) === e.subject)?.[0]?.intake
+				.work ?? null
 		);
 	return null;
 }

@@ -22,10 +22,27 @@ type QueueState = { findings: Finding[]; triage: Queue };
 const withTriage = (
 	state: QueueState,
 	result: Accepted<Queue>,
-): Accepted<QueueState> => ({
-	...result,
-	state: { ...state, triage: result.state },
-});
+): Accepted<QueueState> => {
+	const next = pending(result.state)?.id;
+	const changed = next !== pending(state.triage)?.id;
+	return {
+		...result,
+		state: {
+			...state,
+			triage:
+				changed && next == null
+					? { ...result.state, context: "", direction: "" }
+					: result.state,
+		},
+		...(changed &&
+			next != null && {
+				send: [
+					...(result.send ?? []),
+					{ lane: "queue", work: null, event: { kind: "begin_investigation" } },
+				],
+			}),
+	};
+};
 
 const question = prose(
 	import.meta.dirname,
@@ -63,6 +80,8 @@ export const queueLane = defineLane(
 		}),
 		workInHand: (state, event) => triage.workFor(state.triage, event),
 		reduce(state, event, world): Reduction<QueueState> {
+			if (event.kind === "begin_investigation")
+				return withTriage(state, { state: triage.begin(state.triage, world) });
 			if (event.kind === "intake" || event.kind === "investigated") {
 				const result =
 					event.kind === "intake"
@@ -73,12 +92,7 @@ export const queueLane = defineLane(
 							)
 						: triage.classify(state.triage, event as Investigated, world);
 				return result.reject === undefined
-					? withTriage(
-							state,
-							event.kind === "investigated"
-								? { ...result, state: { ...result.state, direction: "" } }
-								: result,
-						)
+					? withTriage(state, result)
 					: { reject: result.reject };
 			}
 			if (event.kind === "revision_disposition") {
@@ -207,10 +221,8 @@ export const queueLane = defineLane(
 			...triage.asks(state.triage),
 		],
 		view: (state) => ({
-			approvedPatterns: state.triage.patterns,
-			investigation: pending(state.triage)?.context ?? null,
-			openFor: (work: WorkId) =>
-				state.findings.filter((f) => f.work === work && f.status === "open"),
+			approvedPatterns: state.triage.patterns.filter((p) => p.status === "blessed"),
+			investigation: pending(state.triage) ? state.triage.context : null,
 		}),
 		agents: (state) => triage.agents(state.triage),
 		effects: () => [],

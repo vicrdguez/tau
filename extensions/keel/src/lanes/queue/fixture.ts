@@ -1,6 +1,5 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import type { Sha } from "../../repo/index.ts";
-import type { Mandate } from "../design/public.ts";
 
 // Version-one storage contract, independent of the reducer's types.
 type QueueV1 = {
@@ -36,18 +35,7 @@ type QueueV1 = {
 				pattern: string | null;
 				blocking: boolean;
 			};
-			context: {
-				active: boolean;
-				plan: {
-					id: string;
-					goal: string;
-					stage: string;
-					nodes: string[];
-					deps: string[];
-				}[];
-				mandate: Mandate | null;
-				reference: string | null;
-			};
+			basis: string | null;
 			status:
 				| "filed"
 				| "triage"
@@ -57,6 +45,8 @@ type QueueV1 = {
 				| "duplicate"
 				| "blessed"
 				| "cancelled"
+				| "revision_pending"
+				| "no_action"
 				| "revision_declined"
 				| "settled";
 			investigation: {
@@ -66,7 +56,8 @@ type QueueV1 = {
 					| "sets_precedent"
 					| "mandate_wrong"
 					| "unapproved_pattern"
-					| "duplicate";
+					| "duplicate"
+					| "no_action";
 				nodes: string[];
 				evidence: string;
 				size: string;
@@ -78,7 +69,13 @@ type QueueV1 = {
 			batch: number | null;
 			disposition: string | null;
 		}[];
-		patterns: { name: string; finding: number; evidence: string }[];
+		patterns: {
+			name: string;
+			finding: number;
+			evidence: string;
+			status: "blessed" | "revoked";
+		}[];
+		context: string;
 		attempt: number;
 		direction: string;
 		stall: { cause: string; lastWords: string } | null;
@@ -115,20 +112,7 @@ export const queueFixture = {
 						pattern: null,
 						blocking: true,
 					},
-					context: {
-						active: true,
-						plan: [
-							{
-								id: "i1",
-								goal: "Post journal entries",
-								stage: "building",
-								nodes: ["S1"],
-								deps: [],
-							},
-						],
-						mandate: null,
-						reference: null,
-					},
+					basis: "Decide what to do about rounding.",
 					status: "triage",
 					investigation: {
 						classification: "mandate_wrong",
@@ -145,6 +129,7 @@ export const queueFixture = {
 				},
 			],
 			patterns: [],
+			context: "",
 			attempt: 0,
 			direction: "",
 			stall: null,

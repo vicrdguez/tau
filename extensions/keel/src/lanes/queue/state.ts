@@ -10,6 +10,7 @@ export const classes = [
 	"mandate_wrong",
 	"unapproved_pattern",
 	"duplicate",
+	"no_action",
 ] as const;
 export type Classification = (typeof classes)[number];
 export const workChoices = ["build", "defer", "drop"] as const;
@@ -27,7 +28,7 @@ export type Investigation = {
 export type Investigated = {
 	kind: "investigated";
 	finding: number;
-	batchWith: number[];
+	sameAs: number | null;
 } & Investigation;
 export type PlanItem = {
 	id: string;
@@ -53,6 +54,7 @@ export function context(world: World, work: WorkId | null) {
 				} | null);
 	return {
 		active: build?.phase === "active",
+		phase: build?.phase ?? "missing",
 		plan:
 			build?.plan.map(({ id, goal, stage, nodes, deps }) => ({
 				id,
@@ -75,12 +77,14 @@ export type Status =
 	| "duplicate"
 	| "blessed"
 	| "cancelled"
+	| "revision_pending"
+	| "no_action"
 	| "revision_declined"
 	| "settled";
 export type Finding = {
 	id: number;
 	intake: Intake;
-	context: ReturnType<typeof context>;
+	basis: string | null;
 	status: Status;
 	investigation: Investigation | null;
 	batch: number | null;
@@ -88,7 +92,13 @@ export type Finding = {
 };
 export type Queue = {
 	entries: Finding[];
-	patterns: { name: string; finding: number; evidence: string }[];
+	patterns: {
+		name: string;
+		finding: number;
+		evidence: string;
+		status: "blessed" | "revoked";
+	}[];
+	context: string;
 	attempt: number;
 	direction: string;
 	stall: { cause: string; lastWords: string } | null;
@@ -96,6 +106,7 @@ export type Queue = {
 export const initial = (): Queue => ({
 	entries: [],
 	patterns: [],
+	context: "",
 	attempt: 0,
 	direction: "",
 	stall: null,
@@ -113,7 +124,11 @@ export function update(q: Queue, f: Finding, changes: Partial<Finding>): Queue {
 }
 
 export function choices(classification: Classification) {
-	return classification === "unapproved_pattern" ? patternChoices : workChoices;
+	return classification === "no_action"
+		? (["no_action"] as const)
+		: classification === "unapproved_pattern"
+			? patternChoices
+			: workChoices;
 }
 
 export function batches(q: Queue) {

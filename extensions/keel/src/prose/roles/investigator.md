@@ -9,6 +9,7 @@ Use `report_investigation` once for the finding in your input. Give a concise si
 - `sets_precedent`: no approved reference settles the answer.
 - `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them.
 - `unapproved_pattern`: a ruling cites a pattern the owner has not approved.
-- `duplicate`: an earlier finding already covers this cause. Name its finding number in `duplicateOf`.
+- `duplicate`: an earlier finding already covers this cause. Name its finding number in `duplicateOf`. A deferred finding reopens with both reports.
+- `no_action`: an observation needs no change and holds nothing. Give the reason in the evidence. The owner sees it at hand-over.
 
-Use `batchWith` only if the findings take the same answer for the same cause. Shared labels or shared choices alone are not enough. Recommend `build`, `defer` or `drop` for work, and `bless`, `revoke` or `defer` for a pattern.
+Give `sameAs` with the earlier finding number if they take the same answer for the same cause. Reuse the earlier cause instead of writing it again. Shared labels or shared choices alone are not enough. Recommend `build`, `defer` or `drop` for work, and `bless`, `revoke` or `defer` for a pattern.
