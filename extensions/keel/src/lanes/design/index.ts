@@ -600,9 +600,13 @@ export const design: Lane<State> = {
 	view: (s) => ({
 		mandate: s.mandate,
 		goal: goal(s),
+		phase: s.phase,
 		ownerReviewed:
-			s.rounds.some((r) => r.answer?.choice === "approve") ||
-			s.revisions.some((r) => r.phase === "applied"),
+			s.phase !== "cancelled" &&
+			s.rounds.some((r) => r.answer?.choice === "approve"),
+		revisedLabels: s.revisions.flatMap((r) =>
+			r.phase === "applied" ? r.rounds.at(-1)!.nodes : [],
+		),
 		reference: s.reference,
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {

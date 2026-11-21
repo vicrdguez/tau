@@ -7,7 +7,7 @@ import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
 import { workRulings } from "../lanes/build/public.ts";
-import { reviewedMandate } from "../lanes/design/public.ts";
+import { explorerDesign, mandateNodes } from "../lanes/design/public.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
 import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
@@ -58,21 +58,52 @@ export const explorerDispatch: NonNullable<
 	resolve({ role, options, cwd, view, priorWorks }, { seat: requested }) {
 		const explorerRole = explorerSeat(role);
 		if (!explorerRole || requested !== explorerRole) return;
-		const design = view("design");
+		const design = explorerDesign(view("design"));
 		const queue = view("queue") as {
 			patternRulings: unknown;
 			investigation: unknown;
 		} | null;
+		const history = priorWorks.flatMap(({ work, view }) => {
+			const prior = explorerDesign(view("design"));
+			if (!prior?.mandate) return [];
+			const nodes = mandateNodes(prior.mandate);
+			const mandate = prior.ownerReviewed ? prior.mandate : null;
+			const revisionNodes = nodes.filter((n) =>
+				prior.revisedLabels.includes(n.label),
+			);
+			if (!mandate && !revisionNodes.length) return [];
+			return [
+				{
+					work,
+					goal: prior.goal,
+					mandate,
+					nodes: mandate ? nodes : revisionNodes,
+					view,
+				},
+			];
+		});
+		const firstLine = (text: string) =>
+			text.trim().split(/\r?\n/, 1)[0]!.trim();
 		const record = JSON.stringify(
 			{
 				design,
-				rulings: workRulings(view("build")),
-				priorWorks: priorWorks.flatMap(({ work, view }) => {
-					const mandate = reviewedMandate(view("design"));
-					return mandate
-						? [{ work, mandate, rulings: workRulings(view("build")) }]
-						: [];
-				}),
+				rulings: design ? workRulings(view("build")) : [],
+				priorWorks: history.slice(-3).map(({ work, mandate, nodes, view }) => ({
+					work,
+					...(mandate ? { mandate } : { revisionNodes: nodes }),
+					rulings: workRulings(view("build")),
+				})),
+				earlierWorks: history
+					.slice(0, -3)
+					.map(({ work, goal, mandate, nodes }) => ({
+						work,
+						goal: firstLine(goal),
+						...(mandate ? {} : { revisionOnly: true }),
+						nodes: nodes.map(({ label, body }) => ({
+							label,
+							line: firstLine(body),
+						})),
+					})),
 				patternRulings: queue?.patternRulings ?? [],
 				investigation:
 					role === "investigator" ? (queue?.investigation ?? null) : null,
