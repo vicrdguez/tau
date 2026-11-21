@@ -159,6 +159,23 @@ function run(facts = world) {
 	};
 }
 
+test("an ordinary follow seed does not ask the designer to encode an owed check", () => {
+	const x = run();
+	x.act(seed);
+	assert.doesNotMatch(x.input(), /owed check|commission a regression test/i);
+});
+
+test("declining a seeded design reports its uncleared checks", () => {
+	const x = run();
+	x.act({ ...seed, route: "precedent", owed: [4] });
+	x.act({ kind: "ground", route: "precedent", reference, audit });
+	x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
+	const result = x.answer(x.asks()[0]!.subject, "decline");
+	const returned = result.send?.find((m) => m.event.kind === "checks_finished");
+	assert.deepEqual(returned?.event.ids, [4]);
+	assert.match(String(returned?.event.outcome), /declined/);
+});
+
 async function explorerHistory(
 	works: ReturnType<typeof run>[],
 	current?: ReturnType<typeof run>,

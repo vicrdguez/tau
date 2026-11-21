@@ -79,6 +79,61 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 	await s.accept(trunk);
 });
 
+async function openAsk(
+	s: Awaited<ReturnType<typeof openScenario>>,
+	lane: string,
+) {
+	const { harness } = s.store;
+	const slots = Object.values(
+		(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
+	);
+	const slot = slots.find((a) => a.lane === lane);
+	assert.ok(slot, `missing ${lane} decision`);
+	const d = await harness.commit((tx) => decision(tx, slot.decision), ctx);
+	assert.ok(d?.status === "open");
+	const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
+	return { d, text: String((basis!.data as JsonObject).text) };
+}
+
+test("cancelled encoding work reopens its original owed-check decision without changing trunk", async (t) => {
+	const { root } = await fixture(t);
+	const s = await openScenario(root, new MemoryStorage(), "rework");
+	t.after(() => s.store.harness.close(ctx));
+	await s.start();
+	await s.settle();
+	const before = git(root, "rev-parse", "trunk");
+	const check =
+		"Keep a runnable book-format regression check in the repository.";
+	const answer = (
+		d: Awaited<ReturnType<typeof openAsk>>["d"],
+		choice: string,
+		annotations: { start: number; end: number; text: string }[] = [],
+	) => fauxAnswer(s.store, d.id, { basis: d.basis, choice, annotations });
+	await answer((await openAsk(s, "verify")).d, "reject", [
+		{ start: 0, end: 1, text: check },
+	]);
+	await s.settle();
+	const triage = await openAsk(s, "queue");
+	if (process.env.KEEL_SWEEP_FIX_RENDERS)
+		await writeFile(
+			"/tmp/keel-sweep-fix-triage.md",
+			`Title: ${triage.d.title}\nChoices: ${triage.d.choices.join(", ")}\n\n${triage.text}`,
+		);
+	s.provider.setResponses([]);
+	await answer(triage.d, "build");
+	await s.settle();
+	const stalled = await openAsk(s, "queue");
+	assert.deepEqual(stalled.d.choices, ["resume", "cancel"]);
+	await answer(stalled.d, "cancel");
+	await s.settle();
+	const returned = await openAsk(s, "queue");
+	assert.notEqual(returned.d.id, triage.d.id);
+	assert.deepEqual(returned.d.choices, ["build", "defer", "drop"]);
+	assert.match(returned.text, /Encoding work was cancelled/);
+	assert.ok(returned.text.includes(check));
+	assert.equal(git(root, "rev-parse", "trunk"), before);
+});
+
 test("a rejected landing opens owed-check triage; the check's verified landed commit clears it from the next hand-over", async (t) => {
 	const { root } = await fixture(t);
 	const s = await openScenario(root, new MemoryStorage(), "rework");
@@ -86,17 +141,7 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 	t.after(() => harness.close(ctx));
 	await s.start();
 	await s.settle();
-	async function ask(lane: string) {
-		const slots = Object.values(
-			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-		);
-		const slot = slots.find((a) => a.lane === lane);
-		assert.ok(slot, `missing ${lane} decision`);
-		const d = await harness.commit((tx) => decision(tx, slot.decision), ctx);
-		assert.ok(d?.status === "open");
-		const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
-		return { d, text: String((basis!.data as JsonObject).text) };
-	}
+	const ask = (lane: string) => openAsk(s, lane);
 	const first = await ask("verify");
 	const before = git(root, "rev-parse", "trunk");
 	const check =
@@ -148,7 +193,7 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 					checks: [proof],
 				},
 			},
-			check,
+			"runnable regression check",
 		),
 		s.turn("coordinator", "publish_plan", {
 			items: [{ id: "encode", kind: "encode", goal, deps: [] }],

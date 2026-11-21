@@ -279,8 +279,15 @@ test("an unannotated hand-over rejection stays open and files nothing", () => {
 	assert.equal(x.asks()[0]?.subject, open?.subject);
 });
 
-test("a rejected hand-over files each nonblank annotation as an owed check with the original evidence", () => {
-	const x = flow();
+test("a hand-over explains rejection and lists owed checks up front; its rejection files only the evidence", () => {
+	const x = flow((lane) =>
+		lane === "queue"
+			? {
+					owedChecks: () =>
+						"- #4: Cover a zero-sized lot. (deferred; rejected previous-commit)",
+				}
+			: null,
+	);
 	x.prepared();
 	x.done("land", { kind: "landed", sha: "prepared" });
 	const [open] = x.asks();
@@ -307,8 +314,59 @@ test("a rejected hand-over files each nonblank annotation as an owed check with 
 			["owner", "prepared", true, "Check the upper bound."],
 		],
 	);
-	assert.match(String(filings[0]?.event.report), /Balance every ledger/);
+	assert.match(
+		open!.basis,
+		/Each annotation becomes a check that is owed until built or dropped/,
+	);
+	assert.match(
+		open!.basis,
+		/Checks still owed[\s\S]*Cover a zero-sized lot[\s\S]*Balance every ledger/,
+	);
+	for (const { event } of filings) {
+		assert.match(String(event.report), /Balance every ledger/);
+		assert.doesNotMatch(
+			String(event.report),
+			/Accept the result|Checks still owed|Cover a zero-sized lot|Promotion to/,
+		);
+	}
+	if (process.env.KEEL_SWEEP_FIX_RENDERS)
+		writeFileSync(
+			"/tmp/keel-sweep-fix-handover.md",
+			`Title: ${open!.title}\nChoices: ${open!.choices.join(", ")}\n\n${open!.basis}`,
+		);
 	assert.deepEqual(x.asks(), []);
+});
+
+test("unchanged trunk returns assigned checks even after a full-set verifier confirmation", () => {
+	const x = flow((lane) => (lane === "design" ? { owed: [2] } : null));
+	x.publish();
+	x.checkout();
+	assert.doesNotMatch(x.agent().expects[0]!.input!(), /owed checks/i);
+	x.pass();
+	x.clean();
+	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
+	x.clean();
+	x.handoff();
+	x.checkout();
+	assert.match(
+		x.agent().expects[0]!.input!(),
+		/owed checks[\s\S]*encodedChecks/i,
+	);
+	x.call({
+		kind: "verdict",
+		outcome: "pass",
+		text: "Check exists on candidate.",
+		blocks: [],
+		notes: [],
+		encodedChecks: [2],
+	});
+	x.clean();
+	x.prepare();
+	const result = x.done("prepare_landing", { kind: "unchanged", sha: "base" });
+	const finished = result.send?.find((m) => m.event.kind === "checks_finished");
+	assert.deepEqual(finished?.event.ids, [2]);
+	assert.deepEqual(finished?.event.encoded, []);
+	assert.match(String(finished?.event.outcome), /unchanged/);
 });
 
 test("a verifier's principle violation returns the failed item and separately proposes a sharper description or binding", () => {

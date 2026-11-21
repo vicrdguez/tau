@@ -24,7 +24,7 @@ const inputs: Record<string, string> = {
 	publish_revision:
 		"changes.intent changes.nodes.label changes.nodes.rule changes.nodes.probe changes.remove changes.seams.label changes.seams.callersNow changes.seams.callersLater changes.seams.usage changes.seams.signature changes.seams.owner changes.seams.dependencies changes.checks.id changes.checks.argv changes.checks.timeoutMs changes.sections.label changes.sections.body replies.n replies.status replies.reason answers.cause answers.nodes answers.reason",
 	file_finding:
-		"text report nodes blocking source pattern missingCheck edgeCase.failure edgeCase.likelihood edgeCase.cost",
+		"text report nodes blocking source pattern edgeCase.failure edgeCase.likelihood edgeCase.cost",
 	report_investigation:
 		"finding classification nodes evidence size recommendation cause sameAs reference",
 	principle: "name",

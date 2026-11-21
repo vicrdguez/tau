@@ -137,46 +137,56 @@ function queue(world: World = activeWorld) {
 	});
 }
 
-test("an override goes to triage as the owner's owed check, with the rejected revision and original evidence", () => {
+const missing = {
+	source: "owner",
+	missingCheck: true,
+	text: "Reject a zero-sized lot.",
+	item: null,
+	blocking: false,
+};
+const finished = (outcome: string, encoded: number[] = []) => ({
+	kind: "checks_finished",
+	ids: [1],
+	encoded,
+	outcome,
+});
+
+test("a rejection names the check and annotation, and build lists it until encoding lands", () => {
 	const q = queue();
-	q.file({
-		source: "owner",
-		missingCheck: true,
-		text: "Reject a zero-sized lot.",
-		item: null,
-		blocking: false,
-	});
+	q.file(missing);
+	const ask = q.ask()[0]!;
+	assert.match(ask.title, /Reject a zero-sized lot/);
+	assert.match(ask.basis, /Your annotation: Reject a zero-sized lot/);
+	assert.match(ask.basis, /commit-one[\s\S]*calculations disagree/);
+	assert.doesNotMatch(ask.basis, /Reference:/);
+	assert.deepEqual(ask.choices, ["build", "defer", "drop"]);
 	assert.match(
-		q.ask()[0]!.basis,
-		/Reject a zero-sized lot\.[\s\S]*commit-one[\s\S]*calculations disagree/,
+		ask.basis,
+		/Build starts work to encode this check\. Defer keeps it owed and listed\. Drop clears it\./,
 	);
-	assert.deepEqual(q.ask()[0]!.choices, ["build", "defer", "drop"]);
 	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+	assert.match(q.view().owedChecks(), /in triage/);
 	const [seed] = q.answer("build");
 	assert.equal(seed?.work, "new");
 	assert.deepEqual(seed?.event.owed, [1]);
-	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
-	q.send({ kind: "checks_encoded", ids: [1], sha: "new-trunk" });
+	assert.match(q.view().owedChecks(), /being built/);
+	q.send(finished("Landed at new-trunk.", [1]));
 	assert.equal(q.view().owedChecks(), "");
+	assert.deepEqual(q.ask(), []);
 });
 
-test("two overrides that name the same outstanding check file once; deferring it leaves it owed", () => {
+test("repeating an outstanding rejection does not create a duplicate; defer keeps the check listed", () => {
 	const q = queue();
-	const override = {
-		source: "owner",
-		missingCheck: true,
-		text: "Reject a zero-sized lot.",
-		item: null,
-		blocking: false,
-	};
-	q.file(override);
+	q.file(missing);
 	q.file({
-		...override,
+		...missing,
 		work: 5,
 		sha: "commit-two",
 		text: "  Reject a zero-sized lot.  ",
 	});
 	assert.equal(q.ask().length, 1);
+	assert.deepEqual(q.answer("defer"), []);
+	assert.match(q.view().owedChecks(), /Reject a zero-sized lot.*deferred/);
 	assert.equal(
 		q
 			.view()
@@ -184,69 +194,83 @@ test("two overrides that name the same outstanding check file once; deferring it
 			.match(/Reject a zero-sized lot/g)?.length,
 		1,
 	);
-	assert.deepEqual(q.answer("defer"), []);
-	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
 });
 
-test("the owner's desk can overrule a verified result later, but an unverified result or agent cannot create an obligation", () => {
-	const accepted = {
-		sha: "landed-result",
-		evidence: "Original verifier ran a single book probe.",
-	};
+test("a later objection filed by the owner's desk is investigated, not owed", () => {
 	const q = queue({
 		...activeWorld,
-		view: (lane, work) =>
-			lane === "verify" && Number(work) === 4
-				? { passedResult: () => accepted }
+		view: (lane) =>
+			lane === "verify"
+				? {
+						landed: "landed-result",
+						passedResult: () => ({
+							sha: "landed-result",
+							evidence: "Previous proof.",
+						}),
+					}
 				: null,
 	});
-	const override = {
-		...filing,
-		overridePassed: true,
+	q.file({
 		source: "owner",
+		requestedOwner: true,
+		overridePassed: true,
 		item: null,
-		text: "Include the reverse posting.",
-	};
-	assert.ok("reject" in q.attempt({ ...override, source: "worker" }));
-	assert.ok("reject" in q.attempt({ ...override, work: 5 }));
-	assert.deepEqual(q.send(override), []);
-	assert.match(
-		q.ask()[0]!.basis,
-		/Include the reverse posting\.[\s\S]*landed-result[\s\S]*Original verifier ran a single book probe/,
-	);
-	assert.doesNotMatch(q.ask()[0]!.basis, /commit-one/);
+	});
+	assert.deepEqual(q.ask(), []);
+	assert.equal(q.agents().flatMap((a) => a.expects).length, 1);
+	q.send(q.investigation());
+	q.answer("drop");
+	assert.equal(q.view().owedChecks(), "");
 });
 
-test("a fresh override after drop reopens the same still-owed check with both hand-overs' evidence", () => {
+test("drop clears the obligation; a later rejection opens a new check with only its own evidence", () => {
 	const q = queue();
-	const override = {
-		source: "owner",
-		missingCheck: true,
-		text: "Reject a zero-sized lot.",
-		item: null,
-		blocking: false,
-	};
-	q.file(override);
+	q.file(missing);
 	q.answer("drop");
-	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
+	assert.equal(q.view().owedChecks(), "");
 	q.file({
-		...override,
+		...missing,
 		work: 5,
 		sha: "commit-two",
 		report: "The later verifier missed it again.",
 	});
 	assert.equal(q.ask().length, 1);
-	assert.match(
-		q.ask()[0]!.basis,
-		/commit-one[\s\S]*commit-two[\s\S]*missed it again/,
+	assert.equal(q.ask()[0]?.subject, "triage/2");
+	assert.match(q.ask()[0]!.basis, /commit-two[\s\S]*missed it again/);
+	assert.doesNotMatch(q.ask()[0]!.basis, /commit-one/);
+});
+
+for (const outcome of [
+	"Encoding work was cancelled.",
+	"Encoding work was declined.",
+	"Trunk was unchanged.",
+])
+	test(`an assigned check returns to triage when work ends without encoding: ${outcome}`, () => {
+		const q = queue();
+		q.file(missing);
+		const [ask] = q.ask();
+		q.answer("build");
+		assert.deepEqual(q.ask(), []);
+		q.send(finished(outcome));
+		const [reopened] = q.ask();
+		assert.equal(reopened?.subject, ask?.subject);
+		assert.ok(reopened?.basis.includes(outcome));
+		assert.match(q.view().owedChecks(), /in triage/);
+		q.answer("drop");
+		assert.equal(q.view().owedChecks(), "");
+	});
+
+test("an investigator cannot close a project finding as no action", () => {
+	const q = queue();
+	q.file({ source: "sweeper", work: null, item: null });
+	const result = q.attempt(
+		q.investigation(1, "no_action", { nodes: [], recommendation: "no_action" }),
 	);
-	assert.equal(
-		q
-			.view()
-			.owedChecks()
-			.match(/Reject a zero-sized lot/g)?.length,
-		1,
-	);
+	assert.match("reject" in result ? result.reject : "", /work/);
+	const [turn] = q.agents()[0]!.expects;
+	assert.match(turn!.input!(), /project finding[\s\S]*no_action/);
+	q.send(q.investigation(1, "sets_precedent", { nodes: [] }));
+	assert.equal(q.ask().length, 1);
 });
 
 test("the project sweep is off by default; when enabled its interruptible effect sleeps and failure re-arms it", () => {
@@ -339,6 +363,8 @@ test("one sweep decision lists all long-deferred findings, and a later tick does
 		q.send(q.investigation(i + 1));
 		q.answer("defer");
 	}
+	q.file(missing);
+	q.answer("defer");
 	facts.now += 31 * 86_400_000;
 	const sweep = () =>
 		q.send({
@@ -349,6 +375,11 @@ test("one sweep decision lists all long-deferred findings, and a later tick does
 	sweep();
 	assert.equal(q.ask().length, 1);
 	assert.match(q.ask()[0]!.basis, /First old finding[\s\S]*Second old finding/);
+	assert.doesNotMatch(q.ask()[0]!.basis, /Reject a zero-sized lot/);
+	assert.match(
+		q.ask()[0]!.basis,
+		/Defer and drop both close this list without scheduling work or listing these findings again/,
+	);
 	q.answer("defer");
 	facts.now += 31 * 86_400_000;
 	sweep();
