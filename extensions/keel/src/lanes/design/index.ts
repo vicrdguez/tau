@@ -718,10 +718,11 @@ export const design: Lane<State> = {
 				const r = s.revisions[i];
 				if (r?.phase !== "drafting")
 					return { reject: "There is no open Mandate revision turn." };
+				const changes = e.changes as Changes;
 				const proposed = propose(
 					s.mandate!,
 					r,
-					e.changes as Changes,
+					changes,
 					e.replies as Reply[],
 					e.answers as Parameters<typeof propose>[4],
 				);
@@ -738,6 +739,13 @@ export const design: Lane<State> = {
 							}[];
 						} | null
 					)?.plan ?? [];
+				for (const node of changes.remove ?? []) {
+					const item = plan.find((i) => i.nodes?.includes(node));
+					if (item)
+						return {
+							reject: `Item ${item.id} has started and cites ${node}. Change ${node} instead of removing it.`,
+						};
+				}
 				proposed.round.plan =
 					plan
 						.filter((i) =>
