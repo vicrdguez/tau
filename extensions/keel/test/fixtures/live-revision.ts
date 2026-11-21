@@ -294,7 +294,6 @@ export async function openLiveRevision(
 						recommendation: "build",
 						reference: "Book reader contract",
 						nodes: ["wire"],
-						batchWith: [],
 					},
 					worker,
 					report,

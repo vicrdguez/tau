@@ -308,15 +308,12 @@ export async function openScenario(
 				"report_investigation",
 				{
 					finding: 1,
-					classification: "determined",
+					classification: "no_action",
 					evidence:
-						"The published bytes match; the observation concerns the approved book format.",
+						"The published bytes match; no other reader needs a change.",
 					size: "small",
 					cause: "book readers",
-					recommendation: "defer",
-					reference: "Owner's approved format",
-					nodes: ["format"],
-					batchWith: [],
+					recommendation: "no_action",
 				},
 				note,
 				"The published bytes match.",
@@ -405,48 +402,9 @@ export async function openScenario(
 				.snapshot(stateDoc(ProjectState), ctx)
 				.then((p) => Object.values(p?.asks ?? {}));
 		const open = await asks();
-		assert.equal(
-			open.length,
-			2,
-			"the verifier note and the hand-over are independent",
-		);
-		const handOver = open.find((ask) => ask.lane === "verify");
-		const triage = open.find((ask) => ask.lane === "queue");
-		assert.ok(handOver);
-		assert.ok(triage);
-		const finding = await harness.commit(
-			(tx) => decision(tx, triage.decision),
-			ctx,
-		);
-		assert.equal(finding?.status, "open");
-		assert.deepEqual(finding?.choices, ["build", "defer", "drop"]);
-		const investigated = await harness.commit(
-			(tx) => tx.entry(finding!.basis),
-			ctx,
-		);
-		assert.match(
-			JSON.stringify(investigated?.data),
-			/No other readers changed/,
-		);
-		assert.match(
-			JSON.stringify(investigated?.data),
-			/observation concerns the approved book format/,
-		);
-		assert.equal(
-			(
-				await fauxAnswer(store, finding!.id, {
-					basis: finding!.basis,
-					choice: "defer",
-					annotations: [],
-				})
-			).kind,
-			"answered",
-		);
-		await settle();
-		assert.deepEqual(
-			(await asks()).map((ask) => ask.decision),
-			[handOver.decision],
-		);
+		assert.equal(open.length, 1, "only hand-over needs the owner");
+		const handOver = open[0]!;
+		assert.equal(handOver.lane, "verify");
 		const d = await harness.commit(
 			(tx) => decision(tx, handOver.decision),
 			ctx,
@@ -458,6 +416,8 @@ export async function openScenario(
 			basis?.data && typeof basis.data === "object" && "text" in basis.data,
 		);
 		const rendered = String(basis.data.text);
+		assert.match(rendered, /no action/i);
+		assert.match(rendered, /no other reader needs a change/);
 		for (const part of [trunk, goal, what, note, risk])
 			assert.ok(
 				rendered.includes(part),
