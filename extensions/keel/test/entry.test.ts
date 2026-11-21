@@ -19,6 +19,8 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 		"dispatch",
 		"frame_arena",
 		"answer_challenger",
+		"start_experiment",
+		"record_experiment",
 		"publish_mandate",
 		"publish_revision",
 		"principle",
@@ -81,7 +83,9 @@ test("the public workflow entry starts a designer with its own model and coding 
 		"publish_mandate",
 		"publish_revision",
 		"read",
+		"record_experiment",
 		"request_cancel",
+		"start_experiment",
 	]);
 	assert.deepEqual(
 		agent.extensions.map((ext) => ext.name).sort(),

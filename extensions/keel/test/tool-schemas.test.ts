@@ -6,6 +6,8 @@ import { extension } from "../src/index.ts";
 // registered tool (including nested Mandate and item records), not TS cast syntax.
 const inputs: Record<string, string> = {
 	dispatch: "jobs.seat jobs.question",
+	start_experiment: "node question decisionRule controls axis variants",
+	record_experiment: "comparison winner",
 	frame_arena: "question rubric",
 	answer_challenger: "dispositions.n dispositions.status dispositions.reason",
 	ground:
