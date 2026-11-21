@@ -210,6 +210,11 @@ test("a defect goes to the coordinator without triage; determined work waits for
 			[["build", 4, "plan_finding"]],
 		);
 		assert.match(String(out[0]?.event.text), /calculations disagree/);
+		assert.deepEqual(out[0]?.event.nodes, ["sums"]);
+		assert.equal(
+			out[0]?.event.reference,
+			cls === "determined" ? "signed spec" : "Current Mandate",
+		);
 	}
 });
 test("duplicates link to the original, retain a blocking report until its answer, and deferred findings stay addressable", () => {
@@ -251,6 +256,22 @@ test("a blessed pattern is an approved reference across works; revoke seeds stru
 		}
 	}
 });
+test("blessing a pattern withdraws other open decisions and investigations for that pattern", () => {
+	const q = queue();
+	for (const text of ["First ruling", "Another ruling", "Third ruling"])
+		q.file({ text, pattern: "round-last" });
+	for (const id of [1, 2])
+		q.send(
+			q.investigation(id, "unapproved_pattern", { recommendation: "bless" }),
+		);
+	const [first, second] = q.ask();
+	assert.ok(first && second);
+	assert.deepEqual(q.answer("bless", first.subject), []);
+	assert.deepEqual(q.ask(), []);
+	assert.equal(q.agents()[0]?.expects.length, 0);
+	assert.deepEqual(q.answer("revoke", second.subject), []);
+});
+
 test("determined work whose original build closed seeds new follow work with its reference", () => {
 	let phase = "active";
 	const q = queue({
@@ -321,10 +342,12 @@ test("a deferred Mandate finding releases its causes just as a dropped one does"
 	const q = queue();
 	q.file();
 	const [hold] = q.send(q.investigation(1, "mandate_wrong"));
+	const out = q.answer("defer");
 	assert.deepEqual(
-		q.answer("defer").map((m) => [m.lane, m.work, m.event.kind, m.event.cause]),
+		out.map((m) => [m.lane, m.work, m.event.kind, m.event.cause]),
 		[["build", 4, "queue_release", hold?.event.cause]],
 	);
+	assert.match(String(out[0]?.event.direction), /Use the ledger boundary/);
 	assert.deepEqual(q.ask(), []);
 	assert.match(JSON.stringify(q.state()), /deferred/);
 });
