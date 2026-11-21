@@ -159,24 +159,29 @@ function run(facts = world) {
 	};
 }
 
-test("successful Ground on any route and a queue seed tell the project it is configured", () => {
+test("successful Ground on any route and queue seeds arm an enabled sweep, not a disabled one", () => {
 	for (const event of [
 		follow,
 		{ kind: "ground", route: "precedent", reference, audit },
 		{ kind: "ground", route: "ambiguous", reference, readings: ["A", "B"] },
 		seed,
 	]) {
-		const x = run();
-		const result = x.act(event);
-		assert.ok(
-			result.send?.some(
-				(m) =>
-					m.lane === "queue" &&
-					m.work === null &&
-					m.event.kind === "sweep_configured",
-			),
-			JSON.stringify(event),
-		);
+		for (const enabled of [false, true]) {
+			const options = enabled
+				? { ...world.options, sweep_minutes: 1 }
+				: world.options;
+			const { send } = run({ ...world, options }).act(event);
+			assert.equal(
+				(send ?? []).some(
+					(m) =>
+						m.lane === "queue" &&
+						m.work === null &&
+						m.event.kind === "sweep_configured",
+				),
+				enabled,
+				JSON.stringify(event),
+			);
+		}
 	}
 });
 
