@@ -428,11 +428,12 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 	assert.ok("reject" in design.reduce(taken.state, publish, world));
 	const second = { ...publish, base: "arena_seat_2", grafts: [] };
 	assert.ok("reject" in design.reduce(taken.state, second, world));
-	const challenged = challengeTurn(taken.state, {
+	const review = step(taken.state, {
 		...second,
 		replies: [{ n: 1, status: "acted_on", reason: "Kept account ownership." }],
-	});
-	const review = step(answeringTurn(challenged), answerChallenger).state;
+	}).state;
+	assert.deepEqual(design.effects(review, world), []);
+	assert.match(ask(review).basis, /challenged round 1.*arena_seat_1/i);
 	assert.notEqual(ask(review).subject, ask(first).subject);
 	assert.match(ask(review).basis, /Retain account ownership/);
 	assert.match(ask(review).basis, /Kept account ownership/);
@@ -474,23 +475,21 @@ test("seeded and fresh arenas keep the old candidates, judge, challenger and rou
 	}
 });
 
-test("rework preserves the first round, rechallenges the amended synthesis, and replies by annotation number", () => {
+test("rework retains the first challenge and round, and replies by annotation number without starting a new challenge",  () => {
 	const first = firstReview();
 	const revised = owner(first, "rework", [
 		{ n: 1, text: "Drop the incidental default." },
 	]).state;
 	assert.match(input(revised), /Drop the incidental default/);
 	const newer = { ...draft, riders: draft.riders.slice(1) };
-	const challenged = challengeTurn(revised, {
+	const review = step(revised, {
 		...publish,
 		draft: newer,
 		replies: [{ n: 1, status: "acted_on", reason: "Dropped R1." }],
-	});
-	assert.ok(
-		!pending(challenged).jobs[0]?.question.includes("Use the account default."),
-	);
-	assert.notEqual(pending(challenged).key, pending(challengeTurn()).key);
-	const review = step(answeringTurn(challenged), answerChallenger).state;
+	}).state;
+	assert.deepEqual(design.effects(review, world), []);
+	assert.deepEqual(review.arenas, first.arenas);
+	assert.match(ask(review).basis, /challenged round 1/i);
 	assert.match(ask(review).basis, /rider R1 removed/);
 	assert.match(ask(review).basis, /Dropped R1/);
 	assert.deepEqual(review.rounds[0]?.draft, draft);

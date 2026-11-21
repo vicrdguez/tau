@@ -321,6 +321,10 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 		phase: "entry",
 		audit: null,
 		seed: null,
+		arenas: [],
+		experiments: [],
+		experimentReturn: null,
+		proposal: null,
 		rounds: [],
 		revisions: [],
 		reference: "",
@@ -330,6 +334,7 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 		cancelRequested: false,
 		cleanup: null,
 		cause: null,
+		heldTurn: null,
 		seq: 0,
 	});
 });

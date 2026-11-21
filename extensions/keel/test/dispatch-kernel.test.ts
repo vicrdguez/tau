@@ -57,9 +57,10 @@ for (const move of ["pause", "cancel"] as const) {
 	});
 }
 
-test("an effect runner joins the child of its task and can only report, not complete the task", {
+test("an effect runner reuses its joined child on retry and cannot complete the task itself", {
 	timeout: 3000,
 }, async (t) => {
+	let attempts = 0;
 	const x = await toy({
 		async runEffect(_input, context, owner) {
 			assert.ok(!("commit" in owner));
@@ -68,6 +69,8 @@ test("an effect runner joins the child of its task and can only report, not comp
 				[job],
 				context,
 			);
+			if (++attempts === 1)
+				throw new Error("interrupted before publishing the effect result");
 			return { value: result[0]?.answer ?? "unanswered" };
 		},
 	});
@@ -77,6 +80,8 @@ test("an effect runner joins the child of its task and can only report, not comp
 	x.harness.resume();
 	await x.finish("keel.effect");
 	assert.deepEqual((await x.state()).facts, ["a joined answer"]);
+	assert.equal(attempts, 2);
+	assert.equal(x.provider.state.callCount, 1);
 	const [effect] = await x.tasks("keel.effect");
 	assert.ok(effect);
 	assert.equal(

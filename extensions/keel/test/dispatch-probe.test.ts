@@ -11,7 +11,7 @@ import { openNodeSqliteStorage } from "tau/durable";
 import { fauxAssistantMessage, fauxText } from "tau/testing";
 import { probeStore } from "./fixtures/dispatch-probe.ts";
 
-test("dispatch: a killed toy tool joins its original children and finds the original submission", {
+test("dispatch: a killed toy tool joins its original children and reuses admitted submissions", {
 	timeout: 20_000,
 }, async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "keel-dispatch-probe-"));
@@ -62,7 +62,12 @@ test("dispatch: a killed toy tool joins its original children and finds the orig
 				)
 			).flat();
 		const admitted = await submissions();
-		assert.equal(admitted.length, 1);
+		assert.ok(admitted.length >= 1 && admitted.length <= before.length);
+		assert.ok(
+			admitted.every(
+				({ status }) => status !== "done" && status !== "unanswered",
+			),
+		);
 		provider.setResponses([
 			fauxAssistantMessage([fauxText("first answer")]),
 			fauxAssistantMessage([fauxText("second answer")]),
@@ -73,7 +78,7 @@ test("dispatch: a killed toy tool joins its original children and finds the orig
 		assert.deepEqual(await children(), before);
 		const after = await submissions();
 		assert.equal(after.length, 2);
-		assert.ok(after.some(({ id }) => id === admitted[0]?.id));
+		for (const { id } of admitted) assert.ok(after.some((s) => s.id === id));
 		const root = await harness.conversation(tool.conversationId, ctx);
 		assert.ok(root);
 		await root.waitForIdle(ctx);

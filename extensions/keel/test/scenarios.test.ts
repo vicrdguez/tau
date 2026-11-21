@@ -93,6 +93,28 @@ test("precedent-setting work: two explorers, two candidates, judge and challenge
 	assert.match(git(root, "show", "trunk:book-report.sh"), /read_book book/);
 });
 
+test("declining the completed arena leaves six settled children and no build or open decisions", {
+	timeout: 5000,
+}, async (t) => {
+	const { root } = await fixture(t);
+	await seedBookPolicy(root);
+	const s = await openReview(root, new MemoryStorage(), true);
+	t.after(() => s.harness.close(ctx));
+	await s.start();
+	await s.decline();
+	assert.deepEqual(await s.subjects(), []);
+	assert.deepEqual((await s.harness.inspect(ctx)).tasks, []);
+	const owners = await s.harness.commit(async (tx) => {
+		const { items } = await tx.scanConversations({}, 100);
+		return Promise.all(
+			items.flatMap(({ owner }) => (owner ? [tx.task(owner.taskId)] : [])),
+		);
+	}, ctx);
+	assert.equal(owners.length, 6);
+	assert.ok(owners.every((owner) => owner?.state.status === "terminal"));
+	assert.equal(git(root, "for-each-ref", "refs/heads/keel/"), "");
+});
+
 test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening the answered round or starting a build", async (t) => {
 	const { root } = await fixture(t);
 	await seedBookPolicy(root);

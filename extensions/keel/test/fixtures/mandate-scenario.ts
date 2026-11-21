@@ -194,6 +194,7 @@ export async function openReview(
 	scriptRevision(): void;
 	settle(): Promise<void>;
 	reworkRider(): Promise<void>;
+	decline(): Promise<void>;
 	approveAndBuild(): Promise<void>;
 }> {
 	const {
@@ -363,7 +364,6 @@ export async function openReview(
 		]);
 	}
 	function scriptRevision() {
-		challenge();
 		provider.setResponses([
 			turn(
 				"designer",
@@ -379,7 +379,6 @@ export async function openReview(
 				},
 				...revisionNotes,
 			),
-			respond(),
 		]);
 	}
 	const rework = () =>
@@ -393,7 +392,6 @@ export async function openReview(
 			settlement,
 			...revisionNotes,
 		]);
-		challenge();
 		provider.setResponses([
 			turn(
 				"designer",
@@ -405,7 +403,6 @@ export async function openReview(
 				},
 				riderNote,
 			),
-			respond(),
 		]);
 		await answer("mandate/2", "rework", [[riders[2]!.text, riderNote]]);
 		assert.deepEqual(
@@ -413,7 +410,8 @@ export async function openReview(
 			["mandate/3"],
 			"only the new Mandate round is open",
 		);
-		expectAll((await review("mandate/3")).text, [redesigned]);
+		expectAll((await review("mandate/3")).text, [redesigned, objection]);
+		assert.equal(challenger.state.callCount, 1, "challenge runs once for this arena");
 		assert.equal(
 			git(cwd, "for-each-ref", "refs/heads/keel/"),
 			"",
@@ -557,6 +555,7 @@ export async function openReview(
 		scriptRevision,
 		settle,
 		reworkRider,
+		decline: () => answer("mandate/1", "decline"),
 		approveAndBuild,
 	};
 }

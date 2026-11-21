@@ -44,6 +44,7 @@ export function frameReview(x: Driver, world: World) {
 	complete(x, world, () => judgeReport);
 }
 export function challengeReview(x: Driver, world: World) {
+	if (x.state().phase === "review") return;
 	complete(x, world, () => '{"objections":[]}');
 	x.act({ kind: "answer_challenger", dispositions: [] });
 }
