@@ -15,6 +15,7 @@ import {
 import type { SweepFinding, SweepHistory } from "../lanes/queue/public.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
 import { principleUsage } from "../principles/index.ts";
+import { replyJson } from "../reply-json.ts";
 import { nodeExec, readRepo } from "../repo/index.ts";
 import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
@@ -107,6 +108,7 @@ const sweepRole = prose(dir, "roles/sweeper.md", [
 	"revision",
 	"authority",
 	"usage",
+	"priorFindings",
 ]);
 const sweepInput = prose(dir, "inputs/queue/sweep.md", [])({});
 
@@ -146,7 +148,7 @@ export function sweepDispatch(
 					// model stay pinned even if trunk advances while the server is down.
 					async resolve(tx) {
 						const repo = await readRepo(nodeExec, root, opts);
-						const { authority, samples, patternRulings } =
+						const { authority, samples, patternRulings, priorFindings } =
 							await readHistory(tx);
 						return seat(
 							"sweeper",
@@ -159,6 +161,7 @@ export function sweepDispatch(
 									patternRulings,
 								}),
 								usage: JSON.stringify(await principleUsage(tx, samples)),
+								priorFindings: JSON.stringify(priorFindings),
 							}),
 						);
 					},
@@ -169,7 +172,7 @@ export function sweepDispatch(
 		);
 		if (!result?.answer)
 			throw new Error(result?.error ?? "Sweep returned no answer.");
-		const findings: unknown = JSON.parse(result.answer);
+		const findings = replyJson(result.answer);
 		if (
 			!Array.isArray(findings) ||
 			findings.length > 8 ||

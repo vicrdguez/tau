@@ -114,6 +114,7 @@ export type State = {
 	landingUnconfirmed: boolean;
 	handover: {
 		sha: Sha;
+		at: number;
 		unchanged: boolean;
 		status: "asking" | "accepted" | "rejected";
 		missing: string[];

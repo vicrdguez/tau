@@ -33,24 +33,17 @@ import {
 } from "./state.ts";
 
 const documents = `${import.meta.dirname}/../../prose/documents`;
-const investigationSlots = [
-	"id",
-	"finding",
-	"context",
-	"queue",
-	"patterns",
-	"direction",
-] as const;
-const investigateInput = prose(
-	import.meta.dirname,
-	"../../prose/inputs/queue/investigate.md",
-	investigationSlots,
-);
-const investigateProject = prose(
-	import.meta.dirname,
-	"../../prose/inputs/queue/investigate-project.md",
-	investigationSlots,
-);
+const investigateInput = (name: string) =>
+	prose(documents, `../inputs/queue/${name}.md`, [
+		"id",
+		"finding",
+		"context",
+		"queue",
+		"patterns",
+		"direction",
+	]);
+const investigate = investigateInput("investigate");
+const investigateProject = investigateInput("investigate-project");
 const owedDocument = prose(documents, "owed-check.md", [
 	"name",
 	"work",
@@ -92,7 +85,7 @@ function filingText(f: Finding) {
 	} = f.intake;
 	return [
 		`### Finding #${f.id}: ${text}`,
-		`Source: ${[source, f.goal ?? "project", item].filter(Boolean).join(" / ")}. Revision: ${sha ?? "not available"}.`,
+		`Source: ${[source, f.goal ?? "project", item].filter(Boolean).join(" / ")}.${sha ? ` Revision: ${sha}.` : ""}`,
 		nodes.length && `Reported nodes: ${nodes.join(", ")}.`,
 		report && `Report: ${report}`,
 		edgeCase &&
@@ -124,6 +117,8 @@ function reportText(f: Finding, q?: Queue) {
 const evidence = (q: Queue, findings: readonly Finding[]) =>
 	findings.map((f) => reportText(f, q)).join("\n\n");
 const decisionSubject = (f: Finding) => subject(`triage/${f.id}`);
+const findingChoices = (f: Finding) =>
+	f.investigation ? choices(f.investigation.classification) : workChoices;
 
 function hold(f: Finding, nodes: string[], heldCause = cause(f)): Message {
 	return toBuild(f.intake.work!, {
@@ -206,12 +201,7 @@ function owedTriage(f: Finding, outcome = ""): Finding {
 			name: f.intake.text,
 			work: f.goal ?? "unnamed work",
 			revision: f.intake.sha ?? "not available",
-			evidence:
-				f.intake.report
-					?.trim()
-					.split("\n")
-					.map((line) => (line ? `> ${line}` : ">"))
-					.join("\n") ?? "",
+			evidence: f.intake.report?.replace(/^/gm, "> ") ?? "",
 			outcome: outcome ? `\n\n${outcome}` : "",
 		}),
 	};
@@ -351,10 +341,7 @@ export function intake(
 const deferredAge = 30 * 86_400_000;
 export function revisit(q: Queue, world: World): Queue {
 	const due = q.entries.filter(
-		(f) =>
-			!f.intake.missingCheck &&
-			f.deferredAt != null &&
-			world.now - f.deferredAt >= deferredAge,
+		(f) => f.deferredAt !== null && world.now - f.deferredAt >= deferredAge,
 	);
 	if (!due.length) return q;
 	const ids = due.map((f) => f.id);
@@ -655,46 +642,10 @@ export function onFact(
 		return { state: q };
 	}
 	const first = decisions(q).find((f) => decisionSubject(f) === fact.subject);
-	if (!first) return { state: q };
-	if (first.intake.missingCheck) {
-		switch (fact.choice) {
-			case "build": {
-				const direction = fact.annotations
-					.map((a) => `${a.n}. ${a.text}`)
-					.join("\n");
-				return {
-					state: update(q, first, close("build: routed")),
-					send: [
-						seed(
-							"follow",
-							[
-								first.intake.report,
-								direction && `Owner direction:\n${direction}`,
-							]
-								.filter(Boolean)
-								.join("\n\n"),
-							first.intake.text,
-							[first.id],
-						),
-					],
-				};
-			}
-			case "defer":
-			case "drop":
-				return {
-					state: update(
-						q,
-						first,
-						close(fact.choice === "drop" ? "dropped" : "deferred"),
-					),
-				};
-			default:
-				return { state: q };
-		}
-	}
-	const i = first.investigation!;
-	if (!choices(i.classification).some((c) => c === fact.choice))
+	if (!first || !findingChoices(first).some((c) => c === fact.choice))
 		return { state: q };
+	const { investigation: i } = first;
+	const classification = i?.classification;
 	const related = decisionMembers(q, first.id);
 	const annotations = fact.annotations
 		.map((a) => `${a.n}. ${a.text}`)
@@ -707,10 +658,10 @@ export function onFact(
 		.join("\n\n");
 	const active = context(world, first.intake.work).active;
 	const building = fact.choice === "build";
-	const revising = building && active && i.classification === "mandate_wrong";
-	const defect = i.classification === "defect_in_scope";
+	const revising = building && active && classification === "mandate_wrong";
+	const defect = classification === "defect_in_scope";
 	const planning =
-		building && active && (defect || i.classification === "determined");
+		building && active && (defect || classification === "determined");
 	const fixing = planning && (defect || related.some((f) => f.intake.blocking));
 	const pattern = ["bless", "revoke"].includes(fact.choice)
 		? first.intake.pattern
@@ -742,7 +693,11 @@ export function onFact(
 							? [entry.triageDirection, annotations].filter(Boolean).join("\n")
 							: (entry.triageDirection ?? ""),
 					deferredAt:
-						fact.choice === "defer" && !entry.revisit ? world.now : null,
+						fact.choice === "defer" &&
+						!entry.revisit &&
+						!entry.intake.missingCheck
+							? world.now
+							: null,
 				};
 			}
 			return entry;
@@ -774,14 +729,16 @@ export function onFact(
 				...related
 					.filter((f) => f !== first && f.intake.blocking)
 					.flatMap((f) => [hold(f, [], cause(first)), release(f)]),
-				plan(first, related, text, defect ? null : i.reference!),
+				plan(first, related, text, defect ? null : i!.reference),
 			],
 		};
 
 	const send: Message[] = [];
 	if (building) {
-		if (i.classification === "determined")
-			send.push(seed("follow", text, i.reference));
+		if (first.intake.missingCheck)
+			send.push(seed("follow", text, first.intake.text, [first.id]));
+		else if (classification === "determined")
+			send.push(seed("follow", text, i!.reference));
 		else send.push(seed("precedent", text, null));
 	}
 	if (fact.choice === "revoke")
@@ -853,9 +810,7 @@ export function asks(q: Queue): Ask[] {
 			subject: decisionSubject(first),
 			title: basis.split("\n", 1)[0]!,
 			basis,
-			choices: first.intake.missingCheck
-				? workChoices
-				: choices(first.investigation!.classification),
+			choices: findingChoices(first),
 			works: decisionMembers(q, first.id).map((f) => f.intake.work),
 		};
 	});
@@ -898,7 +853,7 @@ export function begin(q: Queue, world: World): Queue {
 	};
 }
 function investigationText(q: Queue, f: Finding) {
-	return (f.intake.work === null ? investigateProject : investigateInput)({
+	return (f.intake.work === null ? investigateProject : investigate)({
 		id: String(f.id),
 		finding: filingText(f),
 		direction: q.direction ? `\n\nOwner direction:\n${q.direction}` : "",
@@ -943,28 +898,21 @@ export function agents(q: Queue): AgentDecl[] {
 	];
 }
 
-const checkLine = (f: Finding) => `- #${f.id}: ${f.intake.text}`;
-export function checks(q: Queue, ids: number[]) {
-	return q.entries
-		.filter((f) => isOwed(f) && ids.includes(f.id))
-		.map(checkLine)
-		.join("\n");
-}
-export function owedChecks(
+export function checks(
 	q: Queue,
-	encoded: number[] = [],
+	select: (id: number) => boolean,
 	returning: readonly number[] = [],
 ) {
 	return q.entries
-		.filter((f) => isOwed(f) && !encoded.includes(f.id))
+		.filter((f) => isOwed(f) && select(f.id))
 		.map((f) => {
 			const state =
 				f.status === "triage" || returning.includes(f.id)
 					? "in triage"
-					: beingBuilt(f)
-						? "being built"
-						: "deferred";
-			return `${checkLine(f)} (${state}; rejected ${f.intake.sha})`;
+					: f.disposition === "deferred"
+						? "deferred"
+						: "being built";
+			return `- #${f.id}: ${f.intake.text} (${state}; rejected ${f.intake.sha})`;
 		})
 		.join("\n");
 }

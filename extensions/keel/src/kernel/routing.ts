@@ -109,7 +109,6 @@ export async function route(
 	options: KeelOptions,
 	root: string,
 	caller: WorkId | null,
-	projectStart?: Delivery,
 ) {
 	const scopes = new Map<WorkId | null, Map<string, Frame>>();
 	const effectsByScope = new Map<
@@ -157,7 +156,6 @@ export async function route(
 		delivery: Message | FactDelivery;
 		path: Set<string>;
 	}[] = [{ delivery: first, path: new Set() }];
-	if (projectStart) pending.push({ delivery: projectStart, path: new Set() });
 	const touched = new Set<Frame>();
 	let reply: string | null = null;
 	let next = 0;

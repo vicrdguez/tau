@@ -16,19 +16,14 @@ import {
 	type RepoResult,
 	type Sha,
 } from "../../repo/index.ts";
-import { toBuild, workPrinciples } from "../build/public.ts";
-import {
-	authorityIndex,
-	type Mandate,
-	reviewedHistory,
-} from "../design/public.ts";
+import { toBuild } from "../build/public.ts";
+import type { Mandate } from "../design/public.ts";
 import {
 	checksFinished,
 	fileHolding,
 	fileIntake,
 	type QueueChecks,
 	type Resume,
-	recordLanding,
 	resumption,
 } from "../queue/public.ts";
 import {
@@ -36,7 +31,7 @@ import {
 	agents,
 	asks,
 	effects,
-	rejectedEvidence,
+	handoverEvidence,
 } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
 import type { FindingNote, Publication } from "./public.ts";
@@ -279,6 +274,7 @@ function transition(prev: State, world: World) {
 		s.directions.push(...(queue?.directionsFor?.(work) ?? []));
 		s.handover = {
 			sha,
+			at: world.now,
 			unchanged,
 			status: "asking",
 			missing: [],
@@ -286,19 +282,7 @@ function transition(prev: State, world: World) {
 			findings: queue?.findingsFor?.(work) ?? "",
 			owed: queue?.owedChecks?.(encoded, returning) ?? "",
 		};
-		if (!s.cancelled) {
-			const history = reviewedHistory(design);
-			const samples = workPrinciples(world.view("build"));
-			if (history || samples.length)
-				send.push(
-					recordLanding(
-						work,
-						history ? authorityIndex(work, history) : null,
-						samples,
-					),
-				);
-			deliver("design", { kind: "landed" });
-		}
+		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
 			`${s.cancelled ? "Cancelled work: " : ""}${unchanged ? "trunk unchanged at" : "landed on trunk at"} ${sha}`,
 		);
@@ -431,7 +415,7 @@ function transition(prev: State, world: World) {
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
 					if (e.choice === "reject") {
 						s.handover.missing = missing.map((a) => a.text);
-						const original = rejectedEvidence(prev);
+						const original = handoverEvidence(prev);
 						for (const a of missing)
 							file(
 								"owner",
@@ -931,6 +915,7 @@ export const verify: Lane<State> = {
 	effects,
 	view: (s) => ({
 		landed: s.handover?.sha ?? null,
+		landedAt: s.cancelled ? null : (s.handover?.at ?? null),
 	}),
 	reduce: (s, e, w) => transition(s, w).reduce(e as Event),
 	onFact: (s, e, w) => transition(s, w).onFact(e),

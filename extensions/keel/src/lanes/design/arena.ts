@@ -8,7 +8,7 @@ import {
 	type StaticFacts,
 } from "../../kernel/lane.ts";
 import { text } from "./draft.ts";
-import { replyJson } from "./reply-json.ts";
+import { replyJson } from "../../reply-json.ts";
 
 const candidateSeats = [
 	"arena_seat_1",

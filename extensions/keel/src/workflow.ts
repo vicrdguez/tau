@@ -4,6 +4,8 @@ import { readViews } from "./kernel/routing.ts";
 import { project } from "./kernel/storage.ts";
 import type { EffectRunner } from "./kernel/tasks.ts";
 import { lanes, tools } from "./lanes/index.ts";
+import { workPrinciples } from "./lanes/build/public.ts";
+import { authorityIndex, reviewedHistory } from "./lanes/design/public.ts";
 import { queueLane } from "./lanes/queue/index.ts";
 import { type SweepHistory, sweepConfigured } from "./lanes/queue/public.ts";
 import {
@@ -25,10 +27,38 @@ import {
 } from "./roles/dispatch.ts";
 import { options } from "./roles/index.ts";
 
-const history = new Map([[queueLane.name, queueLane]]);
-const sweep = sweepDispatch(
-	async (tx) => (await readViews(tx, history, null))("queue") as SweepHistory,
+const history = new Map(
+	lanes
+		.filter((lane) => lane.scope === "conversation")
+		.map((lane) => [lane.name, lane]),
 );
+const projectViews = new Map([[queueLane.name, queueLane]]);
+const sweep = sweepDispatch(async (tx) => {
+	const queue = (await readViews(tx, projectViews, null))("queue") as Pick<
+		SweepHistory,
+		"patternRulings" | "priorFindings"
+	>;
+	const works = await Promise.all(
+		(await project(tx)).works.map(async (work) => {
+			const view = await readViews(tx, history, work);
+			const { landedAt } = view("verify") as { landedAt: number | null };
+			return landedAt === null ? [] : [{ work, view, landedAt }];
+		}),
+	);
+	const landed = works.flat().sort((a, b) => a.landedAt - b.landedAt);
+	return {
+		...queue,
+		authority: landed.flatMap(({ work, view }) => {
+			const reviewed = reviewedHistory(view("design"));
+			return reviewed ? [authorityIndex(work, reviewed)] : [];
+		}),
+		samples: landed
+			.flatMap(({ work, view }) =>
+				workPrinciples(view("build")).map((sample) => ({ work, ...sample })),
+			)
+			.slice(-30),
+	};
+});
 
 // Specs are authored by lane declarations and committed by the kernel, not supplied by agents.
 // Discovery pins the repository before the *next* operation is planned. Never rediscover it on retry.
@@ -53,7 +83,6 @@ export function createWorkflow(runEffect: EffectRunner = runRepoEffect) {
 	const kernel = createKernel({
 		lanes,
 		tools,
-		firstProjectEvent: sweepConfigured,
 		runEffect: (input, ctx, owner) => {
 			if (input.spec.kind === "arena_dispatch")
 				return runDesignDispatch(input, ctx, owner);
@@ -72,7 +101,7 @@ export function createWorkflow(runEffect: EffectRunner = runRepoEffect) {
 			async set(...[tx, value]: Parameters<typeof options.set>) {
 				const before = (await options.get(tx)).sweep_minutes;
 				await options.set(tx, value);
-				if (before !== value.sweep_minutes && (await project(tx)).root)
+				if (before !== value.sweep_minutes && (await project(tx)).works.length)
 					// The task uses its durable clock on admission. This event opens no decision.
 					await kernel.transact(tx, sweepConfigured, 0);
 			},

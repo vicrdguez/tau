@@ -1,4 +1,4 @@
-The owner chose to build a runnable regression check, a boundary rule or a type to encode this obligation. Use a principle only when the check requires judgment.
+The owner chose to encode the check below. Prefer a runnable regression check, a boundary rule or a type. Use a principle only when the check requires judgment.
 
 Owner's check: {{reference}}
 

@@ -15,18 +15,6 @@ type QueueV1 = {
 	}[];
 	sweepMinutes: number | null;
 	sweepTick: number;
-	authority: {
-		work: WorkId;
-		goal: string;
-		revisionOnly: boolean;
-		nodes: { label: string; line: string }[];
-	}[];
-	samples: {
-		work: WorkId;
-		worker: string;
-		kind: "build" | "encode";
-		citations: string[];
-	}[];
 	triage: {
 		entries: {
 			id: number;
@@ -106,8 +94,6 @@ export const queueFixture = {
 		],
 		sweepMinutes: null,
 		sweepTick: 0,
-		authority: [],
-		samples: [],
 		triage: {
 			entries: [
 				{

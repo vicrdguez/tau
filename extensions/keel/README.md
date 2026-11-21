@@ -60,11 +60,13 @@ Only rejecting a hand-over creates owed checks. Name one missing check per annot
 
 ### Project sweep
 
-The sweep is off by default. Set `sweep_minutes` to a positive whole number. The first tick is armed when Keel learns the project directory from the first work; it continues whether or not any work is active. Once Keel knows the directory, changing the setting replaces the timer and clearing it stops the timer and any running sweep. A tick reads the then-current trunk (or the base before trunk exists) and the compact explorer index of owner-reviewed authority from earlier landings. It does not acquire the landing slot.
+The sweep is off by default. Set `sweep_minutes` to a positive whole number. The first tick is armed when Keel learns the project directory from the first work; it continues whether or not any work is active. Once Keel knows the directory, changing the setting replaces the timer and clearing it stops the timer and any running sweep. A tick pins the then-current trunk (or the base before trunk exists) and computes the compact index of owner-reviewed authority and recent landed samples from the work records. It does not acquire the landing slot.
 
-The sweep looks for un-runnable verification playbook instructions, repeated workarounds and type escapes, callers depending on module internals, and decisions that disagree with the code. Findings use the same investigator and triage as other project findings. After 30 days, newly eligible deferred findings appear once in one triage decision. `build` on that digest starts one follow-up design; it does not silently revoke any pattern. `defer` or `drop` does not show that digest again.
+The sweep looks for un-runnable verification playbook instructions, repeated workarounds and type escapes, callers depending on module internals, and decisions that disagree with the code. Findings use the same investigator and triage as other project findings. Findings with no work cannot be closed as no action. The sweeper sees its earlier findings and dispositions and skips dropped or deferred findings unless the evidence changed. After 30 days, newly eligible deferred findings other than owed checks appear once in one triage decision. `build` on that digest starts one follow-up design; it does not silently revoke any pattern. `defer` or `drop` does not show that digest again.
 
 After a tick settles, including a failure, the next tick sleeps durably for the configured interval. Restart rejoins the original dispatch rather than creating another tick. Missed wall-clock intervals do not produce a backlog.
+
+Limits: the sweeper and investigator rely on their instructions to read the pinned commit rather than the working tree. A rejected hand-over still counts as a landing for sweep history. Confirmation of the check's encoding rests on the verifier's judgment. Reverting the encoding later does not reopen the obligation.
 
 ## Live plan
 
@@ -95,7 +97,7 @@ The frontmatter accepts a scalar description and inline or block lists of string
 
 The worker's index, automatic bindings and explicit pulls all use the principles from its item's prepared base. Other bound roles read from their own checkouts. A verifier receives every project description from the checkout it reviews. Keel binds `model-the-domain` when the designer shapes or revises a Mandate. A failed claimed fix adds `attack-the-premise` to the worker's rework input. A diagnosis gets both `attack-the-premise` and `fix-root-causes`.
 
-A verifier can link a principle it pulled to a failing thread. The block returns to Build as usual; the separate proposal to sharpen the description or bind the principle waits for triage. The sweep uses the last 30 landed worker items, their recorded pulls and deliveries, their ruling citations and the project principles available at their prepared bases. It proposes binding a project principle pulled by at least 90% of at least ten items of one kind, or removing one with no citations across at least twenty recorded opportunities. These proposals go to the owner; the sweep and investigator never edit policies.
+A verifier can link a principle it pulled to a failing thread. The block returns to Build as usual; the separate proposal to sharpen the description or bind the principle waits for triage. The sweep uses the last 30 landed worker items, their recorded pulls and deliveries, their ruling citations and the project principles available at their prepared bases. The [sweeper input](src/prose/inputs/queue/sweep.md#principle-proposal-thresholds) states the binding and removal thresholds. These proposals go to the owner; the sweep and investigator never edit policies.
 
 ## What the owner decides
 

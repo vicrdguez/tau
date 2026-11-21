@@ -8,8 +8,6 @@ import {
 	type Reduction,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
-import type { PrincipleSample } from "../build/public.ts";
-import type { AuthorityIndex } from "../design/public.ts";
 import { queueFixture } from "./fixture.ts";
 import {
 	type ChecksFinished,
@@ -18,11 +16,16 @@ import {
 	type Holding,
 	type HoldingAddress,
 	type Intake,
-	type LandingSample,
 	type Resume,
 	type SweepFinding,
 } from "./public.ts";
-import { type Investigated, initial, pending, type Queue } from "./state.ts";
+import {
+	disposition,
+	type Investigated,
+	initial,
+	pending,
+	type Queue,
+} from "./state.ts";
 import * as triage from "./triage.ts";
 
 export { queueTools } from "./tools.ts";
@@ -36,8 +39,6 @@ type QueueState = {
 	triage: Queue;
 	sweepMinutes: number | null;
 	sweepTick: number;
-	authority: AuthorityIndex[];
-	samples: LandingSample[];
 };
 const sweepKey = (state: QueueState) => effectKey(`sweep/${state.sweepTick}`);
 const withTriage = (
@@ -103,8 +104,6 @@ export const queueLane = defineLane(
 				triage: initial(),
 				sweepMinutes: null,
 				sweepTick: 0,
-				authority: [],
-				samples: [],
 			}),
 		}),
 		workInHand: (state, event) => triage.workFor(state.triage, event),
@@ -120,25 +119,6 @@ export const queueLane = defineLane(
 									sweepMinutes,
 									sweepTick: (state.sweepTick ?? 0) + 1,
 								},
-				};
-			}
-			if (event.kind === "sweep_landing") {
-				const { work, authority, samples } = event as LaneEvent & {
-					work: WorkId;
-					authority: AuthorityIndex | null;
-					samples: PrincipleSample[];
-				};
-				return {
-					state: {
-						...state,
-						authority: authority
-							? [...(state.authority ?? []), authority]
-							: (state.authority ?? []),
-						samples: [
-							...(state.samples ?? []),
-							...samples.map((sample) => ({ work, ...sample })),
-						].slice(-30),
-					},
 				};
 			}
 			if (event.kind === "begin_investigation")
@@ -314,11 +294,22 @@ export const queueLane = defineLane(
 		],
 		view: (state) => ({
 			patternRulings: state.triage.patterns,
-			authority: state.authority ?? [],
-			samples: state.samples ?? [],
-			owedChecks: (encoded?: number[], returning?: readonly number[]) =>
-				triage.owedChecks(state.triage, encoded, returning),
-			checks: (ids: number[]) => triage.checks(state.triage, ids),
+			priorFindings: state.triage.entries.flatMap((f) =>
+				f.intake.source === "sweeper" && !f.revisit
+					? [
+							{
+								id: f.id,
+								text: f.intake.text,
+								report: f.intake.report,
+								disposition: disposition(f),
+							},
+						]
+					: [],
+			),
+			owedChecks: (encoded: number[] = [], returning?: readonly number[]) =>
+				triage.checks(state.triage, (id) => !encoded.includes(id), returning),
+			checks: (ids: number[]) =>
+				triage.checks(state.triage, (id) => ids.includes(id)),
 			investigation: pending(state.triage) ? state.triage.context : null,
 			directionsFor: (work: WorkId) =>
 				state.triage.entries.flatMap((f) =>

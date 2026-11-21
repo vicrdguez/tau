@@ -18,6 +18,7 @@ import {
 	closeFindings,
 	fileHolding,
 	resumption,
+	sweepConfigured,
 } from "../queue/public.ts";
 import { accountingError, outcomesText, synthesisParts } from "./accounting.ts";
 import {
@@ -687,6 +688,7 @@ export const design: Lane<State> = {
 						},
 						seq: s.seq + 1,
 					},
+					send: [sweepConfigured],
 				};
 			}
 			case "revise_mandate": {
@@ -991,6 +993,7 @@ export const design: Lane<State> = {
 						(s.seed.reference && reference !== s.seed.reference))
 				)
 					return { reject: "Keep the queue seed's route and reference." };
+				const started = s.phase === "entry" ? [sweepConfigured] : [];
 				switch (e.route) {
 					case "follow": {
 						const proposed = e.mandate as Draft | undefined;
@@ -1016,7 +1019,7 @@ export const design: Lane<State> = {
 								reference,
 								direction: "",
 							},
-							send: [toBuild(w.work!, { kind: "bound", mandate })],
+							send: [...started, toBuild(w.work!, { kind: "bound", mandate })],
 						};
 					}
 					case "precedent": {
@@ -1034,6 +1037,7 @@ export const design: Lane<State> = {
 								audit,
 								seq: s.seq + 1,
 							},
+							send: started,
 						};
 					}
 					case "ambiguous": {
@@ -1057,6 +1061,7 @@ export const design: Lane<State> = {
 								readings,
 								seq: s.seq + 1,
 							},
+							send: started,
 						};
 					}
 					default:

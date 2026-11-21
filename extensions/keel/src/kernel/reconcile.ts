@@ -239,6 +239,15 @@ export async function reconcile(
 	for (const [key, slot] of Object.entries(slots.effects)) {
 		if (!key.startsWith(prefix) || planned.has(key)) continue;
 		if (slot.status === "planned") slot.status = "cancelled";
+		// Project keys are not reused once retired. Keep claimed or stopping work
+		// until its result task settles it; a late delivery checks the task identity.
+		if (
+			work === null &&
+			(slot.status === "done" || slot.status === "cancelled")
+		) {
+			delete slots.effects[key];
+			continue;
+		}
 		if (slot.status !== "running" || !slot.interrupt) continue;
 		slot.status = "stopping";
 		await tx.createTask(

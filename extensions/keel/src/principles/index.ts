@@ -120,7 +120,7 @@ const checkCitations: CheckCitations = async (
 };
 export const principleInputs = { render, checkCitations };
 
-/** Read actual deliveries and pulls for the queue's bounded sample of landed items. */
+/** Read actual deliveries and pulls for the sweep's bounded sample of landed items. */
 export async function principleUsage(tx: Tx, samples: LandingSample[]) {
 	return Promise.all(
 		samples.map(async ({ work, worker, kind, citations }) => {

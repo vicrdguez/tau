@@ -14,17 +14,14 @@ export function replyJson(answer: string): unknown {
 		if (value !== undefined) return value;
 	}
 
-	// Start each candidate independently so an unmatched prose brace cannot hide a report.
-	for (
-		let start = answer.indexOf("{");
-		start !== -1;
-		start = answer.indexOf("{", start + 1)
-	) {
-		const body = answer.slice(start);
+	// Start each candidate independently so an unmatched prose bracket cannot hide a report.
+	for (const open of answer.matchAll(/[[{]/g)) {
+		const body = answer.slice(open.index);
+		const close = open[0] === "{" ? "}" : "]";
 		let depth = 0;
-		for (const token of body.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}]/g)) {
-			if (token[0] === "{") depth++;
-			if (token[0] === "}" && --depth === 0) {
+		for (const token of body.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[[\]{}]/g)) {
+			if (token[0] === open[0]) depth++;
+			if (token[0] === close && --depth === 0) {
 				const value = parse(body.slice(0, token.index + 1));
 				if (value !== undefined) return value;
 				break;

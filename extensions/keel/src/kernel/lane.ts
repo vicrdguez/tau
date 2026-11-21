@@ -68,7 +68,7 @@ export type AgentDecl = {
 	paused: boolean;
 	expects: readonly Expectation[];
 };
-/** A key names one immutable plan, including across retries. A new plan needs a new key. */
+/** A key names one immutable plan across retries. Retired project keys are never reused. */
 export type EffectDecl = {
 	key: EffectKey;
 	spec: JsonObject;

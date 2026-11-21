@@ -94,18 +94,13 @@ export type SweepHistory = {
 	authority: AuthorityIndex[];
 	samples: LandingSample[];
 	patternRulings: unknown;
+	priorFindings: {
+		id: number;
+		text: string;
+		report: string | null;
+		disposition: string;
+	}[];
 };
-export function recordLanding(
-	work: WorkId,
-	authority: AuthorityIndex | null,
-	samples: PrincipleSample[],
-): Message {
-	return {
-		lane: "queue",
-		work: null,
-		event: { kind: "sweep_landing", work, authority, samples },
-	};
-}
 
 export type QueueChecks = {
 	owedChecks(encoded?: number[], returning?: readonly number[]): string;
@@ -122,20 +117,14 @@ export function checksFinished(
 	outcome: string,
 	encoded: number[] = [],
 ): Message[] {
-	return ids?.length
-		? [
-				{
-					lane: "queue",
-					work: null,
-					event: {
-						kind: "checks_finished",
-						ids,
-						encoded,
-						outcome,
-					} satisfies ChecksFinished,
-				},
-			]
-		: [];
+	if (!ids?.length) return [];
+	const event: ChecksFinished = {
+		kind: "checks_finished",
+		ids,
+		encoded,
+		outcome,
+	};
+	return [{ lane: "queue", work: null, event }];
 }
 
 export type FindingDisposition = {

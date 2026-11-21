@@ -43,7 +43,6 @@ import {
 export function createKernel(config: {
 	lanes: readonly RegisteredLane[];
 	tools: readonly LaneTool[];
-	firstProjectEvent?: Delivery;
 	input?: { render: RenderInput; checkCitations: CheckCitations };
 	plainTools?: readonly {
 		roles: readonly RoleName[];
@@ -205,18 +204,7 @@ export function createKernel(config: {
 			p.root = (await tx.doc(AgentDoc, delivery.work)).cwd ?? null;
 		if (!p.root)
 			throw new Error("No project working directory on the entry conversation");
-		const result = await route(
-			tx,
-			lanes,
-			delivery,
-			now,
-			opts,
-			p.root,
-			caller,
-			p.works.length === 0 && delivery.work !== null
-				? config.firstProjectEvent
-				: undefined,
-		);
+		const result = await route(tx, lanes, delivery, now, opts, p.root, caller);
 		if ("reject" in result) return result;
 		for (const frame of result.frames) {
 			frame.save();

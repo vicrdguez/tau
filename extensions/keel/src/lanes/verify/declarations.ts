@@ -31,7 +31,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", ["facts", "threads"]);
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
-const handoverEvidence = prose(dir, "documents/handover-evidence.md", [
+const evidenceDocument = prose(dir, "documents/handover-evidence.md", [
 	"sha",
 	"result",
 	"intent",
@@ -162,10 +162,10 @@ export function effects(s: State): EffectDecl[] {
 					: { repo: s.repo!, op },
 		}));
 }
-export function rejectedEvidence(s: State): string {
+export function handoverEvidence(s: State): string {
 	const h = s.handover!,
 		info = s.handoff!;
-	return handoverEvidence({
+	return evidenceDocument({
 		sha: h.sha,
 		result: h.unchanged ? unchanged : changed,
 		intent: s.mandate!.intent,
@@ -213,7 +213,7 @@ function handoverAsk(s: State): Ask {
 			trunk,
 			base,
 			owed: owed || "None.",
-			evidence: rejectedEvidence(s),
+			evidence: handoverEvidence(s),
 		}),
 	};
 }
