@@ -115,6 +115,7 @@ function queue(world: World = activeWorld) {
 			agents,
 			state: () => s,
 			notes: () => notes,
+			view: () => l.view(s) as { findingsFor(work: number): string },
 		};
 	});
 }
@@ -308,6 +309,44 @@ test("a wrong Mandate discovered after handoff remains visible without holding l
 	assert.match(q.ask()[0]!.basis, /Round once/);
 	assert.match(q.ask()[0]!.basis, /does not hold.*landing/i);
 	assert.equal(q.answer("build")[0]?.work, "new");
+});
+
+test("hand-over evidence for the work includes dispositions and open findings but not other work", () => {
+	const q = queue();
+	q.file({ text: "Closed as an observation" });
+	q.send(
+		q.investigation(1, "no_action", {
+			recommendation: "no_action",
+			nodes: [],
+			evidence: "Nothing needs editing.",
+		}),
+	);
+	q.file({ text: "Deferred concern" });
+	q.send(q.investigation(2));
+	q.answer("defer");
+	q.file({ text: "Settled rounding boundary" });
+	q.send(q.investigation(3, "mandate_wrong"));
+	q.answer("build");
+	q.send({
+		kind: "revision_disposition",
+		work: 4,
+		causes: ["queue/3"],
+		disposition: "already settled by sums",
+	});
+	q.file({ text: "Still under investigation" });
+	q.file({ work: 5, text: "Different work entirely" });
+	const report = q.view().findingsFor(4);
+	assert.match(
+		report,
+		/Closed as an observation[^\n]+no action[^\n]+Nothing needs editing/,
+	);
+	assert.match(report, /Deferred concern[^\n]+deferred/);
+	assert.match(
+		report,
+		/Settled rounding boundary[^\n]+already settled by sums/,
+	);
+	assert.match(report, /Still under investigation[^\n]+open/);
+	assert.doesNotMatch(report, /Different work entirely/);
 });
 
 test("an unlikely edge case never holds a node even if the Mandate is wrong", () => {
