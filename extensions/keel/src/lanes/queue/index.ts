@@ -10,9 +10,8 @@ import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
 import type { Holding, Resume } from "./public.ts";
 
-type Finding = Omit<Holding, "allow"> & {
-	allow: boolean;
-	status: "open" | "resumed" | "allowed" | "cancelled";
+type Finding = Holding & {
+	status: "open" | "resumed" | "cancelled";
 };
 type FileFinding = { kind: "file" } & Holding;
 type QueueState = { findings: Finding[] };
@@ -20,13 +19,8 @@ type QueueState = { findings: Finding[] };
 const question = prose(
 	import.meta.dirname,
 	"../../prose/documents/holding-finding.md",
-	["goal", "scope", "evidence", "resume", "allow"],
+	["goal", "scope", "evidence", "resume"],
 );
-const permission = prose(
-	import.meta.dirname,
-	"../../prose/documents/allow-publication.md",
-	[],
-)({});
 function cancel(state: QueueState, work: WorkId): Accepted<QueueState> {
 	return {
 		state: {
@@ -67,10 +61,7 @@ export const queueLane = defineLane(
 					return { state };
 				return {
 					state: {
-						findings: [
-							...state.findings,
-							{ ...filing, allow: filing.allow === true, status: "open" },
-						],
+						findings: [...state.findings, { ...filing, status: "open" }],
 					},
 				};
 			}
@@ -86,11 +77,7 @@ export const queueLane = defineLane(
 			if (!finding) return { state };
 			const { work, lane, item, cause, evidence } = finding;
 			if (answer.choice === "cancel") return cancel(state, work);
-			if (
-				answer.choice !== "resume" &&
-				!(answer.choice === "allow" && finding.allow)
-			)
-				return { state };
+			if (answer.choice !== "resume") return { state };
 			const direction = answer.annotations
 				.map((a) => `${a.n}. ${a.text}`)
 				.join("\n");
@@ -108,7 +95,7 @@ export const queueLane = defineLane(
 						direction,
 					},
 				});
-			if (answer.choice === "resume" && item !== null)
+			if (item !== null)
 				send.push({
 					lane: "verify",
 					work,
@@ -128,12 +115,7 @@ export const queueLane = defineLane(
 			return {
 				state: {
 					findings: state.findings.map((f) =>
-						f === finding
-							? {
-									...f,
-									status: answer.choice === "allow" ? "allowed" : "resumed",
-								}
-							: f,
+						f === finding ? { ...f, status: "resumed" } : f,
 					),
 				},
 				send,
@@ -146,7 +128,6 @@ export const queueLane = defineLane(
 					const basis = question({
 						goal: f.goal,
 						resume: f.resume,
-						allow: f.allow ? permission : "",
 						scope: [f.lane, f.item].filter(Boolean).join("/"),
 						evidence: f.evidence,
 					});
@@ -154,9 +135,7 @@ export const queueLane = defineLane(
 						subject: address(f),
 						title: basis.split("\n", 1)[0] ?? basis,
 						basis,
-						choices: f.allow
-							? (["allow", "resume", "cancel"] as const)
-							: (["resume", "cancel"] as const),
+						choices: ["resume", "cancel"],
 					};
 				}),
 		view: (state) => ({

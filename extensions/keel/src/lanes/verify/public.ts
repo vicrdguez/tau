@@ -1,6 +1,6 @@
-import type { ProtectedChange, RepoInfo, Sha } from "../../repo/index.ts";
+import type { RepoInfo, Sha } from "../../repo/index.ts";
 import type { Ruling } from "../build/public.ts";
-import type { Mandate } from "../design/public.ts";
+import type { Mandate, Reply } from "../design/public.ts";
 
 type BuildSnapshot = {
 	repo: RepoInfo;
@@ -15,14 +15,16 @@ export type Publication = BuildSnapshot &
 				item: string;
 				sha: Sha;
 				base: Sha;
-				itemKind: "build" | "encode";
-				protectedChanges: ProtectedChange[];
-				allowed: boolean;
-				direction?: string;
-				trunk: Sha | null;
+				changedPolicyFiles: string[];
 				addresses: string[];
 				brief: string;
 				paths: string[];
 		  }
-		| { kind: "handoff"; base: Sha; summary: string; risk: string }
+		| {
+				kind: "handoff";
+				base: Sha;
+				summary: string;
+				risk: string;
+				approvalReplies: Reply[];
+		  }
 	);

@@ -1,7 +1,6 @@
 import { defineState } from "../../kernel/state.ts";
 import type {
 	ProjectPrincipleFile,
-	ProtectedChange,
 	RepoInfo,
 	Sha,
 	Worker,
@@ -18,7 +17,7 @@ export type Goal = {
 export type Brief = {
 	goal: string;
 	evidence: string;
-	fences: string;
+	fences: string[];
 	nodes: string[];
 };
 export type Item = Goal & {
@@ -36,7 +35,7 @@ export type Item = Goal & {
 	seq: number;
 	retry: number;
 	mergedHead: Sha | null;
-	input: "resume" | "brief" | "integration" | "protected_candidate" | "rework";
+	input: "resume" | "brief" | "integration" | "rework";
 	evidence: string;
 	threads: string[];
 	direction: string;
@@ -46,8 +45,6 @@ export type Item = Goal & {
 		summary: string;
 		addresses: string[];
 		base: Sha;
-		protectedChanges: ProtectedChange[];
-		trunk: Sha | null;
 	} | null;
 };
 export type Build = {
@@ -136,25 +133,14 @@ export const buildDoc = defineState({
 
 export const held = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
-export const fencePaths = (item: Item) =>
-	item
-		.brief!.fences.split("\n")
-		.map((p) => p.trim())
-		.filter(Boolean);
 export const workerKey = (i: Item) => `worker/${i.id}/${i.attempt}`;
 
 export function buildView(s: Build) {
 	return {
 		publicationOf(agent: string) {
 			const worker = s.items.find((i) => workerKey(i) === agent)?.worker;
-			if (!worker || !s.repo || !s.mandate)
-				throw Error("No current worker checkout");
-			return {
-				repo: s.repo,
-				worker,
-				inheritedTrunk: s.coordinator.reason?.inheritedTrunk ?? null,
-				protectedPaths: s.mandate.protectedPaths,
-			};
+			if (!worker || !s.repo) throw Error("No current worker checkout");
+			return { repo: s.repo, worker };
 		},
 	};
 }

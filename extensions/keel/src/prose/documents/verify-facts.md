@@ -3,7 +3,6 @@ Diff base: {{base}}
 Checkout: {{path}}
 Item or build brief: {{brief}}
 
-Mandate:
 {{mandate}}
 
 Rulings:
@@ -15,7 +14,9 @@ Project verification playbook:
 Earlier verdicts:
 {{history}}
 
-Protected changes and owner authorization:
-{{protected}}
+Changed principles and playbooks reported by Git:
+{{changedPolicyFiles}}
+
+Expect these files to be unchanged unless the item's task was to create or change them.
 
 Threads this build claims to address: {{addresses}}

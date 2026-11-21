@@ -5,20 +5,16 @@ import {
 	type EffectDecl,
 	prose,
 } from "../../kernel/lane.ts";
-import { protectedViolations } from "../../repo/index.ts";
 import type { Ruling } from "../build/public.ts";
+import { renderMandate } from "../design/public.ts";
 import { cleaning, type Review, type State } from "./state.ts";
 
 const dir = `${import.meta.dirname}/../../prose`;
 const inputs = Object.fromEntries(
-	[
-		"item",
-		"rework",
-		"integration",
-		"protected-candidate",
-		"full",
-		"landing",
-	].map((name) => [name, prose(dir, `inputs/verify/${name}.md`, ["facts"])]),
+	["item", "rework", "integration", "full", "landing"].map((name) => [
+		name,
+		prose(dir, `inputs/verify/${name}.md`, ["facts"]),
+	]),
 );
 const form = prose(dir, "documents/verify-facts.md", [
 	"sha",
@@ -30,7 +26,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"playbook",
 	"history",
 	"addresses",
-	"protected",
+	"changedPolicyFiles",
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", ["facts", "threads"]);
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
@@ -46,9 +42,14 @@ const handover = prose(dir, "documents/handover.md", [
 	"risk",
 	"diagnoses",
 	"directions",
+	"approvalReplies",
 	"base",
 ]);
-const title = prose(dir, "documents/handover-title.md", ["trunk", "sha"]);
+const title = prose(dir, "documents/handover-title.md", [
+	"trunk",
+	"sha",
+	"goal",
+]);
 const changed = prose(dir, "documents/landing-changed.md", [])({});
 const unchanged = prose(dir, "documents/landing-unchanged.md", [])({});
 function rulings(rs: Ruling[]) {
@@ -66,38 +67,21 @@ export function agentFor(c: Review) {
 		? agentKey(`diagnose/${c.checkout!.key}`)
 		: agentKey(`verify/${c.item}`);
 }
-function protectedFiles(c: Review) {
-	return c.protectedChanges.map((change) => {
-		const allowed = c.waivers.some(
-			(w) =>
-				w.path === change.path &&
-				w.kind === change.kind &&
-				w.before === change.before &&
-				w.after === change.after,
-		);
-		const status = allowed
-			? "owner allowed"
-			: protectedViolations([change], c.reviewedEncode).length
-				? "no owner waiver"
-				: "no waiver needed";
-		return `${c.item}: ${change.kind}: ${change.path} (${status})`;
-	});
-}
 function input(s: State, c: Review) {
 	const history = s.verdicts.filter((v) => v.item === c.item);
+	const changedPolicyFiles =
+		c.scope === "item"
+			? c.changedPolicyFiles
+			: s.checks
+					.filter((other) => other.phase === "merged")
+					.flatMap((other) => other.changedPolicyFiles);
 	const facts = form({
 		sha: c.sha,
 		base: c.base,
 		path: c.checkout!.path,
 		brief: c.brief,
-		protected:
-			(c.scope === "item"
-				? protectedFiles(c)
-				: s.checks
-						.filter((other) => other.phase === "merged")
-						.flatMap(protectedFiles)
-			).join("\n") || "None.",
-		mandate: JSON.stringify(s.mandate, null, 2),
+		changedPolicyFiles: [...new Set(changedPolicyFiles)].join("\n") || "None.",
+		mandate: renderMandate(s.mandate!),
 		rulings: rulings(c.rulings),
 		playbook: c.playbook ?? "None.",
 		history:
@@ -111,15 +95,6 @@ function input(s: State, c: Review) {
 	});
 	function situation() {
 		if (c.scope !== "item") return c.scope;
-		if (
-			s.jobs.some(
-				({ item, op }) =>
-					item === c.item &&
-					op.kind === "merge_item" &&
-					op.protection.allowedCandidate === c.sha,
-			)
-		)
-			return "protected-candidate";
 		if (!history.length) return "item";
 		return history.at(-1)?.outcome === "pass" ? "integration" : "rework";
 	}
@@ -168,8 +143,6 @@ export function effects(s: State): EffectDecl[] {
 			(j) =>
 				s.cancelled ||
 				(!s.holds.some((h) => h.job === j.key) &&
-					(j.op.kind !== "merge_item" ||
-						s.checks.some((c) => c.item === j.item && c.phase === "merging")) &&
 					(j.op.kind === "remove" || !cleaning(s, j.item))),
 		)
 		.map(({ key, op }) => ({
@@ -188,7 +161,7 @@ export function asks(s: State): Ask[] {
 	return [
 		{
 			subject: subject("handover"),
-			title: title({ trunk, sha: h.sha }).trim(),
+			title: title({ trunk, sha: h.sha, goal: s.mandate!.intent }).trim(),
 			choices: ["accept", "reject"],
 			basis: handover({
 				sha: h.sha,
@@ -208,6 +181,15 @@ export function asks(s: State): Ask[] {
 						.join("\n") || "None.",
 				risk: info.risk,
 				directions: s.directions.join("\n") || "None.",
+				approvalReplies:
+					s
+						.mandate!.approvalNotes.map((note, i) => {
+							const n = i + 1;
+							const reply = info.approvalReplies.find((r) => r.n === n);
+							return `${n}. ${note}${reply ? `\n   ${reply.status}: ${reply.reason}` : ""}`;
+						})
+						.join("\n") || "None.",
+
 				diagnoses: s.diagnoses.join("\n") || "None.",
 			}),
 		},

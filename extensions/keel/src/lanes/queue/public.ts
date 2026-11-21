@@ -8,7 +8,6 @@ export const resumption = {
 	discovery: action("discovery"),
 	moved: action("moved"),
 	occupied: action("occupied"),
-	protected: action("protected"),
 	worker: action("worker"),
 	coordinator: action("coordinator"),
 	trunk: action("trunk"),
@@ -20,7 +19,6 @@ export const resumption = {
 export type Holding = {
 	goal: string;
 	resume: string;
-	allow?: boolean;
 	work: WorkId;
 	lane: "design" | "build" | "verify";
 	item: string | null;
@@ -28,7 +26,7 @@ export type Holding = {
 	evidence: string;
 };
 export type Resume = {
-	kind: "resume" | "allow";
+	kind: "resume";
 	item: string | null;
 	cause: string;
 	evidence: string;

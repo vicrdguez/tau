@@ -8,7 +8,6 @@ export type BuildUpdate =
 	| { kind: "merged"; item: string; head: Sha }
 	| {
 			kind: "integration" | "rework";
-			protectedCandidate?: true;
 			item: string;
 			head: Sha;
 			inheritedTrunk?: Sha;

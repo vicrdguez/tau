@@ -11,9 +11,7 @@ import {
 	type World,
 } from "../../kernel/lane.ts";
 import {
-	isPolicyPath,
 	layout,
-	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 	type Sha,
@@ -86,16 +84,6 @@ function transition(prev: State, world: World) {
 		s.jobs.push({ item, op, key: op.key });
 	const cleanup = (item: string, target: Target) =>
 		enqueue(item, { kind: "remove", key: key("remove"), target });
-	function recordPermission(
-		c: Review,
-		scope: "publication" | "merge candidate",
-	) {
-		c.waivers = protectedViolations(c.protectedChanges, c.reviewedEncode);
-		for (const change of c.waivers)
-			s.directions.push(
-				`Owner allowed ${c.item} at ${scope} ${c.sha}: ${change.kind}: ${change.path}`,
-			);
-	}
 	function retire(c: Review) {
 		if (c.checkout) {
 			cleanup(c.item, c.checkout);
@@ -119,11 +107,9 @@ function transition(prev: State, world: World) {
 		evidence: string,
 		resume: string,
 		job: string | null = null,
-		candidate: Sha | null = null,
-		allow = false,
 	) {
 		const cause = key("hold");
-		s.holds.push({ cause, item, evidence, job, candidate });
+		s.holds.push({ cause, item, evidence, job });
 		send.push(
 			fileHolding({
 				work,
@@ -133,7 +119,6 @@ function transition(prev: State, world: World) {
 				cause,
 				evidence,
 				resume,
-				...(allow && { allow }),
 			}),
 		);
 	}
@@ -143,7 +128,7 @@ function transition(prev: State, world: World) {
 	}
 	function back(
 		c: Review,
-		kind: "rework" | "integration" | "protected_candidate",
+		kind: "rework" | "integration",
 		evidence: string,
 		threads: string[],
 		inheritedTrunk?: Sha,
@@ -152,9 +137,7 @@ function transition(prev: State, world: World) {
 		if (c.scope !== "item") release();
 		send.push(
 			toBuild(work, {
-				...(kind === "protected_candidate"
-					? ({ kind: "integration", protectedCandidate: true } as const)
-					: { kind }),
+				kind,
 				item: c.item,
 				evidence,
 				...(c.direction && { direction: c.direction }),
@@ -184,13 +167,6 @@ function transition(prev: State, world: World) {
 			expected: s.head!,
 			item: c.sha,
 			checks: s.mandate!.checks,
-			protectedGlobs: s.mandate!.protectedPaths,
-			protection: {
-				reviewedEncode: c.reviewedEncode,
-				allowedChanges: c.waivers,
-				allowedCandidate: null,
-				trunk: c.trunk,
-			},
 			message: `Merge item ${c.item}`,
 		});
 	}
@@ -315,17 +291,6 @@ function transition(prev: State, world: World) {
 				resumption.pinned({ operation: op.kind }).trim(),
 				j.key,
 			);
-		} else if (r.kind === "protected" && op.kind === "merge_item") {
-			c.protectedChanges = [...r.protectedChanges];
-			c.waivers = [];
-			hold(
-				j.item,
-				`Protected changes in the merge candidate ${r.sha}: ${c.protectedChanges.map((p) => p.kind + ": " + p.path).join(", ")}`,
-				resumption.protected,
-				j.key,
-				r.sha,
-				!c.protectedChanges.some((p) => isPolicyPath(p.path)),
-			);
 		} else {
 			discard(j);
 			switch (op.kind) {
@@ -355,8 +320,6 @@ function transition(prev: State, world: World) {
 					if (op.kind === "merge_item" && r.kind === "merged") {
 						s.head = r.sha;
 						c.phase = "merged";
-						if (r.protectedChanges)
-							c.protectedChanges = [...r.protectedChanges];
 						send.push(
 							toBuild(work, { kind: "merged", item: c.item, head: r.sha }),
 						);
@@ -485,18 +448,13 @@ function transition(prev: State, world: World) {
 								.map((other) => other.direction)
 								.filter(Boolean)
 								.join("\n")
-						: (e.direction ?? ""),
-					protectedChanges: full ? [] : e.protectedChanges,
-					waivers: [],
-					reviewedEncode:
-						!full && e.itemKind === "encode" && e.mandate.reviewed,
-					trunk: full ? null : e.trunk,
+						: "",
+					changedPolicyFiles: full ? [] : e.changedPolicyFiles,
 					phase: "checkout",
 					turn: 0,
 					checkout: null,
 					playbook: null,
 				};
-				if (!full && e.allowed) recordPermission(c, "publication");
 				if (full) for (const prior of s.checks) prior.direction = "";
 				s.checks = s.checks.filter((x) => x !== old);
 				s.checks.push(c);
@@ -506,6 +464,7 @@ function transition(prev: State, world: World) {
 						summary: e.summary,
 						risk: e.risk,
 						rulings: e.rulings,
+						approvalReplies: e.approvalReplies,
 					};
 				checkout(c);
 				break;
@@ -552,21 +511,10 @@ function transition(prev: State, world: World) {
 				});
 				// The agent that just answered has received its direction.
 				c.direction = "";
-				const guarded = s.jobs.find(
-					(j) => j.op.kind === "merge_item" && j.item === c.item,
-				);
 				if (e.outcome === "pass") {
 					retire(c);
-					c.phase = guarded
-						? "merging"
-						: c.scope === "item"
-							? "ready"
-							: "passed";
+					c.phase = c.scope === "item" ? "ready" : "passed";
 					break;
-				}
-				if (guarded) {
-					discard(guarded);
-					clearIntegration(guarded);
 				}
 				for (const id of ids) {
 					const scope = c.scope === "item" ? "item" : "full";
@@ -623,39 +571,18 @@ function transition(prev: State, world: World) {
 			case "reset_counts":
 				for (const t of s.threads) if (t.item === e.item) t.survived = 0;
 				break;
-			case "allow":
 			case "resume": {
 				const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
 				if (!h) break;
 				const c = find(h.item)!;
-				if (
-					e.kind === "allow" &&
-					(!h.candidate || c.protectedChanges.some((p) => isPolicyPath(p.path)))
-				)
-					break;
 				s.holds = s.holds.filter((x) => x !== h);
-				const returning =
-					e.kind === "resume" && (h.candidate || c.phase === "nonconvergent");
+				const returning = c.phase === "nonconvergent";
 				c.direction = [c.direction, returning ? "" : h.evidence, e.direction]
 					.filter(Boolean)
 					.join("\n");
 				c.turn = ++s.seq;
 				if (h.job) {
 					const j = s.jobs.find((j) => j.key === h.job)!;
-					if (h.candidate && j.op.kind === "merge_item") {
-						if (e.kind === "allow") {
-							j.op.protection.allowedCandidate = h.candidate;
-							c.sha = h.candidate;
-							c.base = j.op.expected;
-							recordPermission(c, "merge candidate");
-							checkout(c);
-						} else {
-							discard(j);
-							clearIntegration(j);
-							back(c, "protected_candidate", h.evidence, []);
-							break;
-						}
-					}
 					j.key = key("retry");
 				}
 				if (

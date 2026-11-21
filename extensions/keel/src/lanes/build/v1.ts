@@ -18,7 +18,6 @@ type WorkerV1 = {
 	base: Sha;
 };
 type MandateV1 = {
-	reviewed: boolean;
 	encodeRequired: boolean;
 	approvalNotes: string[];
 	intent: string;
@@ -26,9 +25,13 @@ type MandateV1 = {
 		| { label: string; rule: string; probe: string }
 		| { label: string; section: string; body: string }
 	)[];
-	delegated: { label: string; text: string }[];
+	delegated: {
+		label: string;
+		text: string;
+		origin: "evidence" | "incidental" | "seeded";
+	}[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
-	protectedPaths: string[];
+	considerations: { tradeoffs: string; alternatives: string } | null;
 };
 type V1 = {
 	phase:
@@ -90,7 +93,7 @@ type V1 = {
 		brief: {
 			goal: string;
 			evidence: string;
-			fences: string;
+			fences: string[];
 			nodes: string[];
 		} | null;
 		worker: WorkerV1 | null;
@@ -99,12 +102,7 @@ type V1 = {
 		seq: number;
 		retry: number;
 		mergedHead: Sha | null;
-		input:
-			| "resume"
-			| "brief"
-			| "rework"
-			| "integration"
-			| "protected_candidate";
+		input: "resume" | "brief" | "rework" | "integration";
 		evidence: string;
 		threads: string[];
 		direction: string;
@@ -121,13 +119,6 @@ type V1 = {
 			summary: string;
 			addresses: string[];
 			base: Sha;
-			protectedChanges: {
-				kind: "added" | "modified" | "deleted" | "renamed";
-				path: string;
-				before: string;
-				after: string;
-			}[];
-			trunk: Sha | null;
 		} | null;
 	}[];
 	holds: {

@@ -1,43 +1,9 @@
 import { agentKey, token } from "../../kernel/ids.ts";
 import { type AgentDecl, prose } from "../../kernel/lane.ts";
-import { type Build, fencePaths, held, type Item, workerKey } from "./state.ts";
+import { renderMandate } from "../design/public.ts";
+import { type Build, held, type Item, workerKey } from "./state.ts";
 
 const dir = import.meta.dirname;
-const boundMandate = prose(dir, "../../prose/documents/build-mandate.md", [
-	"reviewed",
-	"nodes",
-	"delegated",
-]);
-function authority(s: Build, labels?: string[]) {
-	const m = s.mandate!;
-	const rows: [string, string][] = [
-		["intent", m.intent],
-		...m.nodes.map((n): [string, string] => [
-			n.label,
-			"rule" in n
-				? `${n.rule}\n\nProbe: ${n.probe}`
-				: `${n.section}\n\n${n.body}`,
-		]),
-		...m.checks.map(({ id, argv, timeoutMs }): [string, string] => [
-			id,
-			`${JSON.stringify(argv)} (${timeoutMs} ms)`,
-		]),
-		["protectedPaths", m.protectedPaths.join("\n")],
-	];
-	const nodes = rows
-		.filter(([label]) => !labels || labels.includes(label))
-		.map(([label, content]) => `### ${label}\n\n${content}`)
-		.join("\n\n");
-	return labels
-		? nodes
-		: boundMandate({
-				reviewed: String(m.reviewed),
-				nodes,
-				delegated:
-					m.delegated.map((r) => `- ${r.label}: ${r.text}`).join("\n") ||
-					"None.",
-			});
-}
 const plan = prose(dir, "../../prose/inputs/build/plan.md", [
 	"mandate",
 	"direction",
@@ -108,11 +74,6 @@ const integrate = prose(dir, "../../prose/inputs/build/integration.md", [
 	"direction",
 	"branch",
 ]);
-const reviseCandidate = prose(
-	dir,
-	"../../prose/inputs/build/protected-candidate.md",
-	["evidence", "brief", "direction"],
-);
 export const ownerDirection = prose(
 	dir,
 	"../../prose/documents/build-direction.md",
@@ -152,7 +113,8 @@ function renderBrief(s: Build, i: Item) {
 		id: i.id,
 		kind: i.kind,
 		...i.brief,
-		nodes: authority(s, i.brief.nodes),
+		fences: i.brief.fences.join("\n"),
+		nodes: renderMandate(s.mandate!, i.brief.nodes),
 		reason: fullContext(s),
 	});
 }
@@ -162,7 +124,7 @@ function coordInput(s: Build) {
 	const c = s.coordinator;
 	const facts = {
 		direction: c.direction,
-		mandate: authority(s),
+		mandate: renderMandate(s.mandate!),
 	};
 	const planRecord = () =>
 		JSON.stringify(
@@ -227,12 +189,10 @@ function workerInput(s: Build, i: Item) {
 				...common,
 				path: w.path,
 				branch: w.branch,
-				mandate: authority(s),
+				mandate: renderMandate(s.mandate!),
 			});
 		case "rework":
 			return rework(common);
-		case "protected_candidate":
-			return reviseCandidate(common);
 		case "integration":
 			return integrate({ ...common, branch: w.from });
 	}
@@ -264,6 +224,7 @@ export function agents(s: Build): AgentDecl[] {
 			key: agentKey(workerKey(i)),
 			role: "worker",
 			cwd: i.worker!.path,
+			projectPrinciples: i.projectPrinciples,
 			paused: held(s, i.id),
 			expects:
 				i.stage === "building" && !held(s, i.id)
@@ -271,8 +232,7 @@ export function agents(s: Build): AgentDecl[] {
 							{
 								token: token("publish", i.seq),
 								tools: ["publish_build"],
-								projectPrinciples: i.projectPrinciples,
-								paths: fencePaths(i),
+								paths: i.brief!.fences,
 								situation:
 									i.input === "rework" &&
 									i.threads.some((id) => i.publication?.addresses.includes(id))

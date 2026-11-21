@@ -9,11 +9,10 @@ import {
 	type StaticFacts,
 	type World,
 } from "../../kernel/lane.ts";
+import { parseFences } from "../../principles/fences.ts";
 import {
-	isPolicyPath,
 	layout,
 	type PublishResult,
-	protectedViolations,
 	type RepoInfo,
 	type RepoResult,
 	type Sha,
@@ -29,7 +28,6 @@ import {
 	type Build,
 	buildDoc,
 	buildView,
-	fencePaths,
 	type Goal,
 	held,
 	type Item,
@@ -44,7 +42,7 @@ type Event =
 	| BuildUpdate
 	| Resume
 	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
-	| ({ kind: "brief"; item: string } & Brief)
+	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
 	| { kind: "handoff"; summary: string; risk: string }
 	| { kind: "ruling"; agent: string; ruling: Ruling }
 	| {
@@ -190,11 +188,9 @@ function hold(
 												: "remove",
 								})
 								.trim()
-						: obstruction === "protected" || obstruction === "policy"
-							? "Return to the worker to revise and republish; this does not allow the protected change."
-							: item
-								? resumption.worker
-								: resumption.coordinator;
+						: item
+							? resumption.worker
+							: resumption.coordinator;
 	const cause = `build/${++s.seq}`;
 	s.holds.push({ cause, item, obstruction, evidence, actual });
 	return {
@@ -208,7 +204,6 @@ function hold(
 				item,
 				cause,
 				evidence,
-				...(obstruction === "protected" ? { allow: true } : {}),
 			}),
 		],
 	};
@@ -336,26 +331,22 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	function verify(event: Publication): Reduction<Build> {
 		return { state, send: [{ lane: "verify", work: w.work, event }] };
 	}
-	function publish(i: Item, allowed: boolean, direction = "") {
+	function publish(i: Item, changedPolicyFiles: string[]) {
 		const p = i.publication!;
 		i.stage = "published";
 		i.direction = "";
 		return verify({
 			kind: "published",
 			item: i.id,
-			itemKind: i.kind,
-			paths: fencePaths(i),
+			paths: i.brief!.fences,
 			sha: p.sha,
 			base: p.base,
-			protectedChanges: p.protectedChanges,
-			trunk: p.trunk,
-			allowed,
+			changedPolicyFiles,
 			addresses: p.addresses,
 			repo: s.repo!,
 			head: s.head!,
 			mandate: s.mandate!,
 			brief: renderReport(s, i, p.summary),
-			...(direction && { direction }),
 			rulings: i.rulings,
 		});
 	}
@@ -408,12 +399,14 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				e.nodes.some((n) => !mandateLabels(s.mandate!).includes(n))
 			)
 				return { reject: "Cite labels from the bound Mandate." };
-			if (![e.goal, e.evidence, e.fences].every((v) => v.trim()))
-				return { reject: "State the goal, evidence and fences." };
+			if (![e.goal, e.evidence].every((v) => v.trim()))
+				return { reject: "State the goal and evidence." };
+			const fences = parseFences(e.fences);
+			if ("reject" in fences) return fences;
 			i.brief = {
 				goal: e.goal,
 				evidence: e.evidence,
-				fences: e.fences,
+				fences: fences.paths,
 				nodes: e.nodes,
 			};
 			prepare(s, i, w);
@@ -454,24 +447,10 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			i.publication = {
 				sha: f.sha,
 				base: f.base,
-				trunk: f.trunk,
-				protectedChanges: [...f.changes],
 				summary: e.summary,
 				addresses: e.addresses,
 			};
-			const violations = protectedViolations(
-				f.changes,
-				i.kind === "encode" && s.mandate!.reviewed,
-			);
-			if (violations.length)
-				return hold(
-					s,
-					w,
-					i.id,
-					violations.some((c) => isPolicyPath(c.path)) ? "policy" : "protected",
-					`Protected changes in ${i.id} at ${f.sha}: ${violations.map((c) => `${c.kind}: ${c.path}`).join(", ")}`,
-				);
-			return publish(i, false);
+			return publish(i, [...f.changedPolicyFiles]);
 		}
 		case "integration":
 		case "rework": {
@@ -492,7 +471,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
 			i.direction = e.direction ?? "";
-			i.input = e.protectedCandidate ? "protected_candidate" : e.kind;
+			i.input = e.kind;
 			i.stage = "building";
 			i.evidence = e.evidence;
 			i.threads = e.threads;
@@ -524,28 +503,19 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				head: s.head!,
 				mandate: s.mandate!,
 				rulings: s.items.flatMap((i) => i.rulings),
+				approvalReplies: s.approvalReplies,
 				summary: e.summary,
 				risk: e.risk,
 			});
-		case "allow":
 		case "resume": {
 			const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
 			if (!h) return { state };
 			const i = s.items.find((item) => item.id === e.item);
-			if (
-				e.kind === "allow" &&
-				(h.obstruction !== "protected" ||
-					i?.stage !== "building" ||
-					!i.publication)
-			)
-				return { reject: "This hold does not allow a waiver." };
 			s.holds = s.holds.filter((other) => other !== h);
 			const direction = ownerDirection({
 				direction: e.direction,
 				evidence: h.evidence,
 			});
-			if (e.kind === "allow")
-				return publish(i!, true, e.direction ? direction : "");
 			if (i?.stage === "building") {
 				i.input = "resume";
 				i.direction = direction;

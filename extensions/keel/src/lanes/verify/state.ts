@@ -3,12 +3,11 @@ import type {
 	BranchName,
 	Checkout,
 	Landing,
-	ProtectedChange,
 	RepoInfo,
 	Sha,
 } from "../../repo/index.ts";
 import type { Ruling } from "../build/public.ts";
-import type { Mandate } from "../design/public.ts";
+import type { Mandate, Reply } from "../design/public.ts";
 
 export type Block = { thread: string; ground: string; evidence: string };
 export type Scope = "item" | "full" | "landing";
@@ -34,10 +33,7 @@ export type Review = {
 	turn: number;
 	checkout: Checkout | null;
 	direction: string;
-	protectedChanges: ProtectedChange[];
-	waivers: ProtectedChange[];
-	reviewedEncode: boolean;
-	trunk: Sha | null;
+	changedPolicyFiles: string[];
 	playbook: string | null;
 };
 export type Verdict = {
@@ -62,13 +58,6 @@ type Merge = Integration & {
 	into: BranchName;
 	item: Sha;
 	message: string;
-	protectedGlobs: string[];
-	protection: {
-		reviewedEncode: boolean;
-		allowedChanges: ProtectedChange[];
-		allowedCandidate: Sha | null;
-		trunk: Sha | null;
-	};
 };
 export type Target = Checkout | Omit<Checkout, "sha">;
 export type Op =
@@ -95,7 +84,6 @@ export type State = {
 		item: string;
 		cause: string;
 		job: string | null;
-		candidate: Sha | null;
 		evidence: string;
 	}[];
 	verdicts: Verdict[];
@@ -110,6 +98,7 @@ export type State = {
 		summary: string;
 		risk: string;
 		rulings: Ruling[];
+		approvalReplies: Reply[];
 	} | null;
 	slot: "none" | "waiting" | "held";
 	plan: Landing | null;

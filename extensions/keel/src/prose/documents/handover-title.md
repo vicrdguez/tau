@@ -1,1 +1,1 @@
-Hand over {{trunk}} at {{sha}}
+Hand over: {{goal}} ({{trunk}} at {{sha}})

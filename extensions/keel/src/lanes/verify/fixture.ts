@@ -11,17 +11,20 @@ type RepoV1 = {
 };
 type ProofV1 = { id: string; argv: string[]; timeoutMs: number };
 type MandateV1 = {
-	reviewed: boolean;
 	encodeRequired: boolean;
 	approvalNotes: string[];
 	intent: string;
-	delegated: { label: string; text: string }[];
+	delegated: {
+		label: string;
+		text: string;
+		origin: "evidence" | "incidental" | "seeded";
+	}[];
 	nodes: (
 		| { label: string; rule: string; probe: string }
 		| { label: string; section: string; body: string }
 	)[];
 	checks: ProofV1[];
-	protectedPaths: string[];
+	considerations: { tradeoffs: string; alternatives: string } | null;
 };
 type RulingV1 = {
 	what: string;
@@ -38,12 +41,6 @@ type PlanV1 = {
 	expectedTrunk: Sha;
 	message: string;
 };
-type ChangeV1 = {
-	path: string;
-	kind: "added" | "modified" | "deleted" | "renamed";
-	before: string;
-	after: string;
-};
 type OpV1 =
 	| CheckoutV1
 	| {
@@ -53,13 +50,6 @@ type OpV1 =
 	  }
 	| {
 			kind: "merge_item";
-			protectedGlobs: string[];
-			protection: {
-				reviewedEncode: boolean;
-				allowedChanges: ChangeV1[];
-				allowedCandidate: Sha | null;
-				trunk: Sha | null;
-			};
 			key: string;
 			integration: string;
 			into: BranchName;
@@ -113,10 +103,7 @@ type V1 = {
 		turn: number;
 		checkout: CheckoutV1 | null;
 		direction: string;
-		protectedChanges: ChangeV1[];
-		waivers: ChangeV1[];
-		reviewedEncode: boolean;
-		trunk: Sha | null;
+		changedPolicyFiles: string[];
 		playbook: string | null;
 	}[];
 	jobs: { item: string; key: string; op: OpV1 }[];
@@ -124,7 +111,6 @@ type V1 = {
 		item: string;
 		cause: string;
 		job: string | null;
-		candidate: Sha | null;
 		evidence: string;
 	}[];
 	verdicts: {
@@ -149,6 +135,11 @@ type V1 = {
 		summary: string;
 		risk: string;
 		rulings: RulingV1[];
+		approvalReplies: {
+			n: number;
+			status: "acted_on" | "considered" | "dismissed";
+			reason: string;
+		}[];
 	} | null;
 	slot: "none" | "waiting" | "held";
 	plan: PlanV1 | null;

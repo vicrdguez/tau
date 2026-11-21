@@ -15,8 +15,11 @@ Verifier notes:
 Non-convergence and diagnosis:
 {{diagnoses}}
 
-Your directions and protected-change permissions:
+Your directions:
 {{directions}}
+
+Coordinator's replies to your approval notes:
+{{approvalReplies}}
 
 Residual risk: {{risk}}
 
