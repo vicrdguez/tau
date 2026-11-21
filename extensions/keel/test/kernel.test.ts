@@ -463,6 +463,25 @@ test("a stale stop cannot abort a later run just because the agent is paused aga
 	assert.equal((await submission.wait(ctx)).status, "done");
 });
 
+test("a platform-faulted effect reports one failure and releases its running slot", { timeout: 3000 }, async (t) => {
+	const x = await toy({
+		async runEffect() {
+			return { get value(): string { throw new Error("could not read effect result"); } };
+		},
+	});
+	t.after(() => x.harness.close(ctx));
+	await x.send("effect");
+	const [task] = await x.tasks("keel.effect");
+	assert.ok(task);
+	const receipt = await x.harness.waitForTask(task.id, ctx);
+	assert.equal(receipt.state.outcome.status, "faulted");
+	await x.finish("keel.effect-result");
+	const facts = (await x.state()).facts;
+	assert.equal(facts.length, 1);
+	assert.match(facts[0]!, /could not read effect result/);
+	assert.deepEqual(await x.send("claimed"), { reply: "false" });
+});
+
 test("three failed effect attempts deliver one failure to the lane", async (t) => {
 	let n = 0;
 	const x = await setup(t, {
