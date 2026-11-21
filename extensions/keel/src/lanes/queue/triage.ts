@@ -928,10 +928,13 @@ export function workFor(
 	if (e.kind === "intake" && "work" in e) return e.work as Intake["work"];
 	if (e.kind === "investigated" || e.kind === "begin_investigation")
 		return pending(q)?.intake.work ?? null;
-	if (e.kind === "answered" && "subject" in e)
+	if (e.kind === "answered" && "subject" in e) {
+		const f = pending(q);
+		if (q.stall && f && e.subject === stalled(f, q)) return f.intake.work;
 		return (
 			decisions(q).find((f) => decisionSubject(f) === e.subject)?.intake.work ??
 			null
 		);
+	}
 	return null;
 }
