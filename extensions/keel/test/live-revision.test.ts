@@ -102,8 +102,8 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 		old,
 		"an answered approval is staged, not active",
 	);
-	const item = (id: string) =>
-		`${s.build.replace(/\/build$/, "")}/item/${id}-1`;
+	const item = (id: string, attempt = 1) =>
+		`${s.build.replace(/\/build$/, "")}/item/${id}-${attempt}`;
 	assert.throws(() => git(root, "rev-parse", "--verify", item("frame")));
 	await s.finish();
 	const current = (await s.desk())?.mandate;
@@ -123,8 +123,11 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 		stats,
 		"the unrelated merged item was not rewritten",
 	);
-	git(root, "merge-base", "--is-ancestor", writer, item("writer"));
-	git(root, "merge-base", "--is-ancestor", item("frame"), item("writer"));
+	assert.throws(
+		() => git(root, "merge-base", "--is-ancestor", writer, item("writer", 2)),
+		"abandoned draft commits must not enter the fresh attempt",
+	);
+	git(root, "merge-base", "--is-ancestor", item("frame"), item("writer", 2));
 	assert.equal(
 		git(
 			root,
