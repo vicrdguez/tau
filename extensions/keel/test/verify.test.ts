@@ -311,6 +311,33 @@ test("a rejected hand-over files each nonblank annotation as an owed check with 
 	assert.deepEqual(x.asks(), []);
 });
 
+test("a verifier's principle violation returns the failed item and separately proposes a sharper description or binding", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	const result = x.apply({
+		kind: "verdict",
+		agent: x.agent().key,
+		outcome: "fail",
+		text: "One rounding boundary is missing.",
+		notes: [],
+		blocks: [
+			{
+				thread: "half-cent",
+				ground: "mandate_violation",
+				evidence: "A half-cent is rounded twice.",
+			},
+		],
+		principlesUnfollowed: [{ name: "project/round-once", thread: "half-cent" }],
+	});
+	assert.ok(result.send?.some((m) => m.event.kind === "rework"));
+	const proposal = result.send?.find((m) => m.event.kind === "intake");
+	assert.equal(proposal?.event.blocking, false);
+	assert.equal(proposal?.event.principle, true);
+	assert.match(String(proposal?.event.text), /project\/round-once/);
+	assert.match(String(proposal?.event.report), /A half-cent is rounded twice/);
+});
+
 test("a classified item hold gates verifier tools and keeps siblings running until the last cause drops", () => {
 	const x = flow();
 	x.publish();

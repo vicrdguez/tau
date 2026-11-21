@@ -168,6 +168,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 						"max_workers",
 						"dispatch_rounds",
 						"dispatch_minutes",
+						"sweep_minutes",
 					].includes(name)
 				)
 					assert.equal(property.format, "model", `keel option ${name}`);

@@ -42,6 +42,7 @@ export async function openScriptedWorkflow(
 	storage: Storage,
 	first: boolean,
 	runner?: EffectRunner,
+	now?: () => number,
 ) {
 	const k = createWorkflow(runner);
 	const registry = createRegistry();
@@ -53,6 +54,10 @@ export async function openScriptedWorkflow(
 		provider: "queue-fixture",
 		models: [{ id: "investigator" }],
 	});
+	const sweeper = fauxProvider({
+		provider: "sweep-fixture",
+		models: [{ id: "sweeper" }],
+	});
 	const secondCandidate = fauxProvider({ provider: "candidate-fixture" });
 	const judge = fauxProvider({ provider: "judge-fixture" });
 	const challenger = fauxProvider({ provider: "challenger-fixture" });
@@ -61,6 +66,7 @@ export async function openScriptedWorkflow(
 	for (const p of [
 		provider,
 		queueProvider,
+		sweeper,
 		secondCandidate,
 		judge,
 		challenger,
@@ -72,6 +78,7 @@ export async function openScriptedWorkflow(
 		{
 			registry,
 			models,
+			...(now && { now }),
 			env: (target) =>
 				new NodeExecutionEnv({
 					cwd: target.cwd ?? cwd,
@@ -144,10 +151,14 @@ export async function openScriptedWorkflow(
 			});
 		};
 	}
-	async function settle() {
+	async function settle(
+		ignore: (kind: string, input: unknown) => boolean = () => false,
+	) {
 		harness.resume();
 		for (;;) {
-			const { tasks } = await harness.inspect(ctx);
+			const tasks = (await harness.inspect(ctx)).tasks.filter(
+				({ record }) => !ignore(record.kind, record.input),
+			);
 			if (!tasks.length) break;
 			await Promise.all(
 				tasks.map(async ({ record, state }) => {
@@ -170,6 +181,7 @@ export async function openScriptedWorkflow(
 		root,
 		provider,
 		queueProvider,
+		sweeper,
 		secondCandidate,
 		judge,
 		challenger,
@@ -192,11 +204,12 @@ export async function openScenario(
 	storage: Storage,
 	phase: Phase,
 	runner?: EffectRunner,
+	now?: () => number,
 ) {
 	const first = phase === "rework" || phase === "through-publish";
 	const rework = phase === "rework";
 	const { store, root, provider, queueProvider, turn, settle } =
-		await openScriptedWorkflow(cwd, storage, first, runner);
+		await openScriptedWorkflow(cwd, storage, first, runner, now);
 	const { harness } = store;
 	const script: FauxResponseStep[] = [];
 	const call = (...args: Parameters<typeof turn>) => script.push(turn(...args));

@@ -75,7 +75,10 @@ function queue(world: World = activeWorld) {
 			if ("reject" in r) assert.fail(r.reject);
 			s = r.state;
 			const outgoing = (r.send ?? []).filter((m) => {
-				if (m.lane !== "queue" || m.event.kind !== "begin_investigation")
+				if (
+					m.lane !== "queue" ||
+					!["begin_investigation", "intake"].includes(m.event.kind)
+				)
 					return true;
 				send(m.event);
 				return false;
@@ -102,6 +105,7 @@ function queue(world: World = activeWorld) {
 			nodes: ["sums"],
 			...(extra as object),
 		});
+		const effects = () => l.effects(s, world);
 		const ask = () => l.asks(s, world);
 		const answer = (choice: string, subject = ask()[0]!.subject) =>
 			send({
@@ -120,6 +124,7 @@ function queue(world: World = activeWorld) {
 			ask,
 			answer,
 			agents,
+			effects,
 			state: () => s,
 			notes: () => notes,
 			view: () =>
@@ -181,6 +186,147 @@ test("two overrides that name the same outstanding check file once; deferring it
 	);
 	assert.deepEqual(q.answer("defer"), []);
 	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
+});
+
+test("the project sweep is off by default; when enabled its interruptible effect sleeps and failure re-arms it", () => {
+	const off = queue();
+	off.send({ kind: "sweep_configured" });
+	assert.deepEqual(off.effects(), []);
+	const q = queue({
+		...activeWorld,
+		options: { ...activeWorld.options, sweep_minutes: 1 },
+	});
+	q.send({ kind: "sweep_configured" });
+	const [tick] = q.effects();
+	assert.equal(tick?.interruptible, true);
+	assert.equal(tick?.delayMs, 60_000);
+	assert.deepEqual(
+		q.send({
+			kind: "effect_failed",
+			key: tick!.key,
+			error: "Failed to inspect the checkout",
+		}),
+		[],
+	);
+	assert.notEqual(q.effects()[0]?.key, tick!.key);
+	assert.deepEqual(q.ask(), []);
+});
+
+test("a sweep files a project defect or reference mismatch without a hold; build seeds new work", () => {
+	for (const classification of ["defect_in_scope", "mandate_wrong"]) {
+		const q = queue({ ...activeWorld, view: () => null });
+		assert.deepEqual(
+			q.file({
+				source: "sweeper",
+				work: null,
+				item: null,
+				text: "The playbook calls a removed command.",
+			}),
+			[],
+		);
+		assert.deepEqual(
+			q.send(q.investigation(1, classification, { nodes: [] })),
+			[],
+		);
+		assert.match(q.ask()[0]!.basis, /The playbook calls a removed command/);
+		const [seed] = q.answer("build");
+		assert.equal(seed?.work, "new");
+		assert.equal(seed?.event.kind, "queue_seed");
+	}
+});
+
+test("owner and sweep findings reopen a blessed pattern without withdrawing authority before revoke", () => {
+	for (const source of ["owner", "sweeper"]) {
+		const q = queue();
+		q.file({ pattern: "round-last" });
+		q.send(
+			q.investigation(1, "unapproved_pattern", { recommendation: "bless" }),
+		);
+		q.answer("bless");
+		assert.deepEqual(
+			q.file({
+				source,
+				work: null,
+				item: null,
+				pattern: "round-last",
+				text: "Rounding last leaks a cent.",
+			}),
+			[],
+		);
+		q.send(
+			q.investigation(2, "unapproved_pattern", { recommendation: "revoke" }),
+		);
+		assert.match(q.ask()[0]!.basis, /Rounding last leaks a cent/);
+		assert.equal(q.view().patternRulings[0]?.status, "blessed");
+		assert.equal(q.answer("revoke")[0]?.work, "new");
+		assert.equal(q.view().patternRulings[0]?.status, "revoked");
+	}
+});
+
+test("one sweep decision lists all long-deferred findings, and a later tick does not list them again", () => {
+	const facts = {
+		...activeWorld,
+		options: { ...activeWorld.options, sweep_minutes: 1 },
+	};
+	const q = queue(facts);
+	q.send({ kind: "sweep_configured" });
+	for (const [i, text] of [
+		"First old finding",
+		"Second old finding",
+	].entries()) {
+		q.file({ text });
+		q.send(q.investigation(i + 1));
+		q.answer("defer");
+	}
+	facts.now += 31 * 86_400_000;
+	const sweep = () =>
+		q.send({
+			kind: "effect_done",
+			key: q.effects()[0]!.key,
+			result: { findings: [] },
+		});
+	sweep();
+	assert.equal(q.ask().length, 1);
+	assert.match(q.ask()[0]!.basis, /First old finding[\s\S]*Second old finding/);
+	q.answer("defer");
+	facts.now += 31 * 86_400_000;
+	sweep();
+	assert.deepEqual(q.ask(), []);
+});
+
+test("a sweep proposal names its measured principle evidence and schedules no work until triage build", () => {
+	const q = queue({
+		...activeWorld,
+		options: { ...activeWorld.options, sweep_minutes: 1 },
+	});
+	q.send({ kind: "sweep_configured" });
+	const [scan] = q.effects();
+	const result = {
+		findings: [
+			{
+				text: "Bind project/round-once to ledger work",
+				report: "Pulled on 9 of 10 landed items",
+				pattern: null,
+				principle: true,
+			},
+		],
+	};
+	q.send({ kind: "effect_done", key: scan!.key, result });
+	assert.ok(
+		"reject" in
+			q.attempt(
+				q.investigation(1, "no_action", {
+					nodes: [],
+					recommendation: "no_action",
+				}),
+			),
+	);
+	assert.deepEqual(
+		q.send(q.investigation(1, "sets_precedent", { nodes: [] })),
+		[],
+	);
+	assert.match(q.ask()[0]!.basis, /Bind project\/round-once[\s\S]*9 of 10/);
+	assert.deepEqual(q.answer("drop"), []);
 });
 
 test("filing twice opens one investigation with the source revision, report, nodes and current plan; owner input schedules no work", () => {
