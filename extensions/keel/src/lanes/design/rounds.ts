@@ -1,6 +1,6 @@
 import { subject } from "../../kernel/ids.ts";
 import { type Ask, type KernelEvent, prose } from "../../kernel/lane.ts";
-import { type Audit, type Draft, draftError, nodes, paths } from "./draft.ts";
+import { type Audit, type Draft, draftError, nodes } from "./draft.ts";
 import { type Mandate, type Reply, repliesCover } from "./public.ts";
 
 type Fact = Extract<KernelEvent, { kind: "answered" }>;
@@ -17,22 +17,24 @@ type Answer = {
 export type Round = {
 	draft: Draft;
 	replies: Reply[];
-	labels: string[];
 	answer: Answer | null;
-	riders: { label: string; answer: Answer | null }[];
 };
 const dir = import.meta.dirname + "/../../prose";
-const review = prose(dir, "documents/review.md", [
-	"round",
-	"labels",
+const review = prose(dir, "documents/review.md", ["round", "body"]);
+const roundText = prose(dir, "documents/mandate-round.md", [
 	"reference",
 	"exists",
 	"nodes",
-	"removed",
 	"riders",
+	"considerations",
+	"removed",
 	"replies",
 ]);
-const rider = prose(dir, "documents/rider.md", ["label", "text", "origin"]);
+const riderText = prose(dir, "documents/mandate-rider.md", [
+	"text",
+	"origin",
+	"disposition",
+]);
 const draftInput = prose(dir, "inputs/design/draft.md", [
 	"reference",
 	"audit",
@@ -43,30 +45,10 @@ const revise = prose(dir, "inputs/design/revise.md", [
 	"answer",
 	"direction",
 ]);
-const designRider = prose(dir, "inputs/design/design-rider.md", [
-	"label",
-	"text",
-	"basis",
-	"answer",
-	"direction",
-]);
 const declined = prose(dir, "documents/declined.md", ["annotations"]);
 const mainKey = (n: number) => subject(`mandate/${n}`);
-const riderKey = (n: number, l: string) => subject(`rider/${n}/${l}`);
-const redesign = (r: Round) =>
-	r.riders.find((v) => v.answer?.choice === "design");
-function owed(r: Round) {
-	return r.answer?.choice === "rework"
-		? r.answer.annotations
-		: (redesign(r)?.answer?.annotations ?? []);
-}
-const source = (d: Draft, label: string) =>
-	d.references.find((r) => r.label === label)?.source;
-function sameRider(prev: Round, r: Draft["riders"][number]) {
-	return prev.draft.riders.some(
-		(p) => p.label === r.label && p.origin === r.origin && p.text === r.text,
-	);
-}
+const owed = (r: Round | undefined) =>
+	r?.answer?.choice === "rework" ? r.answer.annotations : [];
 
 export function openRound(
 	audit: Audit,
@@ -76,91 +58,22 @@ export function openRound(
 ): { reject: string } | { round: Round } {
 	const error = draftError(draft, audit);
 	if (error) return { reject: error };
-	const prev = history.at(-1);
-	const debt = prev ? owed(prev) : [];
-	if (!repliesCover(debt.length, replies))
+	if (!repliesCover(owed(history.at(-1)).length, replies))
 		return {
 			reject:
 				"Reply to every owed number exactly once: acted_on, considered or dismissed, with a reason.",
 		};
-	const ns = nodes(draft, audit);
-	const old = prev ? nodes(prev.draft, audit) : [];
-	const designed = prev && redesign(prev)?.label;
-	if (
-		designed &&
-		(!ns.some((n) => n.label === designed) || source(draft, designed))
-	)
-		return {
-			reject: `Design ${designed} as a node for the owner's review under the same label.`,
-		};
-	// A dropped rider may not return later under its old label as an ordinary node.
-	if (
-		ns.some(
-			(n) =>
-				n.label !== designed &&
-				!old.some((p) => p.label === n.label) &&
-				history.some((r) => r.riders.some((p) => p.label === n.label)),
-		)
-	)
-		return {
-			reject:
-				"Only the owner's design choice converts a rider to a proposed node.",
-		};
-	const labels = ns
-		.filter((n) => {
-			const prior = old.find((p) => p.label === n.label);
-			if (!prior)
-				return (
-					!source(draft, n.label) ||
-					history.some((r) =>
-						nodes(r.draft, audit).some((p) => p.label === n.label),
-					)
-				);
-			if (
-				prior.body !== n.body ||
-				prior.probe !== n.probe ||
-				prior.section !== n.section ||
-				source(prev!.draft, n.label) !== source(draft, n.label)
-			)
-				return true;
-			return (
-				prev!.answer?.choice !== "approve" && prev!.labels.includes(n.label)
-			);
-		})
-		.map((n) => n.label);
-	// A removal is a change too, not an invisible way to drop an obligation.
-	if (prev) labels.push(...removed(prev, draft, audit));
-	return {
-		round: {
-			draft,
-			replies,
-			labels,
-			answer: null,
-			riders: draft.riders.map((r) => ({
-				label: r.label,
-				answer:
-					prev && sameRider(prev, r)
-						? (prev.riders.find((p) => p.label === r.label)?.answer ?? null)
-						: null,
-			})),
-		},
-	};
-}
-function removed(prev: Round, d: Draft, a: Audit) {
-	const current = new Set([...nodes(d, a), ...d.riders].map((n) => n.label));
-	return [...nodes(prev.draft, a), ...prev.draft.riders]
-		.filter((n) => !current.has(n.label))
-		.map((n) => n.label);
+	return { round: { draft, replies, answer: null } };
 }
 function passage(a: Answer["annotations"][number]) {
 	return a.excerpt === null ? "" : `\n> ${a.excerpt}`;
 }
-function annotation(a: Answer["annotations"][number]) {
-	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}${passage(a)}`;
+function annotation(a: Answer["annotations"][number], status = "") {
+	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}${status}${passage(a)}`;
 }
 function repliesText(r: Round, prev: Round | undefined) {
 	return (
-		(prev ? owed(prev) : [])
+		owed(prev)
 			.map((a) => {
 				const reply = r.replies.find((v) => v.n === a.n)!;
 				return `${annotation(a)}\n   ${reply.status}: ${reply.reason}`;
@@ -168,63 +81,110 @@ function repliesText(r: Round, prev: Round | undefined) {
 			.join("\n") || "None."
 	);
 }
-function basis(a: Audit, reference: string, history: Round[]) {
+
+type Entry = {
+	label: string;
+	section: string;
+	body: string;
+	group: "nodes" | "riders" | "considerations";
+	probe?: string;
+	reference?: string;
+};
+function entries(d: Draft, a: Audit): Entry[] {
+	const result: Entry[] = [
+		...nodes(d, a, "Proposed ruling").map((n) => ({
+			...n,
+			group: "nodes" as const,
+		})),
+		...d.riders.map((r) => ({
+			label: r.label,
+			section: "Rider",
+			group: "riders" as const,
+			body: riderText(r).trim(),
+		})),
+		{
+			label: "tradeoffs",
+			section: "Tradeoffs",
+			group: "considerations",
+			body: d.tradeoffs,
+		},
+		{
+			label: "alternatives",
+			section: "Alternatives considered",
+			group: "considerations",
+			body: d.alternatives,
+		},
+	];
+	return result.map((n) => ({
+		...n,
+		reference: d.references.find((r) => r.label === n.label)?.source ?? "",
+	}));
+}
+function entryText(n: Entry, mark = "") {
+	return [
+		`### ${n.label}: ${n.section}${mark}`,
+		n.body,
+		...(n.probe
+			? [
+					`${n.label === "intent" ? "Done when" : "Falsifying probe"}: ${n.probe}`,
+				]
+			: []),
+		...(n.reference ? [`Reference: ${n.reference}`] : []),
+	].join("\n\n");
+}
+function body(a: Audit, reference: string, history: Round[]) {
 	const r = history.at(-1)!;
 	const prev = history.at(-2);
-	return review({
-		round: String(history.length),
-		labels: r.labels.join(", ") || "None.",
+	const previous = prev ? entries(prev.draft, a) : [];
+	const current = entries(r.draft, a);
+	const sections: Record<Entry["group"], string[]> = {
+		nodes: [],
+		riders: [],
+		considerations: [],
+	};
+	for (const n of current) {
+		const old = previous.find((p) => p.label === n.label);
+		const changed =
+			old &&
+			(old.group !== n.group ||
+				old.section !== n.section ||
+				old.body !== n.body ||
+				old.probe !== n.probe ||
+				old.reference !== n.reference);
+		sections[n.group].push(
+			entryText(n, !old ? " (new)" : changed ? " (changed)" : ""),
+		);
+	}
+	return roundText({
 		reference,
 		exists: a.exists,
-		nodes: nodes(r.draft, a)
-			.map(
-				(n) =>
-					`### ${n.label}: ${n.section}\n\n${n.body}${n.probe ? `\n\n${n.label === "intent" ? "Done when" : "Falsifying probe"}: ${n.probe}` : ""}${source(r.draft, n.label) ? `\n\nReference: ${source(r.draft, n.label)}` : ""}`,
-			)
-			.join("\n\n"),
-		removed: prev ? removed(prev, r.draft, a).join(", ") || "None." : "None.",
-		riders:
-			r.draft.riders
-				.map((v) => {
-					const prior =
-						prev && sameRider(prev, v)
-							? prev.riders.find((p) => p.label === v.label)?.answer?.choice
-							: null;
-					return `- ${v.label} (${v.origin}${prior ? "; " + prior : ""}): ${v.text}`;
-				})
-				.join("\n") || "None.",
+		nodes: sections.nodes.join("\n\n"),
+		riders: sections.riders.join("\n\n") || "None.",
+		considerations: sections.considerations.join("\n\n"),
+		removed:
+			previous
+				.filter((p) => !current.some((n) => n.label === p.label))
+				.map((p) => entryText(p))
+				.join("\n\n") || "None.",
 		replies: repliesText(r, prev),
 	});
 }
-export function reviewAsks(
+export function reviewAsk(
 	a: Audit,
 	reference: string,
 	history: Round[],
-): Ask[] {
+): Ask | null {
 	const r = history.at(-1)!;
-	const n = history.length;
-	const asks: Ask[] = [];
-	if (!r.answer) {
-		const text = basis(a, reference, history);
-		asks.push({
-			subject: mainKey(n),
-			title: text.split("\n", 1)[0]!,
-			basis: text,
-			choices: ["approve", "rework", "decline"],
-		});
-	}
-	for (const entry of r.riders) {
-		if (entry.answer) continue;
-		const info = r.draft.riders.find((v) => v.label === entry.label)!;
-		const text = rider(info);
-		asks.push({
-			subject: riderKey(n, entry.label),
-			title: text.split("\n", 1)[0]!,
-			basis: text,
-			choices: ["accept", "leave_open", "design"],
-		});
-	}
-	return asks;
+	if (r.answer) return null;
+	return {
+		subject: mainKey(history.length),
+		title: `Review Mandate: ${r.draft.intent.trim().split("\n", 1)[0]}`,
+		basis: review({
+			round: String(history.length),
+			body: body(a, reference, history),
+		}),
+		choices: ["approve", "rework", "decline"],
+	};
 }
 export function designerInput(
 	a: Audit,
@@ -242,19 +202,14 @@ export function designerInput(
 			].join("\n"),
 			direction,
 		});
-	const r = history.at(-1)!;
-	const facts = {
-		basis: basis(a, reference, history),
-		answer: owed(r).map(annotation).join("\n") || "None.",
+	return revise({
+		basis: body(a, reference, history),
+		answer:
+			owed(history.at(-1))
+				.map((n) => annotation(n))
+				.join("\n") || "None.",
 		direction,
-	};
-	const designed = redesign(r);
-	return designed
-		? designRider({
-				...facts,
-				...r.draft.riders.find((v) => v.label === designed.label)!,
-			})
-		: revise(facts);
+	});
 }
 export function answered(
 	a: Audit,
@@ -262,12 +217,9 @@ export function answered(
 	history: Round[],
 	f: Fact,
 ) {
-	const ask = reviewAsks(a, reference, history).find(
-		(v) => v.subject === f.subject,
-	);
-	if (!ask || !ask.choices.includes(f.choice)) return null;
-	const n = history.length,
-		r = history.at(-1)!;
+	if (f.subject !== mainKey(history.length)) return null;
+	const ask = reviewAsk(a, reference, history);
+	if (!ask?.choices.includes(f.choice)) return null;
 	const answer: Answer = {
 		decision: f.decision,
 		choice: f.choice,
@@ -278,64 +230,45 @@ export function answered(
 			excerpt: range ? ask.basis.slice(range.start, range.end) : null,
 		})),
 	};
-	const next =
-		f.subject === mainKey(n)
-			? { ...r, answer }
-			: {
-					...r,
-					riders: r.riders.map((v) =>
-						riderKey(n, v.label) === f.subject ? { ...v, answer } : v,
-					),
-				};
-	const rounds = [...history.slice(0, -1), next];
 	return {
-		rounds,
+		rounds: [...history.slice(0, -1), { ...history.at(-1)!, answer }],
 		phase:
-			next.answer?.choice === "decline"
-				? ("closed" as const)
-				: next.answer?.choice === "rework" || redesign(next)
+			f.choice === "approve"
+				? ("bound" as const)
+				: f.choice === "rework"
 					? ("drafting" as const)
-					: next.answer?.choice === "approve" &&
-							next.riders.every((v) => v.answer)
-						? ("bound" as const)
-						: ("review" as const),
+					: ("closed" as const),
 	};
 }
-export function declineText(r: Round) {
+export function declineText(history: Round[]) {
 	return declined({
 		annotations:
-			r
-				.answer!.annotations.map((a) => `${annotation(a)}: not pursued`)
-				.join("\n") || "None.",
+			history
+				.map(({ answer }, i) =>
+					(answer?.choice === "approve" || answer?.choice === "decline") &&
+					answer.annotations.length
+						? `### Round ${i + 1}\n\n${answer.annotations.map((a) => annotation(a, ": not pursued")).join("\n")}`
+						: "",
+				)
+				.filter(Boolean)
+				.join("\n\n") || "None.",
 	});
 }
 export function binding(a: Audit, history: Round[]): Mandate {
-	const r = history.at(-1)!;
-	const d = r.draft;
-	const ns = nodes(d, a).filter(
-		(n) =>
-			!["intent", "protectedPaths", ...d.checks.map((c) => c.id)].includes(
-				n.label,
-			),
-	);
-	const accepted = d.riders.filter((p) =>
-		r.riders.some((v) => p.label === v.label && v.answer?.choice === "accept"),
+	const d = history.at(-1)!.draft;
+	const ns = nodes(d, a, "Ruling").filter(
+		(n) => n.label !== "intent" && n.section !== "Proof",
 	);
 	return {
-		reviewed: true,
 		encodeRequired: d.seams.length > 0 || d.nodes.length > 0,
-		approvalNotes: history.flatMap((v) =>
-			v.answer?.choice === "approve"
-				? v.answer.annotations.map((n) => n.text + passage(n))
+		approvalNotes: history.flatMap((r) =>
+			r.answer?.choice === "approve"
+				? r.answer.annotations.map((n) => n.text + passage(n))
 				: [],
 		),
 		delegated: d.riders
-			.filter((p) =>
-				r.riders.some(
-					(v) => p.label === v.label && v.answer?.choice === "leave_open",
-				),
-			)
-			.map(({ label, text }) => ({ label, text })),
+			.filter((r) => r.disposition === "open")
+			.map(({ label, text, origin }) => ({ label, text, origin })),
 		intent: `${d.intent}\n\nDone when: ${d.done}`,
 		nodes: [
 			...ns.map(({ label, section, body, probe }) =>
@@ -343,13 +276,15 @@ export function binding(a: Audit, history: Round[]): Mandate {
 					? { label, rule: body, probe }
 					: { label, section, body },
 			),
-			...accepted.map((v) => ({
-				label: v.label,
-				section: "Accepted rider",
-				body: v.text,
-			})),
+			...d.riders
+				.filter((r) => r.disposition === "bind")
+				.map((r) => ({
+					label: r.label,
+					section: `Rider (${r.origin})`,
+					body: r.text,
+				})),
 		],
 		checks: d.checks,
-		protectedPaths: paths(d),
+		considerations: { tradeoffs: d.tradeoffs, alternatives: d.alternatives },
 	};
 }

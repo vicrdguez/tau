@@ -1,6 +1,6 @@
 import { arr, int, obj, oneOf, str } from "tau/schema";
 import { prose } from "../../kernel/lane.ts";
-import type { Mandate } from "./public.ts";
+import { type Mandate, proofText, type RiderOrigin } from "./public.ts";
 
 export const text = str({ minLength: 1 });
 const observation = obj({ label: text, text });
@@ -20,7 +20,6 @@ const common = {
 		}),
 		{ minItems: 1 },
 	),
-	protectedPaths: arr(text),
 };
 export const smallDraft = obj(common);
 export const reviewedDraft = obj({
@@ -46,6 +45,7 @@ export const reviewedDraft = obj({
 			label: text,
 			text,
 			origin: oneOf(["evidence", "incidental", "seeded"]),
+			disposition: oneOf(["bind", "open"]),
 		}),
 	),
 	references: arr(obj({ label: text, source: text })),
@@ -56,7 +56,7 @@ export type Audit = {
 	gaps: Observation[];
 	contradictions: Observation[];
 };
-export type Draft = Pick<Mandate, "intent" | "checks" | "protectedPaths"> & {
+export type Draft = Pick<Mandate, "intent" | "checks"> & {
 	nodes: { label: string; rule: string; probe: string }[];
 	done: string;
 	seams: {
@@ -72,7 +72,10 @@ export type Draft = Pick<Mandate, "intent" | "checks" | "protectedPaths"> & {
 	tradeoffs: string;
 	alternatives: string;
 	settlements: { label: string; ruling: string }[];
-	riders: (Observation & { origin: "evidence" | "incidental" | "seeded" })[];
+	riders: (Observation & {
+		origin: RiderOrigin;
+		disposition: "bind" | "open";
+	})[];
 	references: { label: string; source: string }[];
 };
 const dir = import.meta.dirname + "/../../prose/documents";
@@ -84,8 +87,11 @@ const seamText = prose(dir, "seam.md", [
 	"owner",
 	"dependencies",
 ]);
-const rulingText = prose(dir, "ground-ruling.md", ["observation", "ruling"]);
-const proofText = prose(dir, "proof-command.md", ["argv", "timeout"]);
+const rulingText = prose(dir, "ground-ruling.md", [
+	"observation",
+	"label",
+	"ruling",
+]);
 const validText = (s: string) => !!s.trim();
 const unique = (xs: string[]) => new Set(xs).size === xs.length;
 function validLabels(xs: string[]) {
@@ -103,24 +109,12 @@ export function validAudit(a: Audit) {
 		[...a.gaps, ...a.contradictions].every((n) => validText(n.text))
 	);
 }
-const reserved = [
-	"intent",
-	"protectedPaths",
-	"never",
-	"tradeoffs",
-	"alternatives",
-];
-export const paths = (d: Pick<Draft, "protectedPaths">) => [
-	...new Set([...d.protectedPaths, ".keel/**"]),
-];
-export function validSmall(
-	d: Pick<Draft, "intent" | "nodes" | "checks" | "protectedPaths">,
-) {
+const reserved = ["intent", "never", "tradeoffs", "alternatives"];
+export function validSmall(d: Pick<Draft, "intent" | "nodes" | "checks">) {
 	return (
 		validText(d.intent) &&
 		validLabels([
 			"intent",
-			"protectedPaths",
 			...d.nodes.map((n) => n.label),
 			...d.checks.map((c) => c.id),
 		]) &&
@@ -133,8 +127,7 @@ export function validSmall(
 				Number.isSafeInteger(c.timeoutMs) &&
 				c.timeoutMs > 0 &&
 				c.timeoutMs <= 2147483647,
-		) &&
-		d.protectedPaths.every((p) => validText(p) && !p.includes("\0"))
+		)
 	);
 }
 export function draftError(d: Draft, a: Audit) {
@@ -183,10 +176,11 @@ export function draftError(d: Draft, a: Audit) {
 		d.riders.some(
 			(r) =>
 				!validText(r.text) ||
-				!["evidence", "incidental", "seeded"].includes(r.origin),
+				!["evidence", "incidental", "seeded"].includes(r.origin) ||
+				!["bind", "open"].includes(r.disposition),
 		)
 	)
-		return "State each rider and its origin.";
+		return "State each rider, its origin and whether it should bind or remain open.";
 	return null;
 }
 type Node = {
@@ -195,7 +189,11 @@ type Node = {
 	body: string;
 	probe: string;
 };
-export function nodes(d: Draft, a: Audit): Node[] {
+export function nodes(
+	d: Draft,
+	a: Audit,
+	rulingLabel: "Proposed ruling" | "Ruling",
+): Node[] {
 	const node = (label: string, section: string, body: string, probe = "") => ({
 		label,
 		section,
@@ -213,6 +211,7 @@ export function nodes(d: Draft, a: Audit): Node[] {
 					observation: (
 						gap ?? a.contradictions.find((i) => i.label === s.label)!
 					).text,
+					label: rulingLabel,
 					ruling: s.ruling,
 				}).trim(),
 			);
@@ -220,18 +219,6 @@ export function nodes(d: Draft, a: Audit): Node[] {
 		...d.seams.map((s) => node(s.label, "Seam", seamText(s).trim())),
 		...d.nodes.map((n) => node(n.label, "Rule", n.rule, n.probe)),
 		node("never", "Anti-criteria", d.never),
-		...d.checks.map((c) =>
-			node(
-				c.id,
-				"Proof",
-				proofText({
-					argv: JSON.stringify(c.argv),
-					timeout: String(c.timeoutMs),
-				}).trim(),
-			),
-		),
-		node("protectedPaths", "Protected paths", paths(d).join("\n")),
-		node("tradeoffs", "Tradeoffs accepted", d.tradeoffs),
-		node("alternatives", "Alternatives considered", d.alternatives),
+		...d.checks.map((c) => node(c.id, "Proof", proofText(c))),
 	];
 }

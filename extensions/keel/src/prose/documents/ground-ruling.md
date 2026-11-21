@@ -1,3 +1,3 @@
 Observation: {{observation}}
 
-Proposed ruling: {{ruling}}
+{{label}}: {{ruling}}

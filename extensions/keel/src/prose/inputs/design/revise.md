@@ -4,8 +4,8 @@ The owner asked you to rework the Mandate. Address these annotations:
 
 {{direction}}
 
-## Previous Mandate and review basis
+## Previous Mandate
 
 {{basis}}
 
-Keep labels stable. Carry forward the riders that still apply, including those already disposed. Return the whole draft with `publish_mandate`. Reply to each numbered annotation on the rework answer: acted on, considered or dismissed, with your reason.
+Keep labels stable. Revise the riders and their dispositions alongside the other entries. Return the whole draft with `publish_mandate`. Reply to each numbered annotation on the rework answer: acted on, considered or dismissed, with your reason.

@@ -14,7 +14,6 @@ import {
 	type Audit,
 	auditSchema,
 	type Draft,
-	paths,
 	reviewedDraft,
 	smallDraft,
 	text,
@@ -29,7 +28,7 @@ import {
 	designerInput,
 	openRound,
 	type Round,
-	reviewAsks,
+	reviewAsk,
 } from "./rounds.ts";
 import { designV1 } from "./v1.ts";
 
@@ -39,7 +38,7 @@ export const designTools = [
 		roles: ["designer"],
 		name: "publish_mandate",
 		description:
-			"Publish the complete labelled Mandate and reply by number to the annotations on the preceding rework or design answer.",
+			"Publish the complete labelled Mandate and reply by number to the annotations on the preceding rework answer.",
 		parameters: obj({ draft: reviewedDraft, replies: repliesSchema }),
 		terminate: true,
 		event: (args) => ({ kind: "publish_mandate", ...args }),
@@ -147,7 +146,8 @@ const cleanupNote = prose(
 	"../../prose/documents/cancel-cleanup.md",
 	["goal", "kept", "work"],
 );
-const goal = (s: State) => s.mandate?.intent ?? s.reference;
+const goal = (s: State) =>
+	s.mandate?.intent ?? s.rounds.at(-1)?.draft.intent ?? s.reference;
 
 function draftTurn(s: State) {
 	return {
@@ -231,17 +231,16 @@ export const design: Lane<State> = {
 						if (!proposed || !validSmall(proposed) || e.readings || e.audit)
 							return {
 								reject:
-									"Give distinct rule labels and check IDs; intent and protectedPaths are reserved. Each rule needs a probe and each proof a timed command.",
+									"Give distinct rule labels and check IDs; intent is reserved. Each rule needs a probe and each proof a timed command.",
 							};
 						const mandate = {
-							reviewed: false,
 							encodeRequired: false,
+							considerations: null,
 							delegated: [],
 							approvalNotes: [],
 							intent: proposed.intent,
 							nodes: proposed.nodes,
 							checks: proposed.checks,
-							protectedPaths: paths(proposed),
 						};
 						return {
 							state: {
@@ -369,14 +368,10 @@ export const design: Lane<State> = {
 					case "closed":
 						return {
 							state: { ...next, cancelRequested: false },
-							notes: [
-								{ agent: null, text: declineText(outcome.rounds.at(-1)!) },
-							],
+							notes: [{ agent: null, text: declineText(outcome.rounds) }],
 						};
 					case "drafting":
 						return { state: { ...next, seq: s.seq + 1 } };
-					default:
-						return { state: next };
 				}
 			}
 			if (s.phase !== "ambiguous" || e.subject !== subject("ground/" + s.seq))
@@ -426,8 +421,11 @@ export const design: Lane<State> = {
 		return { state: s };
 	},
 	asks(s) {
-		const result: Ask[] =
-			s.phase === "review" ? reviewAsks(s.audit!, s.reference, s.rounds) : [];
+		const result: Ask[] = [];
+		if (s.phase === "review") {
+			const ask = reviewAsk(s.audit!, s.reference, s.rounds);
+			if (ask) result.push(ask);
+		}
 		if (s.phase === "ambiguous") {
 			const basis = ground({
 				reference: s.reference,
@@ -436,7 +434,7 @@ export const design: Lane<State> = {
 			});
 			result.push({
 				subject: subject("ground/" + s.seq),
-				title: basis.split("\n", 1)[0]!,
+				title: `Choose a reading: ${s.reference.split("\n", 1)[0]}`,
 				basis,
 				choices: ["first", "second", "decline"],
 			});
@@ -445,7 +443,7 @@ export const design: Lane<State> = {
 			const basis = confirmation({ goal: goal(s) });
 			result.push({
 				subject: subject("cancel"),
-				title: basis.split("\n", 1)[0]!,
+				title: `Cancel work "${goal(s).trim().split("\n", 1)[0]}"?`,
 				basis,
 				choices: ["cancel", "continue"],
 			});

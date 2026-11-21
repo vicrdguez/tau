@@ -5,7 +5,6 @@ type Draft = {
 	done: string;
 	nodes: { label: string; rule: string; probe: string }[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
-	protectedPaths: string[];
 	never: string;
 	tradeoffs: string;
 	alternatives: string;
@@ -23,6 +22,7 @@ type Draft = {
 		label: string;
 		text: string;
 		origin: "evidence" | "incidental" | "seeded";
+		disposition: "bind" | "open";
 	}[];
 	references: { label: string; source: string }[];
 };
@@ -57,30 +57,31 @@ export const designV1 = {
 		} | null,
 		rounds: [] as {
 			draft: Draft;
-			labels: string[];
 			replies: {
 				n: number;
 				status: "acted_on" | "considered" | "dismissed";
 				reason: string;
 			}[];
 			answer: Answer | null;
-			riders: { label: string; answer: Answer | null }[];
 		}[],
 		cancelRequested: false,
 		cleanup: null as { build: string[] | null; verify: string[] | null } | null,
 		reference: "",
 		mandate: null as null | {
-			reviewed: boolean;
 			encodeRequired: boolean;
 			approvalNotes: string[];
 			intent: string;
-			delegated: { label: string; text: string }[];
+			delegated: {
+				label: string;
+				text: string;
+				origin: "evidence" | "incidental" | "seeded";
+			}[];
 			nodes: (
 				| { label: string; rule: string; probe: string }
 				| { label: string; section: string; body: string }
 			)[];
 			checks: { id: string; argv: string[]; timeoutMs: number }[];
-			protectedPaths: string[];
+			considerations: { tradeoffs: string; alternatives: string } | null;
 		},
 		readings: [] as string[],
 		direction: "",
