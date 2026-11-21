@@ -85,13 +85,13 @@ const evidence = prose(dir, "documents/arena-evidence.md", [
 	"candidates",
 	"judge",
 ]);
-const blocked = prose(dir, "documents/arena-blocked.md", ["error", "retry"]);
+const blocked = prose(dir, "documents/arena-blocked.md", ["error", "seats"]);
 
 const modelFor = (seat: Seat, options: StaticFacts["options"]) =>
 	options[seat] ?? options.design;
 function familyError(
 	candidates: Job[],
-	judge: string,
+	judge: string | null,
 	options: StaticFacts["options"],
 ) {
 	const provider = (model: string) => model.split("/", 1)[0];
@@ -106,7 +106,7 @@ function familyError(
 				`Set ${matches.map(({ seat }) => `\`${seat}\``).join(", ")} to different providers (currently \`${family}\`).`,
 			);
 	}
-	if (provider(judge) === provider(options.designer ?? options.design))
+	if (judge && provider(judge) === provider(options.designer ?? options.design))
 		problems.push(
 			"Set `arena_judge` to a different provider from the `designer` model (which defaults to `design`).",
 		);
@@ -180,10 +180,12 @@ export function retryArena(
 		model: modelFor(job.seat, w.options),
 	}));
 	const error = familyError(
-		candidateJobs(arena).map(
-			(job) => jobs.find(({ seat }) => job.seat === seat) ?? job,
-		),
-		run.stage === "judge" ? jobs[0]!.model : arena.judge,
+		run.stage === "candidates"
+			? candidateJobs(arena).map(
+					(job) => jobs.find(({ seat }) => job.seat === seat) ?? job,
+				)
+			: [],
+		run.stage === "judge" ? jobs[0]!.model : null,
 		w.options,
 	);
 	return error ? refuse(arena, error) : dispatch(plan(arena, run.stage, jobs));
@@ -195,13 +197,11 @@ export function blockedAsk(arena: Arena, seq: number): Ask {
 		title: "Retry the arena or decline the work?",
 		basis: blocked({
 			error: arena.refusal ?? run!.outcome!.error!,
-			retry: run
-				? `Retry runs only ${failedJobs(run)
+			seats: run
+				? failedJobs(run)
 						.map(({ seat }) => `\`${seat}\``)
-						.join(
-							", ",
-						)} with the models configured now. It keeps answers from successful seats and checks model families again.`
-				: "Retry checks the currently configured seats and starts the arena if they pass.",
+						.join(", ")
+				: "all configured seats",
 		}),
 		choices: ["retry", "decline"],
 	};
@@ -244,19 +244,23 @@ function receipts(fact: EffectFact, run: Run): Receipt[] | string {
 	return results;
 }
 
-const heading = /^ {0,3}#{1,6}[ \t]+/m;
 function candidateValid(answer: string) {
-	return [
-		...answer.matchAll(
-			/^ {0,3}#{1,6}[ \t]+Unasked decisions[ \t]*(?:#+[ \t]*)?\r?\n/gim,
-		),
-	].some(
-		(match) =>
-			!!answer
-				.slice(match.index + match[0].length)
-				.split(heading, 1)[0]
-				?.trim(),
-	);
+	for (const heading of answer.matchAll(
+		/^ {0,3}(#{1,6})[ \t]+Unasked decisions[ \t]*(?:#+[ \t]*)?\r?\n/gim,
+	)) {
+		const nextSection = new RegExp(
+			`^ {0,3}#{1,${heading[1]!.length}}[ \\t]+`,
+			"m",
+		);
+		if (
+			answer
+				.slice(heading.index + heading[0].length)
+				.split(nextSection, 1)[0]
+				?.trim()
+		)
+			return true;
+	}
+	return false;
 }
 function judgeReport(answer: string) {
 	const report = judgeSchema.validate(replyJson(answer));
@@ -338,7 +342,7 @@ export function settleArena(arena: Arena, fact: EffectFact) {
 			);
 		case "judge":
 			return {
-				arena: { ...next, judge: run.jobs[0]!.model },
+				arena: next,
 				phase: "drafting" as const,
 			};
 		case "challenger":
