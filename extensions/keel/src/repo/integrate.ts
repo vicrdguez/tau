@@ -12,14 +12,12 @@ import {
 	oid,
 	success,
 } from "./git.ts";
-import { changeReport, holds } from "./protection.ts";
 import type {
 	Check,
 	CheckReport,
 	Integrate,
 	Landing,
 	ProofChanges,
-	ProtectedChange,
 	RepoInfo,
 	RepoResult,
 } from "./types.ts";
@@ -98,7 +96,6 @@ export async function integrate(
 	repo: RepoInfo,
 	op: Integrate,
 ): Promise<RepoResult> {
-	const protectedGlobs = "protectedGlobs" in op ? op.protectedGlobs : undefined;
 	const taking = op.kind === "take_trunk";
 	const into = taking ? op.build : op.into,
 		other = taking ? op.trunk : op.item;
@@ -117,7 +114,6 @@ export async function integrate(
 				sha: at,
 				trunk,
 				checks: [],
-				...(protectedGlobs ? { touched: [], protectedChanges: [] } : {}),
 			};
 		}
 	}
@@ -150,26 +146,6 @@ export async function integrate(
 		taking ? "Take trunk" : op.message,
 	);
 	if (at !== op.expected && at !== candidate) moved(at);
-	let paths: { touched?: string[]; protectedChanges?: ProtectedChange[] } = {};
-	if (protectedGlobs) {
-		const policy = "protection" in op ? op.protection : null;
-		const { changes, touched } = await changeReport(
-			g,
-			[op.expected],
-			other,
-			candidate,
-			policy?.trunk ?? null,
-			protectedGlobs,
-		);
-		if (policy && holds(changes, policy, candidate))
-			return {
-				kind: "protected",
-				sha: candidate,
-				touched,
-				protectedChanges: changes,
-			};
-		paths = { touched, protectedChanges: changes };
-	}
 	const target = {
 		kind: "checkout",
 		key: op.key,
@@ -243,7 +219,6 @@ export async function integrate(
 		kind: "checks_failed" as const,
 		sha: candidate,
 		checks: reports,
-		...paths,
 		...(changes ? { changes } : {}),
 	});
 	for (const [index, spec] of op.checks.entries()) {
@@ -263,13 +238,12 @@ export async function integrate(
 	if (!published) await advance(g, into, op.expected, candidate, op.key);
 	return taking
 		? {
-				...paths,
 				kind: "combined",
 				sha: candidate,
 				trunk: other,
 				checks: reports,
 			}
-		: { ...paths, kind: "merged", sha: candidate, checks: reports };
+		: { kind: "merged", sha: candidate, checks: reports };
 }
 
 export async function landingCommit(g: Git, plan: Landing) {

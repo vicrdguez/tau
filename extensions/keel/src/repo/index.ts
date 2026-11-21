@@ -9,9 +9,9 @@ import {
 	occupied,
 	oid,
 	report,
+	success,
 } from "./git.ts";
 import { integrate, landingCommit } from "./integrate.ts";
-import { changeReport } from "./protection.ts";
 import type {
 	PublishResult,
 	RepoInfo,
@@ -31,10 +31,10 @@ import {
 	ownedBranch,
 	remove,
 	workerSpec,
+	zlist,
 } from "./worktrees.ts";
 
 export { type Exec, layout, nodeExec } from "./git.ts";
-export { isPolicyPath, protectedViolations } from "./protection.ts";
 export type * from "./types.ts";
 
 function roles(base: string, trunk: string) {
@@ -150,14 +150,41 @@ export function converge(
 	});
 }
 
-/** Only Build may supply the sanctioned correction trunk; never infer a waiver
- * of inherited changes from a live ref or a model-supplied commit. */
+/** Keep the verifier's comparison pinned even if the build moves again. In a
+ * criss-cross history neither best base alone contains all inherited work. */
+async function comparisonBase(g: Git, build: Sha, item: Sha): Promise<Sha> {
+	const bases = (await g.output("merge-base", "--all", build, item))
+		.trimEnd()
+		.split("\n")
+		.sort()
+		.map((b) => oid(b) as Sha);
+	let base = bases[0]!;
+	for (const other of bases.slice(1)) {
+		const merge = await g.run(
+			"merge-tree",
+			"--write-tree",
+			"--name-only",
+			"--no-messages",
+			"-z",
+			base,
+			other,
+		);
+		// Even a conflicted comparison tree is only a diff aid, never merged.
+		if (merge.code !== 1) success(merge);
+		base = await g.commit(
+			zlist(merge.stdout)[0]!,
+			[base, other],
+			"comparison",
+			"Inherited inputs",
+		);
+	}
+	return base;
+}
+
 export function readPublishable(
 	exec: Exec,
 	repo: RepoInfo,
 	worker: Worker,
-	protectedGlobs?: readonly string[],
-	inheritedTrunk: Sha | null = null,
 ): Promise<PublishResult> {
 	return report(async (): Promise<PublishResult> => {
 		workerSpec(repo, worker);
@@ -172,21 +199,27 @@ export function readPublishable(
 		const build = await g.head(worker.from);
 		if (build === null) moved(null);
 		await ownedBranch(g, worker.from);
-		const bases = (await g.output("merge-base", "--all", build, owned.head))
-			.trimEnd()
-			.split("\n")
-			.sort()
-			.map((b) => oid(b) as Sha);
-		const paths = await changeReport(
-			g,
-			bases,
-			owned.head,
-			owned.head,
-			inheritedTrunk,
-			protectedGlobs,
-		);
+		const sha = owned.head;
+		const base = await comparisonBase(g, build, sha);
+		// Treat renames as deletes and adds so both in-scope names are listed.
+		const changedPolicyFiles = zlist(
+			await g.output(
+				"diff",
+				"--no-ext-diff",
+				"--no-textconv",
+				"--no-renames",
+				"--ignore-submodules=none",
+				"--name-only",
+				"-z",
+				base,
+				sha,
+				"--",
+				":(top,glob).keel/principles/**",
+				":(top,glob).keel/playbooks/**",
+			),
+		).sort();
 		const at = await g.head(worker.branch);
-		if (at !== owned.head) moved(at);
-		return { kind: "ok", sha: owned.head, trunk: inheritedTrunk, ...paths };
+		if (at !== sha) moved(at);
+		return { kind: "ok", sha, base, changedPolicyFiles };
 	});
 }
