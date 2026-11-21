@@ -4,8 +4,8 @@ import { slotKey, type WorkId, workId } from "./ids.ts";
 import type {
 	Delivery,
 	FactDelivery,
-	Lane,
 	KernelEvent,
+	Lane,
 	LaneEvent,
 	Message,
 	Note,

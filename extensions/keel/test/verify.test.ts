@@ -345,9 +345,10 @@ test("diagnosed rework waits for the last queue hold regardless of answer order"
 		},
 		"diagnoser",
 	);
-	const local = diagnosis.send?.find((m) => m.lane === "queue")!.event;
+	const local = diagnosis.send?.find((m) => m.lane === "queue")?.event;
+	assert.ok(local);
 	x.apply(findingHold("boundary"));
-	assert.deepEqual(x.apply(resume(local!)).send, []);
+	assert.deepEqual(x.apply(resume(local)).send, []);
 	const result = x.apply({ kind: "queue_release", cause: "boundary" });
 	const update = result.send?.find((m) => m.lane === "build")?.event;
 	assert.equal(update?.kind, "rework");
