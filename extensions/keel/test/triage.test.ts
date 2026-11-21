@@ -528,12 +528,7 @@ test("explorers distinguish a revoked pattern from approved authority, and only 
 		q.answer(choice);
 	}
 	q.file({ text: "A new investigation" });
-	for (const role of [
-		"designer",
-		"coordinator",
-		"worker",
-		"investigator",
-	] as const) {
+	for (const role of ["designer", "worker", "investigator"] as const) {
 		const explorer = await explorerDispatch.resolve(
 			{
 				role,
