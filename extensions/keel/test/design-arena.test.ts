@@ -110,8 +110,8 @@ const publish = {
 		},
 	],
 	outcomes: [
-		{ source: "arena_seat_1", n: 1, kind: "rider", label: "R1" },
-		{ source: "arena_seat_2", n: 1, kind: "node", label: "L1" },
+		{ source: "arena_seat_1", n: 1, label: "R1" },
+		{ source: "arena_seat_2", n: 1, label: "L1" },
 	],
 	replies: [],
 };
@@ -293,6 +293,7 @@ test("a timed-out child or a candidate that omits its unasked decisions cannot s
 	for (const answer of [
 		null,
 		candidate(seats[1]!).split("\n\n## Unasked Decisions")[0]!,
+		"## Unasked Decisions\n\n  \t\n\n## Other evidence\nText under another heading.",
 	]) {
 		const s = candidateTurn();
 		const { key, jobs } = pending(s);
@@ -344,6 +345,11 @@ test("retry checks the failed seat's current provider against the actual success
 	});
 	assert.deepEqual(design.effects(conflict, world), []);
 	assert.match(ask(conflict).basis, /provider.*family|family.*provider/i);
+	assert.match(
+		ask(conflict).basis,
+		/Set `arena_seat_2` to a different provider from `alpha`/,
+	);
+	assert.doesNotMatch(ask(conflict).basis, /arena_seat_1|unrelated/);
 	const revised = retry(conflict, {
 		...world,
 		options: { ...world.options, arena_seat_2: "gamma/fixed" },
@@ -370,7 +376,11 @@ test("judge and challenger retries use current models without invalidating seats
 		).state;
 	const failedJudge = complete(judgeTurn(), { arena_judge: null });
 	const badJudge = retry(failedJudge, { arena_judge: "design/judge" });
-	assert.match(ask(badJudge).basis, /different provider from the `designer`/);
+	assert.match(
+		ask(badJudge).basis,
+		/Set `arena_judge` to a different provider from `design`/,
+	);
+	assert.doesNotMatch(ask(badJudge).basis, /`designer`|arena_seat_/);
 	const retriedJudge = retry(badJudge, { arena_judge: "review/corrected" });
 	assert.deepEqual(
 		pending(retriedJudge).jobs.map(({ seat, model }) => [seat, model]),
@@ -413,18 +423,51 @@ test("candidate headings are flexible and the judge can return fenced JSON with 
 	}
 });
 
-test("base and graft decisions must each name one real outcome; no omissions, duplicates or nonexistent targets", () => {
+test("the judge reads the first fenced block or first object, with surrounding prose", () => {
+	const decorated = judge.replace(
+		"Judge's score for arena_seat_1",
+		'Measured {one} and } inside a quote: \\"ok\\".',
+	);
+	for (const response of [
+		`Here is my report:\n\n\`\`\`json\n${decorated}\n\`\`\`\n\nNothing else.\n\`\`\`json\n{}\n\`\`\``,
+		`Here is my report: ${decorated} End of report. {}`,
+	]) {
+		const turn = complete(judgeTurn(), { arena_judge: response });
+		assert.match(input(turn), /Measured \{one\}/);
+	}
+	for (const response of [
+		`\`\`\`json\n{}\n\`\`\`\n\`\`\`json\n${judge}\n\`\`\``,
+		`First {} then ${judge}`,
+	]) {
+		const turn = complete(judgeTurn(), { arena_judge: response });
+		assert.match(ask(turn).basis, /Name a candidate as base/);
+	}
+});
+
+test("base and graft decisions accept a label or a reason alone and refuse missing, duplicate, ambiguous or unknown outcomes", () => {
 	const s = synthesisTurn();
+	const reason = {
+		source: seats[0]!,
+		n: 1,
+		reason: "The default is outside the rubric.",
+	};
+	for (const outcome of [publish.outcomes[0]!, reason])
+		assert.equal(
+			challengeTurn(s, {
+				...publish,
+				outcomes: [outcome, publish.outcomes[1]!],
+			}).phase,
+			"dispatching",
+		);
 	for (const outcomes of [
 		[],
 		[publish.outcomes[0]!],
 		[publish.outcomes[1]!],
 		[...publish.outcomes, publish.outcomes[0]!],
 		[{ ...publish.outcomes[0]!, label: "missing" }, publish.outcomes[1]!],
-		[
-			{ source: seats[0]!, n: 1, kind: "not_taken", reason: " " },
-			publish.outcomes[1]!,
-		],
+		[{ source: seats[0]!, n: 1, reason: " " }, publish.outcomes[1]!],
+		[{ source: seats[0]!, n: 1 }, publish.outcomes[1]!],
+		[{ ...reason, label: "R1" }, publish.outcomes[1]!],
 	]) {
 		const result = design.reduce(s, { ...publish, outcomes }, world);
 		assert.ok("reject" in result, JSON.stringify(outcomes));
@@ -477,7 +520,6 @@ test("a winning prototype uses the same outcomes as candidates and cannot disapp
 			{
 				source: "experiment-1",
 				n: 1,
-				kind: "not_taken",
 				reason: "Cache names are not part of the interface.",
 			},
 		],
@@ -684,10 +726,7 @@ test("review shows each source's own unasked decisions beside the judge's list, 
 test("review pairs each labelled outcome with node text or rider text and disposition", () => {
 	const mapped = {
 		...publish,
-		outcomes: [
-			{ source: seats[0]!, n: 1, kind: "rider", label: "R2" },
-			publish.outcomes[1]!,
-		],
+		outcomes: [{ source: seats[0]!, n: 1, label: "R2" }, publish.outcomes[1]!],
 	};
 	const review = step(
 		answeringTurn(challengeTurn(synthesisTurn(), mapped)),
@@ -810,7 +849,6 @@ test("rework retains the first challenge and round, and replies by annotation nu
 			{
 				source: seats[0]!,
 				n: 1,
-				kind: "not_taken",
 				reason: "Dropped per owner direction.",
 			},
 			publish.outcomes[1]!,

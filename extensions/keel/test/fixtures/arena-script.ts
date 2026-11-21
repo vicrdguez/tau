@@ -28,7 +28,6 @@ export const grafts = [
 export const candidateOutcome = (seat: string) => ({
 	source: seat,
 	n: 1,
-	kind: "not_taken",
 	reason: "The interface does not establish a naming default.",
 });
 export const objection = "Will the next implementation copy an unsafe default?";

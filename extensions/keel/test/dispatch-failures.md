@@ -34,6 +34,10 @@ The installed-API probe was committed before the dispatcher (`00e32e8`). The sam
 - A candidate's own unasked decisions, including a judge omission, appear beside the judge's list for each candidate source.
 - A labelled outcome shows the node's actual text or the rider's actual text and disposition.
 - A judge's Markdown reason is quoted under its score and cannot introduce a review heading.
+- Judge and prototype replies accept prose around the first fenced block or object; a later valid object cannot replace an invalid first one.
+- A blank Unasked Decisions section cannot borrow text from the next heading.
+- Retry refuses a provider collision but names only the options for seats that will run again.
+- An outcome accepts just a label or just a reason, and refuses both or neither.
 - The unasked-decisions heading names all source types; Ground context and design considerations are outside the Mandate.
 - Declining a completed arena in Tau leaves six settled child conversations, no tasks, no decision and no build.
 

@@ -106,10 +106,9 @@ test("protocol-first prototypes use separate scratch directories and put the com
 				{
 					source: seats[0],
 					n: 1,
-					kind: "not_taken",
 					reason: "The representation does not prescribe names.",
 				},
-				{ source: "experiment-1", n: 1, kind: "rider", label: "plain-naming" },
+				{ source: "experiment-1", n: 1, label: "plain-naming" },
 			],
 			replies: [],
 			draft: {

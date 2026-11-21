@@ -265,13 +265,11 @@ export async function openReview(
 			{
 				source: seats[0],
 				n: 1,
-				kind: "not_taken",
 				reason: "Only the public shell entry points are named by the Mandate.",
 			},
 			{
 				source: seats[1],
 				n: 1,
-				kind: "not_taken",
 				reason: "The graft takes the proof boundary, not this naming default.",
 			},
 		],
@@ -395,9 +393,7 @@ export async function openReview(
 				draft,
 				base: seats[1],
 				grafts: [],
-				outcomes: [
-					{ source: seats[1], n: 1, kind: "rider", label: "indentation" },
-				],
+				outcomes: [{ source: seats[1], n: 1, label: "indentation" }],
 				replies: [
 					{
 						n: 1,

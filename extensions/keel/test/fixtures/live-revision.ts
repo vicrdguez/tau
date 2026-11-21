@@ -202,7 +202,6 @@ export async function openLiveRevision(
 					{
 						source: seats[0],
 						n: 1,
-						kind: "not_taken",
 						reason: "The design has no naming default.",
 					},
 				],

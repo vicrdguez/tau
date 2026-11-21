@@ -213,12 +213,15 @@ test("records the protocol, both receipts and the decision under the named node"
 	assert.ok("reject" in recordExperiment(experiment, comparison));
 });
 
-test("accepts prototype reports in JSON fences and preserves the winner's unasked decisions", () => {
+test("accepts prototype reports as fenced JSON or objects surrounded by prose and preserves the winner's unasked decisions", () => {
 	const result = recordExperiment(
 		settled(
-			receipts.map((receipt) => ({
+			receipts.map((receipt, i) => ({
 				...receipt,
-				answer: `\`\`\`json\n${receipt.answer}\n\`\`\``,
+				answer:
+					i === 0
+						? `Measurements follow.\n\`\`\`json\n${receipt.answer}\n\`\`\`\nEnd of report.`
+						: `Measurement report: ${receipt.answer} End of report.`,
 			})),
 		),
 		comparison,
