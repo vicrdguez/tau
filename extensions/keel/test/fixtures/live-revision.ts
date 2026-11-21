@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import type { Harness, JsonObject, Storage } from "tau/durable";
-import { type FauxResponseStep, fauxAnswer } from "tau/testing";
+import {
+	type FauxResponseStep,
+	fauxAnswer,
+	fauxAssistantMessage,
+} from "tau/testing";
 import { ProjectState, WorkState } from "../../src/kernel/records.ts";
 import { stateDoc } from "../../src/kernel/state.ts";
 import { design } from "../../src/lanes/design/index.ts";
@@ -10,6 +14,12 @@ import { options } from "../../src/roles/index.ts";
 import { runRepoEffect } from "../../src/workflow.ts";
 import { git } from "../repo/fixture.ts";
 import { latch } from "../toy.ts";
+import {
+	arenaFrame,
+	candidateResponse,
+	judgeReport,
+	seats,
+} from "./arena-script.ts";
 import { openScriptedWorkflow } from "./scenario.ts";
 
 const intent = "Write a book export and an independent statistics file";
@@ -166,6 +176,9 @@ export async function openLiveRevision(
 		});
 	const permitStats = () => statsGate.resolve();
 	async function openTriage() {
+		s.secondCandidate.setResponses([candidateResponse(seats[1])]);
+		s.judge.setResponses([fauxAssistantMessage(judgeReport)]);
+		s.challenger.setResponses([fauxAssistantMessage('{"objections":[]}')]);
 		s.provider.setResponses([
 			s.turn("designer", "ground", {
 				route: "precedent",
@@ -176,7 +189,11 @@ export async function openLiveRevision(
 					contradictions: [],
 				},
 			}),
+			s.turn("designer", "frame_arena", arenaFrame),
+			candidateResponse(seats[0]),
 			s.turn("designer", "publish_mandate", {
+				base: seats[0],
+				grafts: [],
 				draft: {
 					intent,
 					done: "Book and statistics are exported.",
@@ -198,6 +215,7 @@ export async function openLiveRevision(
 				},
 				replies: [],
 			}),
+			s.turn("designer", "answer_challenger", { dispositions: [] }),
 		]);
 		await s.root.submit({ type: "input", content: intent }, ctx);
 		await s.settle();

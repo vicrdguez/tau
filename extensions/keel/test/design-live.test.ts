@@ -3,6 +3,13 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
+import {
+	challengeReview,
+	crossFamilyOptions,
+	frameReview,
+	reviewChoices,
+	synthesis,
+} from "./fixtures/design-review.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const work = 12 as WorkId;
@@ -13,6 +20,7 @@ const world: World = {
 	view: () => null,
 	options: {
 		design: "a/a",
+		...crossFamilyOptions,
 		build: "b/b",
 		verify: "v/v",
 		queue: "q/q",
@@ -104,6 +112,12 @@ function run(facts = world) {
 		state = result.state;
 		return result;
 	};
+	const driver = { act, state: () => state };
+	const publishMandate = (event: LaneEvent) => {
+		if (state.phase === "framing") frameReview(driver, facts);
+		act({ ...synthesis, ...event });
+		challengeReview(driver, facts);
+	};
 	const asks = () => design.asks(state, world);
 	const answer = (
 		subject: string,
@@ -123,6 +137,7 @@ function run(facts = world) {
 	return {
 		send,
 		act,
+		publishMandate,
 		asks,
 		answer,
 		turn,
@@ -187,8 +202,8 @@ test("a queue precedent seed survives a stopped Ground and enters audited Mandat
 	x.act({ kind: "ground", route: "precedent", reference, audit });
 	assert.match(x.input(), /shell writer/);
 	assert.ok(x.input().includes(seed.text));
-	x.act({ kind: "publish_mandate", draft, replies: [] });
-	assert.deepEqual(x.asks()[0]?.choices, ["approve", "rework", "decline"]);
+	x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
+	assert.deepEqual(x.asks()[0]?.choices, reviewChoices);
 	assert.equal(x.mandate(), null);
 });
 
@@ -265,7 +280,7 @@ test("a revision refuses empty, unchanged, malformed, duplicated, or unclassifie
 test("a seam revision needs the usage-first contract and preserves proof, riders, and reference context", () => {
 	const x = run();
 	x.act({ kind: "ground", route: "precedent", reference, audit });
-	x.act({ kind: "publish_mandate", draft, replies: [] });
+	x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
 	x.answer(x.asks()[0]!.subject, "approve");
 	const old = x.mandate();
 	x.act({ ...request, nodes: ["S1"] });
@@ -399,11 +414,11 @@ test("cancel names the current rework annotation as not pursued, and omits a rep
 	const x = run();
 	x.act({ kind: "ground", route: "precedent", reference, audit });
 	const first = { kind: "publish_mandate", draft, replies: [] };
-	x.act(first);
+	x.publishMandate(first);
 	x.answer(x.asks()[0]!.subject, "rework", [
 		{ ...note, text: "Already answered in round 2." },
 	]);
-	x.act({ ...first, replies: [reply] });
+	x.publishMandate({ ...first, replies: [reply] });
 	x.answer(x.asks()[0]!.subject, "rework", [note]);
 	const cancellation = x.act({ kind: "cancel" });
 	assert.match(
@@ -421,7 +436,7 @@ test("cancel names approval notes as not pursued only before their plan is writt
 			view: () => ({ plan: hasPlan ? [{ id: "report" }] : [] }),
 		});
 		x.act({ kind: "ground", route: "precedent", reference, audit });
-		x.act({ kind: "publish_mandate", draft, replies: [] });
+		x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
 		x.answer(x.asks()[0]!.subject, "approve", [note]);
 		const text =
 			x

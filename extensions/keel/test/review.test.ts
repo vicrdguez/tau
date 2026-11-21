@@ -4,6 +4,13 @@ import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
 import * as mandate from "../src/lanes/design/public.ts";
+import {
+	challengeReview,
+	crossFamilyOptions,
+	frameReview,
+	reviewChoices,
+	synthesis,
+} from "./fixtures/design-review.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const world: World = {
@@ -13,6 +20,7 @@ const world: World = {
 	view: () => null,
 	options: {
 		design: "x/x",
+		...crossFamilyOptions,
 		build: "x/x",
 		verify: "x/x",
 		queue: "x/x",
@@ -95,15 +103,25 @@ const reply = (n: number) => ({
 });
 function run() {
 	let state = design.state.initial();
-	const reduce = (event: LaneEvent) => drive(design, state, event, world);
+	const reduce = (event: LaneEvent) =>
+		drive(
+			design,
+			state,
+			event.kind === "publish_mandate" ? { ...synthesis, ...event } : event,
+			world,
+		);
 	const act = (event: LaneEvent) => {
 		const result = reduce(event);
 		assert.ok("state" in result, JSON.stringify(result));
 		state = result.state;
 		return result;
 	};
-	const publish = (d = draft, replies: ReturnType<typeof reply>[] = []) =>
+	const driver = { act, state: () => state };
+	const frame = () => frameReview(driver, world);
+	const publish = (d = draft, replies: ReturnType<typeof reply>[] = []) => {
 		act({ kind: "publish_mandate", draft: d, replies });
+		challengeReview(driver, world);
+	};
 	const answer = (
 		subject: string,
 		choice: string,
@@ -119,11 +137,12 @@ function run() {
 	const asks = () => design.asks(state, world);
 	const input = () =>
 		design.agents(state, world)[0]?.expects[0]?.input?.() ?? "";
-	return { state: () => state, reduce, act, publish, answer, asks, input };
+	return { ...driver, reduce, frame, publish, answer, asks, input };
 }
 function review() {
 	const x = run();
 	x.act(start);
+	x.frame();
 	x.publish();
 	return x;
 }
@@ -152,6 +171,7 @@ test("Ground requires an audit and unique observations before opening the design
 test("a draft needs every Ground ruling, unique labels, callers, fenced code, probes, proof, alternatives and rider dispositions", () => {
 	const x = run();
 	x.act(start);
+	x.frame();
 	for (const patch of [
 		{ settlements: draft.settlements.slice(1) },
 		{ seams: [{ ...seam, callersLater: " " }] },
@@ -181,7 +201,7 @@ test("one annotatable Mandate names the goal and reviews all nodes and rider dis
 	assert.equal(x.asks().length, 1);
 	const [main] = x.asks();
 	assert.ok(main!.title.includes(draft.intent));
-	assert.deepEqual(main!.choices, ["approve", "rework", "decline"]);
+	assert.deepEqual(main!.choices, reviewChoices);
 	const basis = main!.basis;
 	assert.match(basis, /approv\w*[^\n]*nodes[^\n]*even[^\n]*reference/i);
 	assert.match(basis, /^### P1: Proof$/im);
@@ -289,6 +309,7 @@ test("binding an incidental rider does not manufacture an Encode obligation with
 		...start,
 		audit: { exists: "Reports use plain text.", gaps: [], contradictions: [] },
 	});
+	x.frame();
 	x.publish({
 		...draft,
 		seams: [],
