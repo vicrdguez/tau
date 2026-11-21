@@ -265,6 +265,22 @@ test("a member joining an answered batch takes its disposition without another a
 	);
 });
 
+test("a duplicate of a revision already requested joins it without releasing the blocked filer", () => {
+	const q = queue();
+	q.file();
+	q.send(q.investigation(1, "mandate_wrong"));
+	q.answer("build");
+	q.file({ text: "Also blocks this item", blocking: true });
+	const messages = q.send(q.investigation(2, "duplicate", { duplicateOf: 1 }));
+	assert.deepEqual(
+		messages.map((m) => m.event.kind),
+		["revise_mandate"],
+	);
+	assert.deepEqual(messages[0]?.event.causes, ["queue/2"]);
+	assert.match(String(messages[0]?.event.text), /Also blocks this item/);
+	assert.deepEqual(q.ask(), []);
+});
+
 test("a new duplicate reopens a deferred finding as a new decision with both reports", () => {
 	const q = queue();
 	q.file();
@@ -596,6 +612,18 @@ test("cancelling a work closes only its wrong-Mandate decisions and makes old an
 		remaining.some((basis) => basis.includes("Another work's Mandate")),
 	);
 	assert.match(JSON.stringify(q.state()), /cancelled/);
+});
+
+test("cancelling work closes its pending revision findings rather than leaving them open", () => {
+	const q = queue();
+	q.file({ text: "Needs an active revision" });
+	q.send(q.investigation(1, "mandate_wrong"));
+	q.answer("build");
+	q.send({ kind: "cancel_work", work: 4 });
+	assert.match(
+		q.view().findingsFor(4),
+		/Needs an active revision \(cancelled\)/,
+	);
 });
 
 test("a deferred Mandate finding releases its causes just as a dropped one does", () => {
