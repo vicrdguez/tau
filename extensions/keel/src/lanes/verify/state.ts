@@ -103,6 +103,7 @@ export type State = {
 	slot: "none" | "waiting" | "held";
 	plan: Landing | null;
 	target: Sha | null;
+	landingUnconfirmed: boolean;
 	handover: {
 		sha: Sha;
 		unchanged: boolean;
@@ -141,6 +142,7 @@ export const VerifyDoc = defineState<State>({
 		slot: "none",
 		plan: null,
 		target: null,
+		landingUnconfirmed: false,
 		handover: null,
 	}),
 });

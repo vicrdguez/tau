@@ -144,6 +144,7 @@ type V1 = {
 	slot: "none" | "waiting" | "held";
 	plan: PlanV1 | null;
 	target: Sha | null;
+	landingUnconfirmed: boolean;
 	handover: {
 		sha: Sha;
 		unchanged: boolean;
@@ -171,6 +172,7 @@ export const verifyFixture = {
 		slot: "none",
 		plan: null,
 		target: null,
+		landingUnconfirmed: false,
 		handover: null,
 	}),
 };

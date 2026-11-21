@@ -176,6 +176,7 @@ function transition(prev: State, world: World) {
 	function landed(sha: Sha, unchanged: boolean) {
 		release();
 		s.handover = { sha, unchanged, status: "asking", missing: [] };
+		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
 			`${s.cancelled ? "Cancelled work: " : ""}${unchanged ? "trunk unchanged at" : "landed on trunk at"} ${sha}`,
 		);
@@ -197,6 +198,10 @@ function transition(prev: State, world: World) {
 				continue;
 			}
 			if (world.runningEffect?.(effectKey(j.key))) continue;
+			if (j.op.kind === "land" && s.landingUnconfirmed) {
+				if (s.holds.some((h) => h.job === j.key)) j.key = key("land-settle");
+				continue;
+			}
 			discard(j);
 			clearIntegration(j);
 		}
@@ -264,6 +269,7 @@ function transition(prev: State, world: World) {
 				: null;
 		const op = j.op,
 			c = find(j.item)!;
+		if (op.kind === "land") s.landingUnconfirmed = !r;
 		if (s.cancelled) {
 			discard(j);
 			if (op.kind === "land") {
@@ -271,9 +277,14 @@ function transition(prev: State, world: World) {
 					landed(r.sha, r.kind === "unchanged");
 				else {
 					release();
-					note(
-						`Cancelled work: landing result ${JSON.stringify(r ?? e)}. No rollback was attempted.`,
-					);
+					if (r?.kind === "moved")
+						note(
+							`Cancelled work: trunk is at ${r.actual ?? "no commit"}. No rollback was attempted.`,
+						);
+					else
+						note(
+							`Cancelled work: could not confirm trunk for landing ${op.target}. ${JSON.stringify(r ?? e)}. No rollback was attempted.`,
+						);
 				}
 			} else if (op.kind === "checkout") retire(c);
 			else if (op.kind === "remove" && r?.kind !== "removed")
