@@ -475,7 +475,7 @@ test("seeded and fresh arenas keep the old candidates, judge, challenger and rou
 	}
 });
 
-test("rework retains the first challenge and round, and replies by annotation number without starting a new challenge",  () => {
+test("rework retains the first challenge and round, and replies by annotation number without starting a new challenge", () => {
 	const first = firstReview();
 	const revised = owner(first, "rework", [
 		{ n: 1, text: "Drop the incidental default." },

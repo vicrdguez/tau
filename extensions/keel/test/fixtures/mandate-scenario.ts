@@ -411,7 +411,11 @@ export async function openReview(
 			"only the new Mandate round is open",
 		);
 		expectAll((await review("mandate/3")).text, [redesigned, objection]);
-		assert.equal(challenger.state.callCount, 1, "challenge runs once for this arena");
+		assert.equal(
+			challenger.state.callCount,
+			1,
+			"challenge runs once for this arena",
+		);
 		assert.equal(
 			git(cwd, "for-each-ref", "refs/heads/keel/"),
 			"",
