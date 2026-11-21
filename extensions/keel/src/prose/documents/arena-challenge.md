@@ -1,5 +1,5 @@
 ## Challenger's report
 
-Model: {{model}}.
+Model: {{model}}. Challenged round {{round}} (base {{base}}).
 
 {{dispositions}}

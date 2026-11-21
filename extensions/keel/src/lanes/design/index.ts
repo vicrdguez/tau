@@ -122,7 +122,7 @@ export const designTools = [
 		roles: ["designer"],
 		name: "publish_mandate",
 		description:
-			"Submit the complete synthesis for challenge: a labelled Mandate, its base and graft sources, and numbered replies to the owner's annotations.",
+			"Submit the complete synthesis: a labelled Mandate, its base and graft sources, and numbered replies to the owner's annotations.",
 		parameters: obj({
 			draft: reviewedDraft,
 			base: text,
@@ -299,6 +299,8 @@ const answerInput = prose(dir, "inputs/design/answer-challenger.md", [
 ]);
 const challengeText = prose(dir, "documents/arena-challenge.md", [
 	"model",
+	"round",
+	"base",
 	"dispositions",
 ]);
 const goal = (s: State) =>
@@ -430,9 +432,33 @@ function attachExperiments(s: State, proposal: Synthesis): string | null {
 	return null;
 }
 
+function openReview(
+	s: State,
+	proposal: Synthesis,
+	challenge: number,
+	dispositions: Reply[],
+): State {
+	return {
+		...s,
+		proposal: null,
+		phase: "review",
+		direction: "",
+		rounds: [
+			...s.rounds,
+			{
+				...proposal,
+				arena: s.arenas.length,
+				challenge,
+				dispositions,
+				answer: null,
+			},
+		],
+	};
+}
 function mandateAsk(s: State, number = s.rounds.length): Ask {
 	const rounds = s.rounds.slice(0, number);
 	const round = rounds.at(-1)!;
+	const challenged = rounds.findIndex((r) => r.arena === round.arena);
 	const arena = s.arenas[round.arena - 1]!;
 	const objections = challengeObjections(arena, round.challenge);
 	const dispositions =
@@ -447,6 +473,8 @@ function mandateAsk(s: State, number = s.rounds.length): Ask {
 		arenaEvidence(arena, round.arena),
 		challengeText({
 			model: arena.runs[round.challenge - 1]!.jobs[0]!.model,
+			round: String(challenged + 1),
+			base: rounds[challenged]!.base,
 			dispositions,
 		}),
 	].join("\n\n");
@@ -839,6 +867,16 @@ export const design: Lane<State> = {
 					attachExperiments(s, proposal) ??
 					synthesisError(s.audit, s.rounds, proposal);
 				if (error) return { reject: error };
+				const previous = s.rounds.at(-1);
+				if (previous?.arena === s.arenas.length)
+					return {
+						state: openReview(
+							s,
+							proposal,
+							previous.challenge,
+							previous.dispositions,
+						),
+					};
 				const synthesis =
 					synthesisSources(proposal.base, proposal.grafts) +
 					"\n\n" +
@@ -867,22 +905,7 @@ export const design: Lane<State> = {
 						reject:
 							"Give one disposition and a reason for each numbered objection.",
 					};
-				const round = {
-					...s.proposal!,
-					arena: s.arenas.length,
-					challenge,
-					dispositions,
-					answer: null,
-				};
-				return {
-					state: {
-						...s,
-						proposal: null,
-						rounds: [...s.rounds, round],
-						phase: "review",
-						direction: "",
-					},
-				};
+				return { state: openReview(s, s.proposal!, challenge, dispositions) };
 			}
 			case "ground": {
 				if (!["entry", "seeded", "directed", "resumed"].includes(s.phase))

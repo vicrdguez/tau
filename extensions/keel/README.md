@@ -1,25 +1,38 @@
 # Keel development workflow
 
-Start a Keel conversation in a Git project and describe a change. For a bug, performance issue or other change fully determined by an approved reference, the designer binds a small Mandate under the authority of the prompt. There is **no Mandate approval step** on this path. The reference, intent, labelled rules and probes, and timed proof commands are the starting record. If no approved reference settles a direction, seam, crossing, domain rule or first of its kind, the designer audits the code and documents against your intent. You settle the proposed Mandate before the build begins.
+Start a Keel conversation in a Git project and describe a change. For a bug, performance issue or other change fully determined by an approved reference, the designer binds a small Mandate under the authority of the prompt. There is **no Mandate approval step** on this path. The reference, intent, labelled rules and probes, and timed proof commands are the starting record. If no approved reference settles a direction, seam, crossing, domain rule or first of its kind, the designer audits the code and documents against your intent. Keel runs an arena before asking you to settle the proposed Mandate.
 
 ## Roles and tools
 
 | Who | What they do | Keel tools |
 | --- | --- | --- |
-| Designer (the entry conversation) | Reads the project and classifies the request. Records two readings if they lead to different results. Remains the owner's desk. | `ground`, `publish_mandate`, `request_cancel` (standing) |
-| Coordinator (one per work) | Plans goals and dependencies, briefs ready items against named Mandate nodes, and hands the merged build to Verify. It has `read` and does not implement. | `publish_plan`, `brief_item`, `handoff_build` |
-| Worker (one checkout per attempt) | Implements the brief inside its fences. Records rulings with their reference and cost if wrong. Publishes a clean committed build and names the block threads it addressed. Keel reads the commit from Git. | `record_ruling` (standing), `publish_build` |
+| Designer (the entry conversation) | Classifies the request, frames the arena and writes the synthesis. Records two readings if they lead to different results. Remains the owner's desk. | `dispatch`, `ground`, `frame_arena`, `start_experiment`, `record_experiment`, `publish_mandate`, `answer_challenger`, `request_cancel` (standing) |
+| Coordinator (one per work) | Plans goals and dependencies, briefs ready items against named Mandate nodes, and hands the merged build to Verify. It has `read` and does not implement. | `dispatch`, `publish_plan`, `brief_item`, `handoff_build` |
+| Worker (one checkout per attempt) | Implements the brief inside its fences. Records rulings with their reference and cost if wrong. Publishes a clean committed build and names the block threads it addressed. Keel reads the commit from Git. | `dispatch`, `record_ruling` (standing), `publish_build` |
 | Verifier | Checks each published commit in a detached checkout, then checks the whole build. Names block threads and their evidence, and keeps lesser findings as notes. | `publish_verdict` |
 | Diagnoser | After the same block survives two **claimed** fixes, independently tests the shared premise before the owner is asked. | `publish_diagnosis` |
-| Investigator (one per project) | Reproduces or measures, checks the queue and plan for duplicates, and recommends a route. Does not design the fix. | `report_investigation` |
+| Investigator (one per project) | Reproduces or measures, checks the queue and plan for duplicates, and recommends a route. Does not design the fix. | `dispatch`, `report_investigation` |
 
 Bound agents can use the standing `file_finding` tool. Designers, verifiers, diagnosers and the investigator have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. Item, full-set and landing reviews all show the changed `.keel/principles/` and `.keel/playbooks/` paths reported by Git. These should be unchanged unless an item under review was tasked with creating or changing them. A weakened check is a block.
+
+## Dispatch and the arena
+
+`dispatch` joins up to eight independent questions and returns every answer or failure in job order. The designer can use `design_explorer` during Ground. Coordinators and workers use `build_explorer`, and the investigator uses `queue_explorer`. Explorers trace how behavior works and check why an existing pattern does or does not count as approved. They use Git, the repository's documents, and Keel's records for the work and project. Children cannot dispatch.
+
+The designer frames one question and rubric. Keel gives the same prompt to two candidates, or three if `arena_seat_3` is set. Candidates must use distinct providers, and the judge must use a different provider from the designer. Keel refuses the arena before starting any children if these settings conflict. Set the options named in the decision, then choose `retry`, or choose `decline`. If a child fails or its report is incomplete, `retry` reruns that stage with the same planned inputs and preserves the failure.
+
+The judge scores each candidate and reports its unasked decisions. The designer chooses a base, attributes each graft and turns the winning candidate's unasked choices into proposed riders. A challenger compares the synthesis with the nearest example and the project's principles. The designer must give a numbered disposition for every objection before Keel opens a decision.
+
+When an observable question comes up in framing or synthesis, the designer writes a protocol first: one named node, the question, the decision rule, shared controls and variants along one axis. Keel runs one prototype per variant in separate scratch directories. The designer records the comparison under that node. The winning prototype's incidental choices appear as open riders unless the designer proposes binding them. Failed or incomparable results can be recorded as inconclusive. Scratch directories stay in the system temporary directory for inspection. A scratch directory is a working directory, not a sandbox.
+
+Dispatch lives in `src/dispatch/`. A tool or effect task owns its children and pins the job order, child IDs and timeout. Restart rejoins the stored submissions instead of creating duplicates. Each child is limited to 12 tool rounds and a shared five-minute batch deadline. Timeout asks Tau to abort the affected child; cancellation still depends on the provider and tools responding to Tau's abort signal.
 
 ## Review a Mandate
 
 The designer reports what exists and labels gaps and contradictions without declaring them defects. The review shows the proposed rulings, the done predicate, each seam's callers, caller code before signatures, ownership and allowed dependencies, rules and their falsifying probes, anti-criteria, timed proofs, tradeoffs and alternatives. Each rider has a label, an origin and a proposed disposition: bind or leave open to agents.
 
-- **Review:** `approve` approves the Mandate as shown, including the proposed rider dispositions and nodes that cite references. `rework` sends your numbered annotations back to the designer. Annotate a rider the same way you annotate a seam or rule. Every annotation needs a reply (acted on, considered or dismissed, with a reason). `decline` ends the work without building and records annotations still owed as not pursued.
+- **Review:** `approve` approves the Mandate as shown, including rider dispositions and nodes that cite references. You see the synthesis, every candidate in full, the judge's report, graft sources and challenge dispositions. `rework` sends your numbered annotations back to the designer. Later rounds in the same arena carry forward the original challenge and name the round and base it examined. Annotate a rider the same way you annotate a seam or rule. Every annotation needs a reply (acted on, considered or dismissed, with a reason). `decline` ends the work without building and records annotations still owed as not pursued.
+- **Choose a direction:** `base:<seat>` makes the named candidate the next synthesis base without approving it. `arena` starts a new arena seeded with the current review and your annotations. `arena_fresh` starts another arena without giving its candidates the earlier review. Earlier candidates, reports and rounds are kept.
 - **Another round:** the review opens with the labels that changed, were added, or were removed. Changed entries include their previous content, and removed entries show separately. Answers to older rounds cannot authorize a different draft. Every revision, answer and numbered reply remains in the record.
 - **Build:** approval makes the proposed binding riders binding nodes and delegates the open ones. Your approval annotations go to the first plan for a numbered reply, and you see the replies at hand-over. A reviewed Mandate with seams or rules requires Encode first: the scaffold, dependency boundaries and rule checks. Every later item depends on Encode. Briefs cite binding nodes, never delegated riders.
 
@@ -81,17 +94,17 @@ The kernel reconciles lane declarations into durable decisions, agent inputs and
 
 ## Project options
 
-Set four lane models in `provider/modelId` form. Each role can independently override its lane. Use a verification model independent of the builder. Model options for later roles already exist; setting them does not activate those roles.
+Set four lane models in `provider/modelId` form. Each role and seat can independently override its lane. Use a verification model independent of the builder. `arena_seat_3` both selects the third candidate's model and enables its seat.
 
-| Required lane model | Active role overrides | Reserved role overrides |
-| --- | --- | --- |
-| `design` | `designer` | `design_explorer`, `design_prototype`, `arena_seat_1`, `arena_seat_2`, `arena_seat_3`, `arena_judge`, `arena_challenger` |
-| `build` | `coordinator`, `worker` | `build_explorer` |
-| `verify` | `verifier`, `diagnoser` | |
-| `queue` | `investigator` | `queue_explorer` |
+| Required lane model | Optional role and seat overrides |
+| --- | --- |
+| `design` | `designer`, `design_explorer`, `design_prototype`, `arena_seat_1`, `arena_seat_2`, `arena_seat_3`, `arena_judge`, `arena_challenger` |
+| `build` | `coordinator`, `worker`, `build_explorer` |
+| `verify` | `verifier`, `diagnoser` |
+| `queue` | `investigator`, `queue_explorer` |
 
 `base` defaults to `main`; `trunk` defaults to `trunk`. Use distinct short branch names outside Keel's namespace. `trunk` cannot be `main`. `max_workers` is a positive integer (default `3`); it bounds concurrent items in a build.
 
 ## Not built yet
 
-Designers author precedent-setting Mandates directly. Dispatch and the design arena are next. Turning a missing check into an owed check and running the scheduled drift sweep are later slices.
+Turning a missing check into an owed check and running the scheduled drift sweep are later slices.

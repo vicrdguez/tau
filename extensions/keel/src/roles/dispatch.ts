@@ -125,7 +125,11 @@ export const runDesignDispatch: EffectRunner = async (
 						);
 					case "design_prototype": {
 						// Resolve only for a new plan. The child's stored cwd survives replay.
-						const instructions = prose(dir, "roles/design-prototype.md", [])({});
+						const instructions = prose(
+							dir,
+							"roles/design-prototype.md",
+							[],
+						)({});
 						const scratch = await mkdtemp(join(tmpdir(), "keel-prototype-"));
 						return seat(role, model, scratch, instructions);
 					}
