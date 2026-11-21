@@ -20,6 +20,7 @@ export type V1 = {
 		string,
 		{
 			task: TaskId;
+			interrupt: ConversationId | null;
 			status: "planned" | "running" | "stopping" | "cancelled" | "done";
 		}
 	>;
@@ -43,7 +44,11 @@ export const current = {
 		},
 	},
 	effects: {
-		checkout: { task: 12 as TaskId, status: "running" },
-		dispatch: { task: 13 as TaskId, status: "stopping" },
+		checkout: { task: 12 as TaskId, status: "running", interrupt: null },
+		dispatch: {
+			task: 13 as TaskId,
+			status: "stopping",
+			interrupt: 14 as ConversationId,
+		},
 	},
 } satisfies V1;

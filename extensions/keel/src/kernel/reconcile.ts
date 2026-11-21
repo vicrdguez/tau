@@ -225,7 +225,11 @@ export async function reconcile(
 			{ ...address, ...effect, root: frame.root },
 			placement,
 		);
-		slots.effects[key] = { task, status: "planned" };
+		slots.effects[key] = {
+			task,
+			status: "planned",
+			interrupt: effect.interruptible ? placement.conversationId : null,
+		};
 		await tx.createTask(
 			tasks.effectResult,
 			{ ...address, key: effect.key, task },
@@ -235,13 +239,11 @@ export async function reconcile(
 	for (const [key, slot] of Object.entries(slots.effects)) {
 		if (!key.startsWith(prefix) || planned.has(key)) continue;
 		if (slot.status === "planned") slot.status = "cancelled";
-		if (slot.status !== "running") continue;
-		const task = await tx.task(slot.task);
-		if (!task || task.background) continue;
+		if (slot.status !== "running" || !slot.interrupt) continue;
 		slot.status = "stopping";
 		await tx.createTask(
 			tasks.stop,
-			{ effect: task.conversationId },
+			{ effect: slot.interrupt },
 			background(await anchor()),
 		);
 	}

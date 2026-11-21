@@ -21,6 +21,7 @@ export type AgentSlot = {
 };
 export type EffectSlot = {
 	task: TaskId;
+	interrupt: ConversationId | null;
 	status: "planned" | "running" | "stopping" | "cancelled" | "done";
 };
 export type Ledger = {
