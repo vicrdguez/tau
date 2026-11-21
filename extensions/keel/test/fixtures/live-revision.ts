@@ -260,6 +260,13 @@ export async function openLiveRevision(
 		s.provider.setResponses([
 			s.turn("coordinator", "publish_plan", {
 				items: [encode, writer, stats, legacy, client],
+				replies: [
+					{
+						n: 1,
+						status: "acted_on",
+						reason: "First plan keeps an independent statistics check.",
+					},
+				],
 			}),
 			brief(encode, "P1"),
 			bash(
@@ -296,7 +303,9 @@ export async function openLiveRevision(
 				)(...args);
 			},
 		]);
-		const approving = answer("mandate/", "approve");
+		const approving = answer("mandate/", "approve", [
+			{ text: "Keep statistics independent." },
+		]);
 		try {
 			await Promise.race([
 				investigationPrompt.promise,
@@ -380,9 +389,18 @@ export async function openLiveRevision(
 						{ ...writer, deps: ["encode", "frame"] },
 						revisedClient,
 					],
-					replies: [],
+					replies: [
+						{
+							n: 1,
+							status: "acted_on",
+							reason: "Revision plan adds a framing item before the writer.",
+						},
+					],
 				},
 				"frame_book prefix value",
+				"Held items",
+				"Affected items",
+				"Recorded items",
 			),
 			brief(frame, "wire", "frame.sh"),
 			bash(

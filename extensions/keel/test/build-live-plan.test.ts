@@ -56,7 +56,12 @@ const proposal = {
 	nodes: ["ledger"],
 	text: "Correct the ledger crossing",
 };
-function setup(items: ReturnType<typeof goal>[], max_workers = 2) {
+function setup(
+	items: ReturnType<typeof goal>[],
+	max_workers = 2,
+	initial = mandate,
+	initialReplies: JsonObject[] = [],
+) {
 	const world: World = {
 		work,
 		root: "/repo",
@@ -121,7 +126,7 @@ function setup(items: ReturnType<typeof goal>[], max_workers = 2) {
 			send({ kind: "merged", item, head: tip });
 			done({ kind: "removed" });
 		};
-		send({ kind: "bound", mandate });
+		send({ kind: "bound", mandate: initial });
 		done({
 			kind: "repo",
 			repo: {
@@ -134,7 +139,7 @@ function setup(items: ReturnType<typeof goal>[], max_workers = 2) {
 			},
 		});
 		done({ kind: "started", base });
-		plan(items);
+		plan(items, initialReplies);
 		return {
 			send,
 			tryEvent,
@@ -484,6 +489,41 @@ test("a held unverified publication is superseded before release; its original w
 	]);
 	assert.deepEqual(republication[0]?.event.changedPolicyFiles, [
 		".keel/playbooks/verification.md",
+	]);
+});
+
+test("handoff keeps original and revision approval notes with unique numbers and their own replies", () => {
+	const item = goal("ledger");
+	const firstReply = {
+		n: 1,
+		status: "considered",
+		reason: "Confirm negatives",
+	};
+	const b = setup(
+		[item],
+		2,
+		{ ...mandate, approvalNotes: ["Check negatives"] },
+		[firstReply],
+	);
+	b.send(hold("queue/1", null, ["ledger"]));
+	b.send(proposal);
+	b.plan([item], reply);
+	b.brief(item.id);
+	b.ready();
+	b.publish(item.id);
+	b.merge(item.id);
+	const handoff = b.send({
+		kind: "handoff",
+		summary: "Ledger done",
+		risk: "None",
+	})[0]!.event;
+	assert.deepEqual((handoff.mandate as Mandate).approvalNotes, [
+		"Check negatives",
+		"Test tie values",
+	]);
+	assert.deepEqual(handoff.approvalReplies, [
+		firstReply,
+		{ ...reply[0], n: 2 },
 	]);
 });
 

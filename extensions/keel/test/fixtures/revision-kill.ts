@@ -36,5 +36,8 @@ const s = await openLiveRevision(root, storage, false);
 await s.answer(
 	boundary === "triage" ? "triage/" : "revision/",
 	boundary === "triage" ? "build" : "approve",
+	boundary === "approval"
+		? [{ text: "Prove framing before resuming the writer." }]
+		: [],
 );
 throw Error(`No queued delivery committed after ${boundary}`);

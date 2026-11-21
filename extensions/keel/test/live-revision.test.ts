@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,11 @@ import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { openNodeSqliteStorage } from "tau/durable";
 import { openLiveRevision } from "./fixtures/live-revision.ts";
 import { fixture, git } from "./repo/fixture.ts";
+
+const save = (kind: string, text: string) => {
+	if (process.env.KEEL_REVIEW_ARTIFACTS)
+		writeFileSync(`${process.env.KEEL_REVIEW_ARTIFACTS}-${kind}.md`, text);
+};
 
 const child = fileURLToPath(
 	new URL("./fixtures/revision-kill.ts", import.meta.url),
@@ -33,6 +39,12 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 	const { triageId, old, stats, writer } = await (async () => {
 		try {
 			await first.openTriage();
+			const triage = await first.review("triage/");
+			save("triage", triage.text);
+			assert.match(triage.text, /Held items:[^\n]*writer/);
+			assert.match(triage.text, /Keeps running:[^\n]*stats/);
+			assert.match(triage.text, /write_book value/);
+			assert.doesNotMatch(triage.text, /Reference: Book reader contract/);
 			return {
 				triageId: (await first.review("triage/")).decision.id,
 				old: (await first.desk())?.mandate,
@@ -66,7 +78,13 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 			assert.deepEqual((await drafting.desk())?.mandate, old);
 			await drafting.propose();
 			assert.equal((await drafting.asks()).length, 1);
-			return (await drafting.review("revision/")).decision.id;
+			const revision = await drafting.review("revision/");
+			save("revision", revision.text);
+			assert.match(
+				revision.text,
+				/Changed: caller usage, types and signatures, owner/,
+			);
+			return revision.decision.id;
 		} finally {
 			await drafting.harness.close(ctx);
 		}
@@ -127,6 +145,17 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 	);
 	assert.equal((await s.asks()).length, 1);
 	const { text } = await s.review("handover");
+	save("handover", text);
+	assert.match(
+		text,
+		/1\. Keep statistics independent\.\n\s+acted_on: First plan keeps an independent statistics check\./,
+	);
+	assert.match(
+		text,
+		/2\. Prove framing before resuming the writer\.\n\s+acted_on: Revision plan adds a framing item before the writer\./,
+	);
+	assert.match(text, /Mandate revisions[\s\S]+wire/);
+	assert.match(text, /Finding #1[^\n]*writer seam[\s\S]+applied/i);
 	for (const value of [
 		git(root, "rev-parse", "trunk"),
 		"Framed book, reader and statistics pass together.",
