@@ -541,7 +541,7 @@ test("a stopped draft resumes with its annotation debt under a new draft token, 
 		evidence: "reading",
 	});
 	const turn = design.agents(x.state(), world)[0]!.expects[0]!;
-	assert.deepEqual(turn.tools, ["publish_mandate"]);
+	assert.deepEqual(turn.tools, ["publish_mandate", "start_experiment"]);
 	assert.notEqual(t, turn.token);
 	for (const v of ["Read ADR 4", "Clarify callers."])
 		assert.ok(x.input().includes(v));

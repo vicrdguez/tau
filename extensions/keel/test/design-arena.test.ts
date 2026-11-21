@@ -164,6 +164,7 @@ test("Ground opens framing, not review or direct Mandate publication; candidate 
 	const s = grounded();
 	assert.deepEqual(design.agents(s, world)[0]?.expects[0]?.tools, [
 		"frame_arena",
+		"start_experiment",
 	]);
 	assert.deepEqual(design.asks(s, world), []);
 	assert.ok("reject" in design.reduce(s, { kind: "publish_mandate" }, world));
