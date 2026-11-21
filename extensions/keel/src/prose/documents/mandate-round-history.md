@@ -1,7 +1,7 @@
-## Removed since the last round
+{{heading}} Removed since the last round
 
 {{removed}}
 
-## Replies to the preceding round
+{{heading}} Replies to the preceding round
 
 {{replies}}

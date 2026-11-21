@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { arr, obj, oneOf, opt } from "tau/schema";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
@@ -15,6 +16,13 @@ import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
 import { fileHolding, resumption } from "../queue/public.ts";
 import {
+	accountingError,
+	normalizeOutcomes,
+	outcomesText,
+	synthesisParts,
+	unaskedSources,
+} from "./accounting.ts";
+import {
 	type Arena,
 	arenaEffect,
 	arenaEvidence,
@@ -22,19 +30,15 @@ import {
 	candidateNames,
 	challengeObjections,
 	frameSchema,
-	graftsSchema,
 	retryArena,
 	settleArena,
 	startArena,
-	startCandidates,
 	startChallenger,
-	synthesisSources,
 } from "./arena.ts";
 import {
 	type Audit,
 	auditSchema,
 	type Draft,
-	reviewedDraft,
 	smallDraft,
 	text,
 	validAudit,
@@ -45,7 +49,6 @@ import {
 	experimentEffect,
 	experimentEvidence,
 	experimentInput,
-	experimentRiders,
 	experimentTools,
 	finishExperiment,
 	recordExperiment,
@@ -84,6 +87,7 @@ import {
 	type Synthesis,
 	synthesisBody,
 	synthesisError,
+	synthesisSources,
 } from "./rounds.ts";
 import { designV1 } from "./v1.ts";
 
@@ -105,7 +109,10 @@ export const designTools = [
 		name: "answer_challenger",
 		description:
 			"Give one numbered disposition per challenge objection to put the synthesis to the owner.",
-		parameters: obj({ dispositions: repliesSchema }),
+		parameters: obj({
+			dispositions: repliesSchema,
+			revision: opt(obj(synthesisParts)),
+		}),
 		terminate: true,
 		event: (args) => ({ kind: "answer_challenger", ...args }),
 	}),
@@ -136,9 +143,8 @@ export const designTools = [
 		description:
 			"Submit the complete synthesis: a labelled Mandate, its base and graft sources, and numbered replies to the owner's annotations.",
 		parameters: obj({
-			draft: reviewedDraft,
+			...synthesisParts,
 			base: text,
-			grafts: graftsSchema,
 			replies: repliesSchema,
 		}),
 		terminate: true,
@@ -442,52 +448,23 @@ const setArena = (s: State, arena: Arena): State => ({
 });
 const auditedGround = (s: State) => auditText(s.audit!, groundContext(s));
 const currentExperiment = (s: State) => s.experiments.at(-1)!;
-function newExperiments(s: State) {
-	const reviewed = new Set(
-		s.rounds.flatMap((r) => r.evidence.map(({ id }) => id)),
-	);
-	return s.experiments.filter((e) => e.comparison && !reviewed.has(e.id));
-}
+const newExperiments = (s: State) =>
+	s.experiments.slice(s.rounds.at(-1)?.experimentCount ?? 0);
 const comparedGround = (s: State) =>
 	[auditedGround(s), ...newExperiments(s).map(experimentEvidence)].join("\n\n");
-function attachExperiments(s: State, proposal: Synthesis): string | null {
-	const { draft } = proposal;
-	const labels = new Set([
-		"intent",
-		"never",
-		"tradeoffs",
-		"alternatives",
-		...draft.checks.map((c) => c.id),
-		...[...draft.nodes, ...draft.seams, ...draft.settlements].map(
-			(n) => n.label,
-		),
-	]);
-	const added = newExperiments(s);
-	for (const experiment of added) {
-		if (!labels.has(experiment.protocol.node))
-			return `Include the Mandate node ${experiment.protocol.node} alongside its recorded experiment evidence.`;
-		for (const rider of experimentRiders(experiment)) {
-			const supplied = draft.riders.find((r) => r.label === rider.label);
-			if (
-				supplied &&
-				(supplied.origin !== rider.origin || supplied.text !== rider.text)
-			)
-				return `Keep ${rider.label}'s recorded incidental choice or leave it to Keel to add.`;
-			if (!supplied) draft.riders.push(rider);
-		}
-	}
-	proposal.evidence = s.experiments.flatMap((experiment) =>
-		experiment.comparison && labels.has(experiment.protocol.node)
-			? [
-					{
-						id: experiment.id,
-						node: experiment.protocol.node,
-						text: experimentEvidence(experiment),
-					},
-				]
-			: [],
+const experimentsText = (experiments: Experiment[]) =>
+	experiments.map(experimentEvidence).join("\n\n") || "None.";
+function proposalError(s: State, proposal: Synthesis) {
+	return (
+		synthesisError(s.audit!, s.rounds, proposal) ??
+		accountingError(
+			s.audit!,
+			currentArena(s),
+			proposal,
+			s.experiments,
+			newExperiments(s),
+		)
 	);
-	return null;
 }
 
 function openReview(
@@ -513,10 +490,12 @@ function openReview(
 		],
 	};
 }
-function mandateAsk(s: State, number = s.rounds.length): Ask {
-	const rounds = s.rounds.slice(0, number);
+function mandateAsk(s: State): Ask {
+	const rounds = s.rounds;
 	const round = rounds.at(-1)!;
-	const challenged = rounds.findIndex((r) => r.arena === round.arena);
+	const challenged = rounds.findIndex(
+		(r) => r.arena === round.arena && r.challenge === round.challenge,
+	);
 	const arena = s.arenas[round.arena - 1]!;
 	const objections = challengeObjections(arena, round.challenge);
 	const dispositions =
@@ -526,28 +505,35 @@ function mandateAsk(s: State, number = s.rounds.length): Ask {
 				return `${i + 1}. ${o}\n\n   ${reply.status}: ${reply.reason}`;
 			})
 			.join("\n\n") || "No objections.";
-	const evidence = [
-		synthesisSources(round.base, round.grafts),
-		arenaEvidence(arena, round.arena),
+	const experiments = s.experiments.slice(0, round.experimentCount);
+	const tail = [
+		"## What the base decided that the question did not ask\n\n" +
+			outcomesText(round, unaskedSources(arena, round, experiments)),
 		challengeText({
 			model: arena.runs[round.challenge - 1]!.jobs[0]!.model,
 			round: String(challenged + 1),
 			base: rounds[challenged]!.base,
 			dispositions,
 		}),
+		arenaEvidence(
+			arena,
+			round.arena,
+			synthesisSources(round),
+			experimentsText(experiments),
+		),
 	].join("\n\n");
 	return reviewAsk(
 		s.audit!,
 		groundContext(s),
 		rounds,
-		evidence,
+		tail,
 		candidateNames(arena),
 	);
 }
-function arenaSeed(s: State, round: number | null) {
-	if (round === null) return "";
-	const r = s.rounds[round - 1]!;
-	return `## Seed from round ${round}\n\n${mandateAsk(s, round).basis}\n\n### Owner annotations\n\n${owedText(r)}`;
+function arenaSeed(s: State) {
+	const r = s.rounds.at(-1);
+	if (r?.answer?.choice !== "arena") return "";
+	return `## Seed from round ${s.rounds.length}\n\n${mandateAsk(s).basis}\n\n### Owner annotations\n\n${owedText(r)}`;
 }
 
 function designerTurn(s: State): Expectation | undefined {
@@ -571,12 +557,7 @@ function designerTurn(s: State): Expectation | undefined {
 						ground: comparedGround(s),
 						direction: s.direction,
 						notes: owedText(s.rounds.at(-1)),
-						seed: arenaSeed(
-							s,
-							s.rounds.at(-1)?.answer?.choice === "arena"
-								? s.rounds.length
-								: null,
-						),
+						seed: arenaSeed(s),
 					}),
 			};
 		case "drafting":
@@ -592,10 +573,7 @@ function designerTurn(s: State): Expectation | undefined {
 						groundContext(s),
 						s.rounds,
 						number,
-						[
-							arenaEvidence(arena, number),
-							...newExperiments(s).map(experimentEvidence),
-						].join("\n\n"),
+						arenaEvidence(arena, number, "", experimentsText(s.experiments)),
 						arena.forcedBase
 							? `The owner chose ${arena.forcedBase} as the base. Use it.`
 							: "Choose the base and explain your choice with the tradeoffs.",
@@ -661,7 +639,6 @@ export const design: Lane<State> = {
 				return [`- Revision ${i + 1}: ${r.rounds.at(-1)!.nodes.join(", ")}`];
 			})
 			.join("\n"),
-		experimentEvidence: s.rounds.at(-1)?.evidence ?? [],
 		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
 			(r) => (r.answer ? [r.answer] : []),
 		),
@@ -936,16 +913,11 @@ export const design: Lane<State> = {
 						reject:
 							"Give one framed question and the rubric every candidate will be scored against.",
 					};
-				const seed =
-					s.rounds.at(-1)?.answer?.choice === "arena" ? s.rounds.length : null;
-				const started = startCandidates(
-					startArena(
-						{ question: e.question.trim(), rubric: e.rubric.trim() },
-						seed,
-						w,
-					),
+				const started = startArena(
+					{ question: e.question.trim(), rubric: e.rubric.trim() },
 					comparedGround(s),
-					arenaSeed(s, seed),
+					arenaSeed(s),
+					w,
 				);
 				return {
 					state: {
@@ -963,38 +935,20 @@ export const design: Lane<State> = {
 							"Complete an arena before submitting the Mandate synthesis.",
 					};
 				const arena = currentArena(s);
-				const seats = candidateNames(arena);
-				const grafts = e.grafts as Synthesis["grafts"];
-				if (
-					typeof e.base !== "string" ||
-					!seats.includes(e.base) ||
-					!Array.isArray(grafts) ||
-					grafts.some(
-						(g) =>
-							!seats.includes(g.seat) || g.seat === e.base || !g.text.trim(),
-					)
-				)
-					return {
-						reject:
-							"Choose an arena candidate as base and attribute each graft to another candidate from this arena.",
-					};
-				if (arena.forcedBase !== null && e.base !== arena.forcedBase)
-					return {
-						reject: `Use ${arena.forcedBase} as the base, as the owner chose.`,
-					};
 				const proposal: Synthesis = {
-					draft: structuredClone(e.draft as Draft),
+					draft: e.draft as Draft,
 					replies: e.replies as Reply[],
-					base: e.base,
-					grafts,
-					evidence: [],
+					base: String(e.base ?? ""),
+					grafts: e.grafts as Synthesis["grafts"],
+					outcomes: normalizeOutcomes(e.outcomes),
+					experimentCount: s.experiments.length,
 				};
-				const error =
-					attachExperiments(s, proposal) ??
-					synthesisError(s.audit, s.rounds, proposal);
+				const error = proposalError(s, proposal);
 				if (error) return { reject: error };
-				const previous = s.rounds.at(-1);
-				if (previous?.arena === s.arenas.length)
+				const previous = s.rounds.findLast(
+					(r) => r.arena === s.arenas.length && r.base === proposal.base,
+				);
+				if (previous)
 					return {
 						state: openReview(
 							s,
@@ -1003,10 +957,14 @@ export const design: Lane<State> = {
 							previous.dispositions,
 						),
 					};
-				const synthesis =
-					synthesisSources(proposal.base, proposal.grafts) +
-					"\n\n" +
-					synthesisBody(s.audit, groundContext(s), proposal);
+				const synthesis = [
+					synthesisSources(proposal),
+					synthesisBody(s.audit, groundContext(s), proposal),
+					outcomesText(
+						proposal,
+						unaskedSources(arena, proposal, s.experiments),
+					),
+				].join("\n\n");
 				return {
 					state: setArena(
 						{ ...s, proposal, phase: "dispatching", direction: "" },
@@ -1031,7 +989,29 @@ export const design: Lane<State> = {
 						reject:
 							"Give one disposition and a reason for each numbered objection.",
 					};
-				return { state: openReview(s, s.proposal!, challenge, dispositions) };
+				const original = s.proposal!;
+				const revision = e.revision as
+					| Pick<Synthesis, "draft" | "grafts" | "outcomes">
+					| undefined;
+				const proposal = revision
+					? {
+							...original,
+							draft: revision.draft,
+							grafts: revision.grafts,
+							outcomes: normalizeOutcomes(revision.outcomes),
+						}
+					: original;
+				if (
+					dispositions.some((d) => d.status === "acted_on") &&
+					isDeepStrictEqual(proposal.draft, original.draft)
+				)
+					return {
+						reject: "A disposition of acted_on requires a changed draft.",
+					};
+				const error = proposalError(s, proposal);
+				return error
+					? { reject: error }
+					: { state: openReview(s, proposal, challenge, dispositions) };
 			}
 			case "ground": {
 				if (!["entry", "seeded", "directed", "resumed"].includes(s.phase))
@@ -1302,7 +1282,7 @@ export const design: Lane<State> = {
 				const { arena, phase } = retryArena(
 					current,
 					comparedGround(s),
-					arenaSeed(s, current.seedRound),
+					arenaSeed(s),
 					w,
 				);
 				return { state: setArena({ ...s, phase, seq: s.seq + 1 }, arena) };

@@ -6,7 +6,7 @@ import {
 	experimentEffect,
 	experimentEvidence,
 	experimentInput,
-	experimentRiders,
+	experimentDecisions,
 	finishExperiment,
 	recordExperiment,
 	startExperiment,
@@ -224,13 +224,8 @@ test("accepts prototype reports in JSON fences and preserves the winner's unaske
 		comparison,
 	);
 	assert.ok("experiment" in result);
-	assert.deepEqual(experimentRiders(result.experiment), [
-		{
-			label: "experiment-3-r1",
-			text: "Name the cache localBlocks.",
-			origin: "incidental",
-			disposition: "open",
-		},
+	assert.deepEqual(experimentDecisions(result.experiment), [
+		"Name the cache localBlocks.",
 	]);
 });
 
@@ -250,7 +245,7 @@ test("requires a reasoned comparison naming a protocol variant or marking the re
 	assert.ok("experiment" in result);
 	assert.equal(result.experiment.comparison?.winner, null);
 	assert.match(experimentEvidence(result.experiment), /inconclusive/i);
-	assert.deepEqual(experimentRiders(result.experiment), []);
+	assert.deepEqual(experimentDecisions(result.experiment), []);
 });
 
 test("retains a failed child beside a successful sibling without treating missing evidence as a win", () => {

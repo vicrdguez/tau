@@ -1,19 +1,19 @@
-## Ground
+## Mandate
+
+{{nodes}}
+
+### Ground context
 
 {{reference}}
 
 {{exists}}
 
-## Mandate
+### Design considerations
 
-{{nodes}}
+{{considerations}}
 
 ## Riders
 
 {{riders}}
-
-## Design considerations
-
-{{considerations}}
 
 {{history}}

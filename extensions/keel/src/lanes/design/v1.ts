@@ -41,19 +41,26 @@ type Reply = {
 	status: "acted_on" | "considered" | "dismissed";
 	reason: string;
 };
-type ArenaSeat = { seat: string; model: string };
+type ArenaSeat = {
+	seat:
+		| "arena_seat_1"
+		| "arena_seat_2"
+		| "arena_seat_3"
+		| "arena_judge"
+		| "arena_challenger";
+	model: string;
+};
 type Arena = {
 	frame: { question: string; rubric: string };
-	seedRound: number | null;
-	setup:
-		| { candidates: ArenaSeat[]; judge: string; challenger: string }
-		| { error: string };
+	judge: string;
+	challenger: string;
+	refusal: string | null;
 	runs: {
 		stage: "candidates" | "judge" | "challenger";
 		jobs: (ArenaSeat & { question: string })[];
 		outcome: {
 			results: {
-				seat: string;
+				seat: ArenaSeat["seat"];
 				conversation: string;
 				answer: string | null;
 				error: string | null;
@@ -89,8 +96,15 @@ type Synthesis = {
 	draft: Draft;
 	replies: Reply[];
 	base: string;
-	grafts: { seat: string; text: string }[];
-	evidence: { id: number; node: string; text: string }[];
+	grafts: { seat: string; label: string; text: string }[];
+	outcomes: {
+		source: string;
+		n: number;
+		kind: "node" | "rider" | "not_taken";
+		label: string | null;
+		reason: string | null;
+	}[];
+	experimentCount: number;
 };
 type DesignerPhase =
 	| "seeded"

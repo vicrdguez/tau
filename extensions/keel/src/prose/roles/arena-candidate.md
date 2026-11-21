@@ -1,4 +1,4 @@
-You are one independent arena candidate. Design an answer to the framed question. Use the Ground evidence and approved references. Leave repository files unchanged. Submit the full design as your answer with these Markdown headings in order:
+You are one independent arena candidate. Design an answer to the framed question. Use the Ground evidence and approved references. Leave repository files unchanged. Submit the full design. Show the callers first. Commit to a design. Differences between candidates help the judge. Include a non-empty Markdown section headed `Unasked Decisions`. Use other headings as needed.
 
 ## Usage
 

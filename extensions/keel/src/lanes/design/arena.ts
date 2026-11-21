@@ -1,4 +1,4 @@
-import { arr, compile, int, obj } from "tau/schema";
+import { arr, compile, num, obj } from "tau/schema";
 import { effectKey, subject } from "../../kernel/ids.ts";
 import {
 	type Ask,
@@ -8,22 +8,22 @@ import {
 	type StaticFacts,
 } from "../../kernel/lane.ts";
 import { text } from "./draft.ts";
+import { replyJson } from "./reply-json.ts";
 
 const candidateSeats = [
 	"arena_seat_1",
 	"arena_seat_2",
 	"arena_seat_3",
 ] as const;
-const candidateHeadings = ["Usage", "Sketch", "Rationale", "Unasked Decisions"];
 const judgeSchema = compile(
 	obj({
 		base: text,
 		scores: arr(
 			obj({
 				seat: text,
-				score: int({ minimum: 0, maximum: 10 }),
+				score: num({ minimum: 0, maximum: 10 }),
 				reason: text,
-				unaskedDecisions: text,
+				unaskedDecisions: arr(text),
 			}),
 		),
 	}),
@@ -31,12 +31,14 @@ const judgeSchema = compile(
 const challengerSchema = compile(obj({ objections: arr(text) }));
 
 export const frameSchema = obj({ question: text, rubric: text });
-export const graftsSchema = arr(obj({ seat: text, text }));
 type Frame = { question: string; rubric: string };
-type Seat = { seat: string; model: string };
-type Job = Seat & { question: string };
+type Seat =
+	| (typeof candidateSeats)[number]
+	| "arena_judge"
+	| "arena_challenger";
+type Job = { seat: Seat; model: string; question: string };
 type Receipt = {
-	seat: string;
+	seat: Seat;
 	conversation: string;
 	answer: string | null;
 	error: string | null;
@@ -48,10 +50,9 @@ type Run = {
 };
 export type Arena = {
 	frame: Frame;
-	seedRound: number | null;
-	setup:
-		| { candidates: Seat[]; judge: string; challenger: string }
-		| { error: string };
+	judge: string;
+	challenger: string;
+	refusal: string | null;
 	runs: Run[];
 	forcedBase: string | null;
 };
@@ -79,71 +80,92 @@ const evidence = prose(dir, "documents/arena-evidence.md", [
 	"arena",
 	"question",
 	"rubric",
+	"sources",
+	"experiments",
 	"candidates",
 	"judge",
 ]);
-const blocked = prose(dir, "documents/arena-blocked.md", ["error"]);
-const baseText = prose(dir, "documents/arena-base.md", ["base", "grafts"]);
+const blocked = prose(dir, "documents/arena-blocked.md", ["error", "retry"]);
 
-function setup(options: StaticFacts["options"]): Arena["setup"] {
-	const seats = options.arena_seat_3
-		? candidateSeats
-		: candidateSeats.slice(0, 2);
-	const family = (model: string) => model.split("/", 1)[0];
-	const candidates = seats.map((seat) => ({
-		seat,
-		model: options[seat] ?? options.design,
-	}));
+const modelFor = (seat: Seat, options: StaticFacts["options"]) =>
+	options[seat] ?? options.design;
+function familyError(
+	candidates: Job[],
+	judge: string,
+	options: StaticFacts["options"],
+) {
+	const provider = (model: string) => model.split("/", 1)[0];
 	const problems: string[] = [];
-	for (const { seat, model } of candidates) {
-		const matches = candidates.filter((s) => family(s.model) === family(model));
-		if (matches.length > 1 && matches[0]?.seat === seat)
+	for (const candidate of candidates) {
+		const family = provider(candidate.model);
+		const matches = candidates.filter(
+			({ model }) => provider(model) === family,
+		);
+		if (matches.length > 1 && matches[0] === candidate)
 			problems.push(
-				`Set ${matches.map((s) => `\`${s.seat}\``).join(", ")} to different providers (currently \`${family(model)}\`).`,
+				`Set ${matches.map(({ seat }) => `\`${seat}\``).join(", ")} to different providers (currently \`${family}\`).`,
 			);
 	}
-	const judge = options.arena_judge ?? options.design;
-	if (family(judge) === family(options.designer ?? options.design))
+	if (provider(judge) === provider(options.designer ?? options.design))
 		problems.push(
 			"Set `arena_judge` to a different provider from the `designer` model (which defaults to `design`).",
 		);
 	return problems.length
-		? { error: problems.join("\n\n") }
-		: {
-				candidates,
-				judge,
-				challenger: options.arena_challenger ?? options.design,
-			};
+		? [
+				"Keel treats the provider in `provider/modelId` as the model family.",
+				...problems,
+			].join("\n\n")
+		: null;
 }
-
+function plan(arena: Arena, stage: Run["stage"], jobs: Job[]): Arena {
+	return {
+		...arena,
+		refusal: null,
+		runs: [...arena.runs, { stage, jobs, outcome: null }],
+	};
+}
+const dispatch = (arena: Arena) => ({ phase: "dispatching" as const, arena });
+const refuse = (arena: Arena, refusal: string) => ({
+	phase: "arena_blocked" as const,
+	arena: { ...arena, refusal },
+});
 export function startArena(
 	frame: Frame,
-	seedRound: number | null,
-	w: StaticFacts,
-): Arena {
-	return {
+	ground: string,
+	seed: string,
+	{ options }: StaticFacts,
+) {
+	const judge = modelFor("arena_judge", options);
+	const arena: Arena = {
 		frame,
-		seedRound,
-		setup: setup(w.options),
+		judge,
+		challenger: modelFor("arena_challenger", options),
+		refusal: null,
 		runs: [],
 		forcedBase: null,
 	};
+	const question = candidateQuestion({ ...frame, ground, seed });
+	const jobs = (
+		options.arena_seat_3 ? candidateSeats : candidateSeats.slice(0, 2)
+	).map((seat) => ({ seat, model: modelFor(seat, options), question }));
+	const error = familyError(jobs, judge, options);
+	return error
+		? refuse(arena, error)
+		: dispatch(plan(arena, "candidates", jobs));
 }
 
-function plan(arena: Arena, stage: Run["stage"], jobs: Job[]): Arena {
-	return { ...arena, runs: [...arena.runs, { stage, jobs, outcome: null }] };
+function candidateJobs(arena: Arena) {
+	const latest = new Map<Seat, Job>();
+	for (const run of arena.runs)
+		if (run.stage === "candidates")
+			for (const job of run.jobs) latest.set(job.seat, job);
+	return [...latest.values()];
 }
-export function startCandidates(arena: Arena, ground: string, seed: string) {
-	if ("error" in arena.setup) return { phase: "arena_blocked" as const, arena };
-	const question = candidateQuestion({ ...arena.frame, ground, seed });
-	return {
-		phase: "dispatching" as const,
-		arena: plan(
-			arena,
-			"candidates",
-			arena.setup.candidates.map((seat) => ({ ...seat, question })),
-		),
-	};
+function failedJobs(run: Run) {
+	return run.jobs.filter(
+		({ seat }) =>
+			!run.outcome?.results.some((r) => r.seat === seat && r.error === null),
+	);
 }
 export function retryArena(
 	arena: Arena,
@@ -152,19 +174,35 @@ export function retryArena(
 	w: StaticFacts,
 ) {
 	const run = arena.runs.at(-1);
-	return run
-		? { phase: "dispatching" as const, arena: plan(arena, run.stage, run.jobs) }
-		: startCandidates({ ...arena, setup: setup(w.options) }, ground, seed);
+	if (!run) return startArena(arena.frame, ground, seed, w);
+	const jobs = failedJobs(run).map((job) => ({
+		...job,
+		model: modelFor(job.seat, w.options),
+	}));
+	const error = familyError(
+		candidateJobs(arena).map(
+			(job) => jobs.find(({ seat }) => job.seat === seat) ?? job,
+		),
+		run.stage === "judge" ? jobs[0]!.model : arena.judge,
+		w.options,
+	);
+	return error ? refuse(arena, error) : dispatch(plan(arena, run.stage, jobs));
 }
 export function blockedAsk(arena: Arena, seq: number): Ask {
-	const error =
-		"error" in arena.setup
-			? arena.setup.error
-			: arena.runs.at(-1)!.outcome!.error!;
+	const run = arena.runs.at(-1);
 	return {
 		subject: subject(`arena/failure/${seq}`),
 		title: "Retry the arena or decline the work?",
-		basis: blocked({ error }),
+		basis: blocked({
+			error: arena.refusal ?? run!.outcome!.error!,
+			retry: run
+				? `Retry runs only ${failedJobs(run)
+						.map(({ seat }) => `\`${seat}\``)
+						.join(
+							", ",
+						)} with the models configured now. It keeps answers from successful seats and checks model families again.`
+				: "Retry checks the currently configured seats and starts the arena if they pass.",
+		}),
 		choices: ["retry", "decline"],
 	};
 }
@@ -182,195 +220,200 @@ type EffectFact = Extract<
 	KernelEvent,
 	{ kind: "effect_done" | "effect_failed" }
 >;
-function receipts(fact: EffectFact, run: Run): NonNullable<Run["outcome"]> {
-	if (fact.kind === "effect_failed") return { results: [], error: fact.error };
-	const value = fact.result.results;
-	const invalid = {
-		results: [],
-		error: "The dispatch result does not match the planned seats in order.",
-	};
-	if (!Array.isArray(value) || value.length !== run.jobs.length) return invalid;
+function receipts(fact: EffectFact, run: Run): Receipt[] | string {
+	if (fact.kind === "effect_failed") return fact.error;
+	const rows = fact.result.results;
+	const invalid =
+		"The dispatch result does not match the planned seats in order.";
+	if (!Array.isArray(rows) || rows.length !== run.jobs.length) return invalid;
 	const results: Receipt[] = [];
-	for (const [i, row] of value.entries()) {
+	for (const [i, row] of rows.entries()) {
 		if (!row || typeof row !== "object" || Array.isArray(row)) return invalid;
 		const { seat, conversation, answer, error } = row;
+		const job = run.jobs[i]!;
 		if (
-			typeof seat !== "string" ||
-			seat !== run.jobs[i]?.seat ||
+			seat !== job.seat ||
 			typeof conversation !== "string" ||
 			!conversation ||
 			(answer !== null && typeof answer !== "string") ||
 			(error !== null && typeof error !== "string")
 		)
 			return invalid;
-		results.push({ seat, conversation, answer, error });
+		results.push({ seat: job.seat, conversation, answer, error });
 	}
-	const errors = results.flatMap(({ seat, answer, error }) =>
-		error !== null || !answer?.trim()
-			? [`${seat}: ${error || "No answer."}`]
-			: [],
-	);
-	return { results, error: errors.join("\n\n") || null };
+	return results;
 }
 
-function json(answer: string): unknown {
-	try {
-		return JSON.parse(answer);
-	} catch {
-		return null;
-	}
-}
+const heading = /^ {0,3}#{1,6}[ \t]+/m;
 function candidateValid(answer: string) {
-	const sections = answer.trim().split(/^##\s+/m);
-	return (
-		sections[0] === "" &&
-		candidateHeadings.every((heading, i) => {
-			const section = sections[i + 1];
-			if (!section) return false;
-			const split = section.indexOf("\n");
-			return (
-				split > 0 &&
-				section.slice(0, split).trim().toLowerCase() ===
-					heading.toLowerCase() &&
-				!!section.slice(split).trim()
-			);
-		})
+	return [
+		...answer.matchAll(
+			/^ {0,3}#{1,6}[ \t]+Unasked decisions[ \t]*(?:#+[ \t]*)?\r?\n/gim,
+		),
+	].some(
+		(match) =>
+			!!answer
+				.slice(match.index + match[0].length)
+				.split(heading, 1)[0]
+				?.trim(),
 	);
 }
 function judgeReport(answer: string) {
-	const report = judgeSchema.validate(json(answer));
+	const report = judgeSchema.validate(replyJson(answer));
 	return report.ok ? report.value : null;
 }
 function objections(answer: string) {
-	const report = challengerSchema.validate(json(answer));
+	const report = challengerSchema.validate(replyJson(answer));
 	return report.ok && report.value.objections.every((s) => s.trim())
 		? report.value.objections
 		: null;
 }
-function stageError(arena: Arena, stage: Run["stage"], results: Receipt[]) {
-	if (stage === "candidates") {
-		return (
-			results
-				.filter((r) => !candidateValid(r.answer!))
-				.map(
-					(r) =>
-						`${r.seat} must supply non-empty sections in order: ${candidateHeadings.join(", ")}.`,
-				)
-				.join("\n\n") || null
-		);
-	}
-	if (stage === "judge") {
-		const report = judgeReport(results[0]!.answer!);
-		const seats = candidateNames(arena);
-		if (
-			!report ||
-			!seats.includes(report.base) ||
-			report.scores.length !== seats.length ||
-			!seats.every((seat) =>
-				report.scores.some(
-					(r) =>
-						r.seat === seat && r.reason.trim() && r.unaskedDecisions.trim(),
-				),
-			)
+function formatError(arena: Arena, stage: Run["stage"], answer: string) {
+	if (stage === "candidates")
+		return candidateValid(answer)
+			? null
+			: "Supply a non-empty Unasked Decisions section.";
+	if (stage === "challenger")
+		return objections(answer) ? null : "Submit an objections array in JSON.";
+	const report = judgeReport(answer);
+	const seats = candidateNames(arena);
+	if (
+		!report ||
+		!seats.some((seat) => seat === report.base) ||
+		report.scores.length !== seats.length ||
+		!seats.every((seat) =>
+			report.scores.some(
+				(r) =>
+					r.seat === seat &&
+					r.reason.trim() &&
+					r.unaskedDecisions.every((decision) => decision.trim()),
+			),
 		)
-			return "The judge must name a candidate as base and give one score, reason, and account of unasked decisions for every candidate.";
-		return null;
-	}
-	return objections(results[0]!.answer!)
-		? null
-		: "The challenger must submit an objections array in JSON.";
+	)
+		return "Name a candidate as base and give one score, reason, and list of unasked decisions for every candidate.";
+	return null;
 }
 
 /** Keep attempts and child receipts even when they cannot be used to advance. */
 export function settleArena(arena: Arena, fact: EffectFact) {
 	const run = arena.runs.at(-1)!;
-	const outcome = receipts(fact, run);
-	outcome.error ??= stageError(arena, run.stage, outcome.results);
-	const next = { ...arena, runs: arena.runs.with(-1, { ...run, outcome }) };
-	if (outcome.error !== null)
-		return { arena: next, phase: "arena_blocked" as const };
+	const returned = receipts(fact, run);
+	const results =
+		typeof returned === "string"
+			? []
+			: returned.map((r) => ({
+					...r,
+					error:
+						r.error ??
+						(r.answer?.trim()
+							? formatError(arena, run.stage, r.answer)
+							: "No answer."),
+				}));
+	const error =
+		typeof returned === "string"
+			? returned
+			: results
+					.flatMap((r) => (r.error === null ? [] : [`${r.seat}: ${r.error}`]))
+					.join("\n\n") || null;
+	const next = {
+		...arena,
+		runs: arena.runs.with(-1, { ...run, outcome: { results, error } }),
+	};
+	if (error !== null) return { arena: next, phase: "arena_blocked" as const };
 	switch (run.stage) {
 		case "candidates":
-			if ("error" in next.setup)
-				throw new Error("Unconfigured arena has a candidate run");
-			return {
-				arena: plan(next, "judge", [
+			return dispatch(
+				plan(next, "judge", [
 					{
 						seat: "arena_judge",
-						model: next.setup.judge,
+						model: next.judge,
 						question: judgeQuestion({
 							...next.frame,
-							candidates: candidateText(next),
+							candidates: candidateNames(next)
+								.map((seat) => `### ${seat}\n\n${candidateAnswer(next, seat)}`)
+								.join("\n\n"),
 						}),
 					},
 				]),
-				phase: "dispatching" as const,
-			};
+			);
 		case "judge":
-			return { arena: next, phase: "drafting" as const };
+			return {
+				arena: { ...next, judge: run.jobs[0]!.model },
+				phase: "drafting" as const,
+			};
 		case "challenger":
 			return { arena: next, phase: "answering" as const };
 	}
 }
 
-function successful(arena: Arena, stage: Run["stage"]) {
+export function candidateNames(arena: Arena) {
+	return candidateJobs(arena).map((j) => j.seat);
+}
+function candidateAnswer(arena: Arena, seat: string) {
+	return arena.runs
+		.findLast(
+			(r) =>
+				r.stage === "candidates" &&
+				r.outcome?.results.some(
+					(row) => row.seat === seat && row.error === null,
+				),
+		)!
+		.outcome!.results.find((row) => row.seat === seat && row.error === null)!
+		.answer!;
+}
+function judging(arena: Arena) {
 	return arena.runs.findLast(
-		(r) => r.stage === stage && r.outcome?.error === null,
+		(r) => r.stage === "judge" && r.outcome?.error === null,
 	)!;
 }
-export function candidateNames(arena: Arena) {
-	return successful(arena, "candidates").jobs.map((j) => j.seat);
+export function candidateDecisions(arena: Arena, seat: string) {
+	return judgeReport(judging(arena).outcome!.results[0]!.answer!)!.scores.find(
+		(row) => row.seat === seat,
+	)!.unaskedDecisions;
 }
-function candidateText(arena: Arena) {
-	const run = successful(arena, "candidates");
-	return run
-		.outcome!.results.map(
-			(r, i) => `### ${r.seat} (${run.jobs[i]!.model})\n\n${r.answer}`,
-		)
-		.join("\n\n");
-}
-export function arenaEvidence(arena: Arena, number: number) {
-	const run = successful(arena, "judge");
+const quote = (text: string) =>
+	text
+		.split("\n")
+		.map((line) => (line ? `> ${line}` : ">"))
+		.join("\n");
+export function arenaEvidence(
+	arena: Arena,
+	number: number,
+	sources = "",
+	experiments = "None.",
+) {
+	const run = judging(arena);
 	const report = judgeReport(run.outcome!.results[0]!.answer!)!;
-	const judge = [
-		`Model: ${run.jobs[0]!.model}. Recommended base: ${report.base}.`,
-		...report.scores.map(
-			(s) =>
-				`### ${s.seat}: ${s.score}/10\n\n${s.reason}\n\nUnasked decisions: ${s.unaskedDecisions}`,
-		),
-	].join("\n\n");
 	return evidence({
 		...arena.frame,
 		arena: String(number),
-		candidates: candidateText(arena),
-		judge,
-	});
-}
-export function synthesisSources(
-	base: string,
-	grafts: { seat: string; text: string }[],
-) {
-	return baseText({
-		base,
-		grafts: grafts.map((g) => `- ${g.seat}: ${g.text}`).join("\n") || "None.",
+		sources,
+		experiments,
+		judge: [
+			`Model: ${run.jobs[0]!.model}. Recommended base: ${report.base}.`,
+			...report.scores.map(
+				(s) =>
+					`#### ${s.seat}: ${s.score}/10\n\n${s.reason}\n\nUnasked decisions:\n\n${s.unaskedDecisions.map((d, i) => `${i + 1}. ${d}`).join("\n") || "None."}`,
+			),
+		].join("\n\n"),
+		candidates: candidateJobs(arena)
+			.map(
+				({ seat, model }) =>
+					`#### ${seat} (${model})\n\n${quote(candidateAnswer(arena, seat))}`,
+			)
+			.join("\n\n"),
 	});
 }
 export function startChallenger(arena: Arena, base: string, synthesis: string) {
-	if ("error" in arena.setup)
-		throw new Error("Unconfigured arena cannot challenge a synthesis");
-	const selected = successful(arena, "candidates").outcome!.results.find(
-		(r) => r.seat === base,
-	)!;
-	const judge = successful(arena, "judge").outcome!.results[0]!;
 	return plan(arena, "challenger", [
 		{
 			seat: "arena_challenger",
-			model: arena.setup.challenger,
+			model: arena.challenger,
 			question: challengerQuestion({
 				...arena.frame,
-				base: `${selected.seat}\n\n${selected.answer}`,
-				synthesis,
-				judge: judge.answer!,
+				base: `${base}\n\n${quote(candidateAnswer(arena, base))}`,
+				synthesis: quote(synthesis),
+				judge: quote(judging(arena).outcome!.results[0]!.answer!),
 			}),
 		},
 	]);

@@ -1,5 +1,7 @@
 #### Experiment {{id}}: evidence for {{node}}
 
+Source for unasked decisions: `experiment-{{id}}`.
+
 **Observable question:** {{question}}
 
 **Written decision rule:** {{decisionRule}}

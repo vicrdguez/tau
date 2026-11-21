@@ -15,6 +15,7 @@ const evidence = prose(dir, "inputs/explorer/evidence.md", ["record"]);
 const candidate = prose(dir, "roles/arena-candidate.md", [])({});
 const judge = prose(dir, "roles/arena-judge.md", [])({});
 const challenger = prose(dir, "roles/arena-challenger.md", [])({});
+const prototype = prose(dir, "roles/design-prototype.md", ["directory"]);
 const challengerPrinciples = prose(
 	dir,
 	"inputs/design/challenger-principles.md",
@@ -125,13 +126,8 @@ export const runDesignDispatch: EffectRunner = async (
 						);
 					case "design_prototype": {
 						// Resolve only for a new plan. The child's stored cwd survives replay.
-						const instructions = prose(
-							dir,
-							"roles/design-prototype.md",
-							[],
-						)({});
-						const scratch = await mkdtemp(join(tmpdir(), "keel-prototype-"));
-						return seat(role, model, scratch, instructions);
+						const directory = await mkdtemp(join(tmpdir(), "keel-prototype-"));
+						return seat(role, model, directory, prototype({ directory }));
 					}
 				}
 			},

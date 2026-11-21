@@ -1,13 +1,19 @@
-## Arena {{arena}}
+## Evidence (does not bind)
 
-**Question:** {{question}}
+{{sources}}
+
+Arena {{arena}}. **Question:** {{question}}
 
 **Rubric:** {{rubric}}
 
-## Candidates in full
-
-{{candidates}}
-
-## Judge's report
+### Judge's report
 
 {{judge}}
+
+### Experiments
+
+{{experiments}}
+
+### Candidates in full
+
+{{candidates}}

@@ -1,7 +1,7 @@
-## Synthesis sources
+### Synthesis sources
 
 **Base:** {{base}}
 
-### Grafts
+**Grafts and their Mandate labels**
 
 {{grafts}}

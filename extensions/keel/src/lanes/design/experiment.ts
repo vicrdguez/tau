@@ -8,6 +8,7 @@ import {
 	type StaticFacts,
 } from "../../kernel/lane.ts";
 import { text } from "./draft.ts";
+import { replyJson } from "./reply-json.ts";
 
 // An experiment is a single bounded dispatch batch.
 const maxVariants = 8;
@@ -221,13 +222,7 @@ export function finishExperiment(
 
 function report(receipt: Receipt) {
 	if (receipt.error !== null || !receipt.answer?.trim()) return null;
-	let json: unknown;
-	try {
-		json = JSON.parse(receipt.answer);
-	} catch {
-		return null;
-	}
-	const parsed = prototypeReport.validate(json);
+	const parsed = prototypeReport.validate(replyJson(receipt.answer));
 	if (!parsed.ok) return null;
 	const { observation, evidence, incidentalChoices } = parsed.value;
 	return written(observation) &&
@@ -286,7 +281,7 @@ function resultsText(experiment: Experiment) {
 					? [
 							`Observation: ${parsed.observation}`,
 							`Evidence: ${parsed.evidence}`,
-							`Incidental choices:\n\n${list(parsed.incidentalChoices) || "None."}`,
+							`Unasked decisions:\n\n${parsed.incidentalChoices.map((choice, i) => `${i + 1}. ${choice}`).join("\n") || "None."}`,
 						]
 					: [
 							receipt.error ??
@@ -300,7 +295,7 @@ function resultsText(experiment: Experiment) {
 		.join("\n\n");
 }
 
-/** Attach this evidence to the Mandate draft's protocol.node, not to the design as a whole. */
+/** Render from the original experiment, outside the binding Mandate. */
 export function experimentEvidence(experiment: Experiment): string {
 	const { protocol, comparison } = experiment;
 	return renderEvidence({
@@ -319,17 +314,10 @@ export function experimentInput(experiment: Experiment): string {
 	return comparePrototypes({ evidence: experimentEvidence(experiment) });
 }
 
-export function experimentRiders(experiment: Experiment) {
+export function experimentDecisions(experiment: Experiment) {
 	const winner = experiment.comparison?.winner;
 	if (winner == null) return [];
-	const i = experiment.protocol.variants.indexOf(winner);
-	const receipt = experiment.outcome?.results[i];
-	return (receipt ? (report(receipt)?.incidentalChoices ?? []) : []).map(
-		(text, i) => ({
-			label: `experiment-${experiment.id}-r${i + 1}`,
-			text,
-			origin: "incidental" as const,
-			disposition: "open" as const,
-		}),
-	);
+	const receipt =
+		experiment.outcome?.results[experiment.protocol.variants.indexOf(winner)];
+	return receipt ? (report(receipt)?.incidentalChoices ?? []) : [];
 }

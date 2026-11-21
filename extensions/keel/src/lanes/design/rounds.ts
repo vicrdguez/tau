@@ -1,5 +1,6 @@
 import { subject } from "../../kernel/ids.ts";
 import { type Ask, type KernelEvent, prose } from "../../kernel/lane.ts";
+import type { Outcome } from "./accounting.ts";
 import {
 	type Audit,
 	changedFields,
@@ -25,8 +26,9 @@ export type Synthesis = {
 	draft: Draft;
 	replies: Reply[];
 	base: string;
-	grafts: { seat: string; text: string }[];
-	evidence: { id: number; node: string; text: string }[];
+	grafts: { seat: string; label: string; text: string }[];
+	outcomes: Outcome[];
+	experimentCount: number;
 };
 export type Round = Synthesis & {
 	arena: number;
@@ -34,7 +36,7 @@ export type Round = Synthesis & {
 	dispositions: Reply[];
 	answer: Answer | null;
 };
-type DraftRound = Pick<Round, "draft" | "replies" | "answer" | "evidence">;
+type DraftRound = Pick<Round, "draft" | "replies" | "answer">;
 const dir = import.meta.dirname + "/../../prose";
 const review = prose(dir, "documents/review.md", ["round", "changes", "body"]);
 const roundText = prose(dir, "documents/mandate-round.md", [
@@ -48,9 +50,18 @@ const roundText = prose(dir, "documents/mandate-round.md", [
 const roundHistory = prose(dir, "documents/mandate-round-history.md", [
 	"removed",
 	"replies",
+	"heading",
 ]);
-export const precedingRound = (removed: string, replies: string) =>
-	roundHistory({ removed: removed || "None.", replies: replies || "None." });
+export const precedingRound = (
+	removed: string,
+	replies: string,
+	heading = "##",
+) =>
+	roundHistory({
+		removed: removed || "None.",
+		replies: replies || "None.",
+		heading,
+	});
 const riderText = prose(dir, "documents/mandate-rider.md", [
 	"text",
 	"origin",
@@ -70,6 +81,16 @@ const revise = prose(dir, "inputs/design/revise.md", [
 	"direction",
 ]);
 const declined = prose(dir, "documents/declined.md", ["annotations"]);
+const baseText = prose(dir, "documents/arena-base.md", ["base", "grafts"]);
+export function synthesisSources(s: Synthesis) {
+	return baseText({
+		base: s.base,
+		grafts:
+			s.grafts
+				.map((g) => `- ${g.seat} → \`${g.label}\`: ${g.text}`)
+				.join("\n") || "None.",
+	});
+}
 const mainKey = (n: number) => subject(`mandate/${n}`);
 export const continuesReview = (choice: string) =>
 	["rework", "arena", "arena_fresh"].includes(choice) ||
@@ -123,7 +144,7 @@ type Entry = {
 	probe?: string;
 	reference?: string;
 };
-function entries({ draft: d, evidence }: DraftRound, a: Audit): Entry[] {
+function entries({ draft: d }: DraftRound, a: Audit): Entry[] {
 	const result: Entry[] = [
 		...nodes(d, a, "Proposed ruling").map((n) => ({
 			...n,
@@ -150,10 +171,6 @@ function entries({ draft: d, evidence }: DraftRound, a: Audit): Entry[] {
 	];
 	return result.map((n) => ({
 		...n,
-		body: [
-			n.body,
-			...evidence.filter((e) => e.node === n.label).map((e) => e.text),
-		].join("\n\n"),
 		reference: d.references.find((r) => r.label === n.label)?.source ?? "",
 	}));
 }
@@ -258,6 +275,7 @@ function body(
 				? precedingRound(
 						removed.map((p) => entryText(p)).join("\n\n"),
 						repliesText(r, prev),
+						"###",
 					)
 				: "",
 		}),
