@@ -79,7 +79,7 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 	await s.accept(trunk);
 });
 
-test("reviewed Mandate: rework annotated nodes and a rider, approve once, then Encode, migrate, verify, land and hand over", async (t) => {
+test("precedent-setting work: two explorers, two candidates, judge and challenge, two annotation rounds, then land three dependent items", async (t) => {
 	const { root } = await fixture(t);
 	const base = await seedBookPolicy(root);
 	const s = await openReview(root, new MemoryStorage(), true);
@@ -90,6 +90,7 @@ test("reviewed Mandate: rework annotated nodes and a rider, approve once, then E
 	await s.reworkRider();
 	await s.approveAndBuild();
 	await assertLanded(root, base, `keel/${s.root.id}/build`, []);
+	assert.match(git(root, "show", "trunk:book-report.sh"), /read_book book/);
 });
 
 test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening the answered round or starting a build", async (t) => {

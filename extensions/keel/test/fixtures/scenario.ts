@@ -53,9 +53,12 @@ export async function openScriptedWorkflow(
 		provider: "queue-fixture",
 		models: [{ id: "investigator" }],
 	});
+	const secondCandidate = fauxProvider({ provider: "candidate-fixture" });
+	const judge = fauxProvider({ provider: "judge-fixture" });
+	const challenger = fauxProvider({ provider: "challenger-fixture" });
+	const explorer = fauxProvider({ provider: "explorer-fixture" });
 	const models = createModels();
-	models.setProvider(provider.provider);
-	models.setProvider(queueProvider.provider);
+	for (const p of [provider, queueProvider, secondCandidate, judge, challenger, explorer]) models.setProvider(p.provider);
 	const store = await openStore(
 		storage,
 		{
@@ -83,6 +86,11 @@ export async function openScriptedWorkflow(
 					worker: "faux/worker",
 					verify: "faux/verifier",
 					queue: "queue-fixture/investigator",
+					arena_seat_1: "faux/designer",
+					arena_seat_2: `candidate-fixture/${secondCandidate.getModel().id}`,
+					arena_judge: `judge-fixture/${judge.getModel().id}`,
+					arena_challenger: `challenger-fixture/${challenger.getModel().id}`,
+					design_explorer: `explorer-fixture/${explorer.getModel().id}`,
 				}),
 			ctx,
 		);
@@ -149,7 +157,7 @@ export async function openScriptedWorkflow(
 		}
 		assert.deepEqual(errors, []);
 	}
-	return { store, root, provider, queueProvider, turn, settle };
+	return { store, root, provider, queueProvider, secondCandidate, judge, challenger, explorer, turn, settle };
 }
 
 export async function openScenario(

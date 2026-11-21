@@ -16,6 +16,9 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 	const tools = extension.tools?.map((tool) => tool.name) ?? [];
 	for (const name of [
 		"ground",
+		"dispatch",
+		"frame_arena",
+		"answer_challenger",
 		"publish_mandate",
 		"publish_revision",
 		"principle",
@@ -68,8 +71,11 @@ test("the public workflow entry starts a designer with its own model and coding 
 		/`file_finding` with `source: \"owner\"`/,
 	);
 	assert.deepEqual(agent.tools.map((tool) => tool.name).sort(), [
+		"answer_challenger",
 		"bash",
+		"dispatch",
 		"file_finding",
+		"frame_arena",
 		"ground",
 		"principle",
 		"publish_mandate",
