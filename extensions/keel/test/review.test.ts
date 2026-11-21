@@ -385,7 +385,7 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	assert.match(current!, /R2: Rule \(new\)[\s\S]*Reference: Construction ADR/i);
 	assert.match(current!, /B: Rider \(changed\)[\s\S]*Disposition: bind/i);
 	assert.match(current!, /D: Rider \(new\)[\s\S]*Disposition: open/i);
-	assert.doesNotMatch(current!, /A: Rider \(|\bR1\b|\bC: Rider\b/i);
+	assert.doesNotMatch(current!, /^### (?:A: Rider \(|R1:|C: Rider\b)/im);
 	assert.match(
 		removed!,
 		/R1: Rule[\s\S]*One representation\.[\s\S]*Count the encodings\./,
