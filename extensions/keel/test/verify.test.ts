@@ -35,6 +35,7 @@ const mandate = {
 	encodeRequired: false,
 	approvalNotes: [],
 	intent: "Balance every ledger.",
+	considerations: null,
 	nodes: [{ label: "sums", rule: "Sums match", probe: "compare totals" }],
 	checks: [{ id: "totals", argv: ["run", "proof"], timeoutMs: 10 }],
 };

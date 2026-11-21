@@ -12,6 +12,7 @@ const mandate: Mandate = {
 	encodeRequired: false,
 	approvalNotes: [] as string[],
 	intent: "repair pricing",
+	considerations: null,
 	nodes: [{ label: "price", rule: "round once", probe: "0.05" }],
 	checks: [{ id: "prove", argv: ["make", "test"], timeoutMs: 5000 }],
 };
@@ -186,7 +187,13 @@ const reviewed: Mandate = {
 	...mandate,
 	encodeRequired: true,
 	approvalNotes: ["Cover cash ties", "Keep the integer seam"],
-	delegated: [{ label: "tick-order", text: "Choose tick order locally" }],
+	delegated: [
+		{
+			label: "tick-order",
+			text: "Choose tick order locally",
+			origin: "incidental",
+		},
+	],
 	nodes: [
 		{ label: "port-api", section: "Seam", body: "```ts\nprice(cents);\n```" },
 		{
@@ -394,7 +401,7 @@ test("a prose fence is refused before any worktree is prepared", () => {
 		fences: "book.sh and book-check.sh",
 	});
 	assert.ok("reject" in result);
-	assert.match(result.reject, /fence.*repository.relative path/i);
+	assert.match(result.reject, /fence.*repository.relative.*path/i);
 	assert.deepEqual(b.effects(), []);
 });
 
@@ -452,7 +459,6 @@ test("the verifier receives the repo's comparison base, not the current head or 
 	const p = b.pub({ ...clean, base: inherited }).send![0]!.event;
 	assert.equal(p.head, merged);
 	assert.equal(p.base, inherited);
-	assert.equal(p.trunk, null);
 });
 
 test("rework and integration reach the original worker with fresh expectations; only observed publications advance", () => {
@@ -1079,6 +1085,7 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 			rulings: [ruling],
 			summary: "price repaired",
 			risk: "tick table",
+			approvalReplies: [],
 		},
 	});
 	b.send({ kind: "closed" });

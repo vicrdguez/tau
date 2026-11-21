@@ -217,7 +217,7 @@ export async function openScenario(
 			{
 				command: `printf '${rework ? "repaired" : "repaired\\n"}' > book && git commit -am 'repair book'`,
 			},
-			"Change only book.",
+			"Fences: book",
 		);
 		call("worker", "record_ruling", {
 			what,
