@@ -961,20 +961,44 @@ test("explorers distinguish a revoked pattern from approved authority, and only 
 	}
 });
 
-test("blessing a pattern withdraws other open decisions and investigations for that pattern", () => {
+test("A-4: a pattern ruling leaves the other decision and the uninvestigated filing open with their own evidence", () => {
 	const q = queue();
-	for (const text of ["First ruling", "Another ruling", "Third ruling"])
-		q.file({ text, pattern: "round-last" });
-	for (const id of [1, 2])
-		q.send(
-			q.investigation(id, "unapproved_pattern", { recommendation: "bless" }),
-		);
+	for (const text of [
+		"Harmless helper",
+		"The helper loses data",
+		"The helper races with statistics",
+	])
+		q.file({ text, pattern: "legacy-writer" });
+	q.send(
+		q.investigation(1, "unapproved_pattern", {
+			recommendation: "bless",
+			evidence: "No lost data in the simple probe.",
+		}),
+	);
+	q.send(
+		q.investigation(2, "unapproved_pattern", {
+			recommendation: "revoke",
+			evidence: "The flush drops a record.",
+		}),
+	);
 	const [first, second] = q.ask();
 	assert.ok(first && second);
+	assert.doesNotMatch(
+		first.basis,
+		/flush drops a record|races with statistics/,
+	);
 	assert.deepEqual(q.answer("bless", first.subject), []);
-	assert.deepEqual(q.ask(), []);
-	assert.equal(q.agents()[0]?.expects.length, 0);
-	assert.deepEqual(q.answer("revoke", second.subject), []);
+	assert.deepEqual(q.ask(), [second]);
+	assert.match(second.basis, /flush drops a record/);
+	assert.match(
+		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		/helper races with statistics/,
+	);
+	assert.equal(q.answer("revoke", second.subject)[0]?.work, "new");
+	assert.deepEqual(
+		q.view().patternRulings.map((p) => [p.name, p.status]),
+		[["legacy-writer", "revoked"]],
+	);
 });
 
 test("a later blessing replaces a prior revocation and governs the next citation", () => {
