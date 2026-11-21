@@ -8,13 +8,12 @@ import {
 	defineLaneTool,
 	type Expectation,
 	type Lane,
-	type Message,
 	prose,
 	type World,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
-import { fileHolding, resumption } from "../queue/public.ts";
+import { closeFindings, fileHolding, resumption } from "../queue/public.ts";
 import {
 	accountingError,
 	normalizeOutcomes,
@@ -56,7 +55,6 @@ import {
 } from "./experiment.ts";
 import {
 	type Mandate,
-	mandateLabels,
 	type Reply,
 	repliesCover,
 	repliesSchema,
@@ -64,6 +62,7 @@ import {
 import {
 	active,
 	type Changes,
+	causeAnswersSchema,
 	changesSchema,
 	declinedRevision,
 	propose,
@@ -121,20 +120,14 @@ export const designTools = [
 		roles: ["designer"],
 		name: "publish_revision",
 		description:
-			"Propose additions, replacements or removals against the bound Mandate. Reply to every owed annotation by number.",
-		parameters: obj({ changes: changesSchema, replies: repliesSchema }),
+			"Propose Mandate changes or explain why none are needed. Cite the nodes that answer each finding and reply to every owed annotation by number.",
+		parameters: obj({
+			changes: changesSchema,
+			answers: causeAnswersSchema,
+			replies: repliesSchema,
+		}),
 		terminate: true,
 		event: (args) => ({ kind: "publish_revision", ...args }),
-	}),
-	defineLaneTool({
-		lane: "design",
-		roles: ["designer"],
-		name: "revision_settled",
-		description:
-			"Release a cause when an existing bound Mandate node already settles it.",
-		parameters: obj({ cause: text, node: text }),
-		terminate: true,
-		event: (args) => ({ kind: "revision_settled", ...args }),
 	}),
 	defineLaneTool({
 		lane: "design",
@@ -341,40 +334,14 @@ const references = (s: State) =>
 			?.draft.references.map((r) => `${r.label}: ${r.source}`) ?? []),
 	].join("\n");
 function revisionIndex(s: State) {
-	const latest = s.revisions.at(-1);
-	return s.phase === "bound" && latest && active(latest)
-		? s.revisions.length - 1
-		: -1;
+	// A draft behind an approved revision waits for the approved plan to apply.
+	return s.phase === "bound" ? s.revisions.findIndex(active) : -1;
 }
 function amend(s: State, i: number, change: Partial<Revision>): State {
 	return {
 		...s,
 		revisions: s.revisions.with(i, { ...s.revisions[i]!, ...change }),
 	};
-}
-function revisionDisposition(
-	work: NonNullable<World["work"]>,
-	causes: string[],
-	disposition: string,
-): Message {
-	return {
-		lane: "queue",
-		work: null,
-		event: { kind: "revision_disposition", work, causes, disposition },
-	};
-}
-const revisionApprovalNotes = (revision: Revision) =>
-	revision.rounds.flatMap((r) =>
-		r.answer?.choice === "approve" ? approvalNotes(r.answer) : [],
-	);
-function followupApproval(
-	work: NonNullable<World["work"]>,
-	revision: Revision,
-): Message[] {
-	const notes = revisionApprovalNotes(revision);
-	return notes.length
-		? [toBuild(work, { kind: "approval_followup", notes })]
-		: [];
 }
 function labels(value: unknown): value is string[] {
 	return (
@@ -632,6 +599,7 @@ export const design: Lane<State> = {
 	state: doc,
 	view: (s) => ({
 		mandate: s.mandate,
+		goal: goal(s),
 		ownerReviewed:
 			s.rounds.some((r) => r.answer?.choice === "approve") ||
 			s.revisions.some((r) => r.phase === "applied"),
@@ -639,7 +607,7 @@ export const design: Lane<State> = {
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {
 				if (r.phase !== "applied") return [];
-				return [`- Revision ${i + 1}: ${r.rounds.at(-1)!.nodes.join(", ")}`];
+				return [`- Revision ${i + 1}: ${r.rounds.at(-1)!.changes}`];
 			})
 			.join("\n"),
 		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
@@ -713,13 +681,12 @@ export const design: Lane<State> = {
 					(cause) => !s.revisions.some((r) => r.causes.includes(cause)),
 				);
 				if (!fresh.length) return { state: s };
-				const index = revisionIndex(s);
-				const open = s.revisions[index];
-				if (!open)
+				const open = s.revisions.at(-1);
+				const state = { ...s, seq: s.seq + 1 };
+				if (!open || !active(open) || open.phase === "approved")
 					return {
 						state: {
-							...s,
-							seq: s.seq + 1,
+							...state,
 							direction: "",
 							cause: null,
 							revisions: [
@@ -729,49 +696,14 @@ export const design: Lane<State> = {
 						},
 					};
 				return {
-					state: amend({ ...s, seq: s.seq + 1 }, index, {
+					state: amend(state, s.revisions.length - 1, {
 						phase: open.phase === "held" ? "held" : "drafting",
 						causes: [...open.causes, ...fresh],
 						nodes: [...new Set([...open.nodes, ...nodes])],
 						text: [open.text, text].join("\n\n"),
+						rounds:
+							open.phase === "review" ? open.rounds.slice(0, -1) : open.rounds,
 					}),
-					send:
-						open.phase === "approved"
-							? [toBuild(w.work!, { kind: "withdraw_revision" })]
-							: [],
-				};
-			}
-			case "revision_settled": {
-				const i = revisionIndex(s);
-				const r = s.revisions[i];
-				const { cause, node } = e;
-				if (
-					r?.phase !== "drafting" ||
-					typeof cause !== "string" ||
-					typeof node !== "string" ||
-					!r.causes.includes(cause) ||
-					!mandateLabels(s.mandate!).includes(node)
-				)
-					return {
-						reject:
-							"Name a pending revision cause and a node of the bound Mandate.",
-					};
-				const remaining = r.causes.filter((c) => c !== cause);
-				return {
-					state: amend(
-						{ ...s, seq: s.seq + 1 },
-						i,
-						remaining.length ? { causes: remaining } : { phase: "settled" },
-					),
-					send: [
-						...(remaining.length ? [] : followupApproval(w.work!, r)),
-						toBuild(w.work!, {
-							kind: "queue_release",
-							cause,
-							direction: `The bound Mandate already settles this in ${node}.`,
-						}),
-						revisionDisposition(w.work!, [cause], `already settled by ${node}`),
-					],
 				};
 			}
 			case "publish_revision": {
@@ -784,6 +716,7 @@ export const design: Lane<State> = {
 					r,
 					e.changes as Changes,
 					e.replies as Reply[],
+					e.answers as Parameters<typeof propose>[4],
 				);
 				if ("reject" in proposed) return proposed;
 				const plan =
@@ -827,15 +760,17 @@ export const design: Lane<State> = {
 				const round = r.rounds.at(-1)!;
 				const mandate = {
 					...round.mandate,
-					approvalNotes: revisionApprovalNotes(r),
+					approvalNotes: approvalNotes(round.answer!),
 				};
 				return {
-					state: amend({ ...s, mandate }, i, { phase: "applied" }),
+					state: amend({ ...s, mandate, seq: s.seq + 1 }, i, {
+						phase: "applied",
+					}),
 					send: [
-						revisionDisposition(
+						closeFindings(
 							w.work!,
 							r.causes,
-							`revision applied (${round.nodes.join(", ")})`,
+							`revision applied (${round.nodes.join(", ") || "no Mandate change"})`,
 						),
 					],
 				};
@@ -1220,7 +1155,7 @@ export const design: Lane<State> = {
 			const index = revisionIndex(s);
 			const revision = s.revisions[index];
 			if (revision?.phase === "review") {
-				const ask = revisionAsk(s.mandate!, revision, index);
+				const ask = revisionAsk(s.mandate!, revision, index, s.seq);
 				if (ask.subject !== e.subject || !ask.choices.includes(e.choice))
 					return { state: s };
 				const answer = reviewAnswer(e, ask.basis);
@@ -1239,15 +1174,10 @@ export const design: Lane<State> = {
 						return {
 							state: amend(state, index, { phase: "declined" }),
 							send: [
-								...followupApproval(w.work!, revision),
 								...revision.causes.map((cause) =>
 									toBuild(w.work!, { kind: "queue_release", cause }),
 								),
-								revisionDisposition(
-									w.work!,
-									revision.causes,
-									"revision declined",
-								),
+								closeFindings(w.work!, revision.causes, "revision declined"),
 							],
 							notes: [{ agent: null, text: declinedRevision(answer) }],
 						};
@@ -1257,15 +1187,14 @@ export const design: Lane<State> = {
 							send: [
 								toBuild(w.work!, {
 									kind: "propose_revision",
+									number: index + 1,
 									mandate: {
 										...round.mandate,
-										approvalNotes: [
-											...revisionApprovalNotes(revision),
-											...approvalNotes(answer),
-										],
+										approvalNotes: approvalNotes(answer),
 									},
 									causes: revision.causes,
 									nodes: round.nodes,
+									changes: round.changes,
 									text: revision.text,
 								}),
 							],
@@ -1389,7 +1318,7 @@ export const design: Lane<State> = {
 		const index = revisionIndex(s);
 		const revision = s.revisions[index];
 		if (revision?.phase === "review")
-			result.push(revisionAsk(s.mandate!, revision, index));
+			result.push(revisionAsk(s.mandate!, revision, index, s.seq));
 		if (s.phase === "review") result.push(mandateAsk(s));
 		if (s.phase === "arena_blocked")
 			result.push(blockedAsk(currentArena(s), s.seq));

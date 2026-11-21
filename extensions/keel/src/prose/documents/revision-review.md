@@ -1,13 +1,9 @@
-Approve these Mandate changes, ask for rework, or decline this proposal. Approval takes effect with the revised plan. Declining keeps the current Mandate and releases this proposal's holds.
+{{disposition}}, ask for rework, or decline this proposal. Approval takes effect when the coordinator publishes the plan. Declining keeps the current Mandate and releases this proposal's holds.
 
 {{summary}}
-## Investigation
+## How the proposal answers the findings
 
-{{evidence}}
-
-## What the plan must revisit
-
-{{plan}}
+{{answers}}
 
 ## Currently bound
 
@@ -16,5 +12,13 @@ Approve these Mandate changes, ask for rework, or decline this proposal. Approva
 ## Proposed
 
 {{after}}
+
+## What the plan must revisit
+
+{{plan}}
+
+## Investigation
+
+{{evidence}}
 
 {{history}}

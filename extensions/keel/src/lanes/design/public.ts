@@ -81,30 +81,99 @@ const considerationsText = prose(dir, "design-considerations.md", [
 	"alternatives",
 ]);
 
-/** Render the complete bound document, or only the binding labels named by a brief. */
-export function renderMandate(m: Mandate, labels?: readonly string[]) {
-	const rows = [
+/** The common review representation of a bound or draft Mandate node. */
+export type MandateNode = {
+	label: string;
+	section: string;
+	body: string;
+	probe?: string;
+	seam?: Draft["seams"][number] | undefined;
+	check?: Mandate["checks"][number] | undefined;
+	rider?: Draft["riders"][number];
+	reference?: string;
+};
+export function mandateNodes(m: Mandate): MandateNode[] {
+	return [
 		{ label: "intent", section: "Intent", body: m.intent },
 		...m.nodes.map((n) =>
 			"rule" in n
-				? {
-						label: n.label,
-						section: "Rule",
-						body: `${n.rule}\n\nFalsifying probe: ${n.probe}`,
-					}
+				? { label: n.label, section: "Rule", body: n.rule, probe: n.probe }
 				: n,
 		),
-		...m.checks.map((c) => ({
-			label: c.id,
+		...m.checks.map((check) => ({
+			label: check.id,
 			section: "Proof",
-			body: proofText(c),
+			body: proofText(check),
+			check,
 		})),
 	];
-	const nodes = rows
+}
+function nodeFields(n: MandateNode) {
+	const { seam, check, rider } = n;
+	return {
+		section: n.section,
+		...(seam
+			? {
+					"current callers": seam.callersNow,
+					"future callers": seam.callersLater,
+					"caller usage": seam.usage,
+					"types and signatures": seam.signature,
+					owner: seam.owner,
+					"allowed dependencies": seam.dependencies,
+				}
+			: check
+				? { command: check.argv, timeout: check.timeoutMs }
+				: rider
+					? {
+							text: rider.text,
+							origin: rider.origin,
+							disposition: rider.disposition,
+						}
+					: {
+							[n.label === "intent"
+								? "intent"
+								: n.section === "Rule"
+									? "rule"
+									: "text"]: n.body,
+							[n.label === "intent" ? "done when" : "falsifying probe"]:
+								n.probe || undefined,
+						}),
+		reference: n.reference,
+	};
+}
+export function changedFields(old: MandateNode, next: MandateNode) {
+	const before: Record<string, unknown> = nodeFields(old);
+	const after: Record<string, unknown> = nodeFields(next);
+	return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+		(field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]),
+	);
+}
+export function nodeBody(n: MandateNode) {
+	return [
+		n.body,
+		...(n.probe
+			? [
+					`${n.label === "intent" ? "Done when" : "Falsifying probe"}: ${n.probe}`,
+				]
+			: []),
+		...(n.reference ? [`Reference: ${n.reference}`] : []),
+	].join("\n\n");
+}
+export function renderNode(
+	n: MandateNode,
+	mark = "",
+	fields: string[] = [],
+	heading = "###",
+) {
+	const changes = fields.length ? `Changed: ${fields.join(", ")}\n\n` : "";
+	return `${heading} ${n.label}: ${n.section}${mark}\n\n${changes}${nodeBody(n)}`;
+}
+
+/** Render the complete bound document, or only the binding labels named by a brief. */
+export function renderMandate(m: Mandate, labels?: readonly string[]) {
+	const nodes = mandateNodes(m)
 		.filter((n) => !labels || labels.includes(n.label))
-		.map(
-			(n) => `${labels ? "###" : "####"} ${n.label}: ${n.section}\n\n${n.body}`,
-		)
+		.map((n) => renderNode(n, "", [], labels ? "###" : "####"))
 		.join("\n\n");
 	return labels
 		? nodes

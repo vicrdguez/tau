@@ -2,12 +2,10 @@ import { arr, obj, opt } from "tau/schema";
 import { subject, token } from "../../kernel/ids.ts";
 import { type Ask, type Expectation, prose } from "../../kernel/lane.ts";
 import {
-	changedFields,
 	checkSchema,
 	type Draft,
 	renderSeam,
 	ruleSchema,
-	seamFields,
 	seamSchema,
 	text,
 	validCheck,
@@ -15,10 +13,14 @@ import {
 	validSeam,
 } from "./draft.ts";
 import {
+	changedFields,
 	type Mandate,
 	mandateLabels,
+	mandateNodes,
+	nodeBody,
 	type Reply,
 	renderMandate,
+	renderNode,
 	repliesCover,
 } from "./public.ts";
 import {
@@ -42,29 +44,28 @@ export type Changes = Partial<
 	sections?: { label: string; body: string }[];
 	remove?: string[];
 };
+export const causeAnswersSchema = arr(
+	obj({ cause: text, nodes: arr(text), reason: text }),
+);
+type CauseAnswer = { cause: string; nodes: string[]; reason: string };
 type RevisionRound = {
 	mandate: Mandate;
 	nodes: string[];
+	answers: CauseAnswer[];
+	changes: string;
 	replies: Reply[];
 	plan: string;
 	answer: Answer | null;
 };
 export type Revision = {
-	phase:
-		| "drafting"
-		| "review"
-		| "held"
-		| "approved"
-		| "applied"
-		| "declined"
-		| "settled";
+	phase: "drafting" | "review" | "held" | "approved" | "applied" | "declined";
 	causes: string[];
 	nodes: string[];
 	text: string;
 	rounds: RevisionRound[];
 };
 export const active = (r: Revision) =>
-	r.phase !== "applied" && r.phase !== "declined" && r.phase !== "settled";
+	r.phase !== "applied" && r.phase !== "declined";
 const owed = (r: RevisionRound | undefined) =>
 	r?.answer?.choice === "rework" ? r.answer.annotations : [];
 export const revisionToken = (seq: number) => token("revision", seq);
@@ -74,6 +75,7 @@ export function propose(
 	r: Revision,
 	changes: Changes,
 	replies: Reply[],
+	answers: CauseAnswer[] | undefined,
 ): { round: RevisionRound } | { reject: string } {
 	if (!repliesCover(owed(r.rounds.at(-1)).length, replies))
 		return { reject: "Reply to every owed number exactly once with a reason." };
@@ -160,14 +162,41 @@ export function propose(
 	};
 	if (!mandate.checks.length)
 		return { reject: "Keep at least one timed proof." };
-	const changed = [
-		...new Set([...mandateLabels(base), ...mandateLabels(mandate)]),
-	].filter((l) => renderMandate(base, [l]) !== renderMandate(mandate, [l]));
-	if (!changed.length) return { reject: "There is no change to review." };
+	const edits = mandateEdits(base, mandate);
+	const available = new Set([
+		...mandateLabels(base),
+		...mandateLabels(mandate),
+	]);
+	if (
+		!Array.isArray(answers) ||
+		!sameCauses(
+			r.causes,
+			answers.map((a) => a.cause),
+		) ||
+		answers.some(
+			(a) =>
+				!a.reason.trim() ||
+				!a.nodes.length ||
+				a.nodes.some((l) => !available.has(l)),
+		) ||
+		edits.some(({ label }) => !answers.some((a) => a.nodes.includes(label)))
+	)
+		return {
+			reject:
+				"Explain each finding once. Cite its settling or changed labels, and attribute every edit to a finding.",
+		};
 	return {
 		round: {
 			mandate,
-			nodes: changed,
+			nodes: edits.map((e) => e.label),
+			changes:
+				edits
+					.map(
+						({ label, before, after, fields }) =>
+							`${label}: ${!after ? "removed" : !before ? "added" : fields.join(", ")}`,
+					)
+					.join("; ") || "No Mandate change",
+			answers,
 			replies,
 			answer: null,
 			plan: "No plan items affected.",
@@ -175,23 +204,36 @@ export function propose(
 	};
 }
 
-function mandateFields(m: Mandate, label: string) {
-	if (label === "intent") return { intent: m.intent };
-	const check = m.checks.find((c) => c.id === label);
-	if (check) return { command: check.argv, timeout: check.timeoutMs };
-	const n = m.nodes.find((n) => n.label === label)!;
-	if ("rule" in n) return { rule: n.rule, "falsifying probe": n.probe };
-	return "seam" in n
-		? seamFields(n.seam)
-		: { section: n.section, text: n.body };
+function mandateEdits(base: Mandate, next: Mandate) {
+	const old = new Map(mandateNodes(base).map((n) => [n.label, n]));
+	const current = new Map(mandateNodes(next).map((n) => [n.label, n]));
+	return [...new Set([...old.keys(), ...current.keys()])].flatMap((label) => {
+		const before = old.get(label);
+		const after = current.get(label);
+		const fields = before && after ? changedFields(before, after) : [];
+		return before && after && !fields.length
+			? []
+			: [{ label, before, after, fields }];
+	});
 }
+
+const answersText = (r: RevisionRound) =>
+	r.answers
+		.map(
+			({ cause, nodes, reason }) =>
+				`- ${cause.replace(/^queue\/(\d+)$/, "Finding #$1")}: ${nodes.join(", ")}. ${reason.trim()}`,
+		)
+		.join("\n");
+const cited = (round: RevisionRound) => round.answers.flatMap((a) => a.nodes);
 
 const dir = import.meta.dirname + "/../../prose";
 const review = prose(dir, "documents/revision-review.md", [
 	"summary",
+	"disposition",
 	"evidence",
 	"before",
 	"after",
+	"answers",
 	"history",
 	"plan",
 ]);
@@ -209,52 +251,58 @@ const rework = prose(dir, "inputs/design/rework-revision.md", [
 	"causes",
 	"mandate",
 	"references",
-	"before",
 	"after",
+	"answers",
 	"annotations",
 	"direction",
 ]);
 const decline = prose(dir, "documents/revision-declined.md", ["annotations"]);
 
-export function revisionAsk(base: Mandate, r: Revision, index: number): Ask {
+export function revisionAsk(
+	base: Mandate,
+	r: Revision,
+	index: number,
+	seq: number,
+): Ask {
 	const current = r.rounds.at(-1)!;
 	const previous = r.rounds.at(-2);
-	const changes: string[] = [];
-	const proposed = current.nodes.map((label) => {
-		const entry = renderMandate(current.mandate, [label]);
-		const bound = renderMandate(base, [label]);
-		const old = previous ? renderMandate(previous.mandate, [label]) : bound;
-		if (previous && old !== entry)
-			changes.push(`${label} ${!old ? "new" : !entry ? "removed" : "changed"}`);
-		if (!entry) return `### ${label} (removed)`;
-		const fields = bound
-			? changedFields(
-					mandateFields(base, label),
-					mandateFields(current.mandate, label),
-				)
-			: [];
-		const marked = entry.replace(
-			"\n",
-			` (${bound ? "changed" : "new"})\n${fields.length ? `\nChanged: ${fields.join(", ")}\n` : ""}`,
-		);
-		return previous && old && old !== entry
-			? `${marked}\n\n#### Previously\n\n${old.replace(/^### (.+)$/m, "**$1**")}`
-			: marked;
-	});
+	const proposed = mandateEdits(base, current.mandate).map(
+		({ label, before, after, fields }) => {
+			if (!after) return `### ${label} (removed)`;
+			const old = previous && renderMandate(previous.mandate, [label]);
+			const text = renderNode(after, before ? " (changed)" : " (new)", fields);
+			return old &&
+				old !== renderMandate(base, [label]) &&
+				old !== renderNode(after)
+				? `${text}\n\n#### Previously\n\n${old.replace(/^### (.+)$/m, "**$1**")}`
+				: text;
+		},
+	);
 	const removed =
 		previous?.nodes.filter((l) => !current.nodes.includes(l)) ?? [];
-	changes.push(...removed.map((l) => `${l} reverted to bound`));
 	return {
-		subject: subject(`revision/${index + 1}/${r.rounds.length}`),
-		title: `Review Mandate revision: ${current.nodes.join(", ")}`,
+		subject: subject(`revision/${index + 1}/${seq}`),
+		title: `Review Mandate revision: ${current.nodes.join(", ") || "no change"}`,
 		basis: review({
+			disposition: current.nodes.length
+				? "Approve these Mandate changes"
+				: "Approve keeping the Mandate unchanged",
 			summary: previous
-				? `Since round ${r.rounds.length - 1}: ${changes.join(", ") || "no nodes changed"}.\n`
+				? `Since round ${r.rounds.length - 1}: ${
+						mandateEdits(previous.mandate, current.mandate)
+							.map(
+								({ label, before, after }) =>
+									`${label} ${removed.includes(label) ? "reverted to bound" : !after ? "removed" : !before ? "new" : "changed"}`,
+							)
+							.join(", ") || "no nodes changed"
+					}.\n`
 				: "",
 			evidence: r.text,
-			plan: current.plan ?? "No plan items affected.",
-			before: renderMandate(base, current.nodes),
-			after: proposed.join("\n\n"),
+			plan: current.plan,
+			before:
+				renderMandate(base, cited(current)) || "No existing nodes change.",
+			after: proposed.join("\n\n") || "No change to the Mandate.",
+			answers: answersText(current),
 			history: previous
 				? precedingRound(
 						renderMandate(previous.mandate, removed),
@@ -280,7 +328,7 @@ export function revisionTurn(
 ): Expectation {
 	return {
 		token: revisionToken(seq),
-		tools: ["publish_revision", "revision_settled"],
+		tools: ["publish_revision"],
 		situation: "shape",
 		input: () => {
 			const fields = {
@@ -295,8 +343,10 @@ export function revisionTurn(
 			return previous
 				? rework({
 						...fields,
-						before: renderMandate(base, previous.nodes),
-						after: renderMandate(previous.mandate, previous.nodes),
+						after:
+							renderMandate(previous.mandate, previous.nodes) ||
+							"No change to the Mandate.",
+						answers: answersText(previous),
 						annotations:
 							owed(previous)
 								.map((a) => annotation(a))

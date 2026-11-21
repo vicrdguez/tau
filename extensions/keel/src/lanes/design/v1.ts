@@ -173,14 +173,15 @@ export const designV1 = {
 				| "held"
 				| "approved"
 				| "applied"
-				| "declined"
-				| "settled";
+				| "declined";
 			causes: string[];
 			nodes: string[];
 			text: string;
 			rounds: {
 				mandate: Mandate;
 				nodes: string[];
+				answers: { cause: string; nodes: string[]; reason: string }[];
+				changes: string;
 				replies: Reply[];
 				plan: string;
 				answer: Answer | null;

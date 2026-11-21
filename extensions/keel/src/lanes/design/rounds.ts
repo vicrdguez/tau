@@ -1,15 +1,16 @@
 import { subject } from "../../kernel/ids.ts";
 import { type Ask, type KernelEvent, prose } from "../../kernel/lane.ts";
 import type { Outcome } from "./accounting.ts";
+import { type Audit, type Draft, draftError, nodes } from "./draft.ts";
 import {
-	type Audit,
 	changedFields,
-	type Draft,
-	draftError,
-	nodes,
-	seamFields,
-} from "./draft.ts";
-import { type Mandate, type Reply, repliesCover } from "./public.ts";
+	type Mandate,
+	type MandateNode,
+	nodeBody,
+	type Reply,
+	renderNode,
+	repliesCover,
+} from "./public.ts";
 
 type Fact = Extract<KernelEvent, { kind: "answered" }>;
 export type Answer = {
@@ -136,25 +137,21 @@ function repliesText(r: DraftRound, prev: DraftRound | undefined) {
 	);
 }
 
-type Entry = {
-	label: string;
-	section: string;
-	body: string;
-	group: "nodes" | "riders" | "considerations";
-	probe?: string;
-	reference?: string;
-};
+type Entry = MandateNode & { group: "nodes" | "riders" | "considerations" };
 function entries({ draft: d }: DraftRound, a: Audit): Entry[] {
 	const result: Entry[] = [
 		...nodes(d, a, "Proposed ruling").map((n) => ({
 			...n,
 			group: "nodes" as const,
+			seam: d.seams.find((s) => s.label === n.label),
+			check: d.checks.find((c) => c.id === n.label),
 		})),
 		...d.riders.map((r) => ({
 			label: r.label,
 			section: "Rider",
 			group: "riders" as const,
 			body: riderText(r).trim(),
+			rider: r,
 		})),
 		{
 			label: "tradeoffs",
@@ -173,49 +170,6 @@ function entries({ draft: d }: DraftRound, a: Audit): Entry[] {
 		...n,
 		reference: d.references.find((r) => r.label === n.label)?.source ?? "",
 	}));
-}
-function entryBody(n: Entry) {
-	return [
-		n.body,
-		...(n.probe
-			? [
-					`${n.label === "intent" ? "Done when" : "Falsifying probe"}: ${n.probe}`,
-				]
-			: []),
-		...(n.reference ? [`Reference: ${n.reference}`] : []),
-	].join("\n\n");
-}
-function entryFields(n: Entry, d: Draft) {
-	const seam = d.seams.find((entry) => entry.label === n.label);
-	const check = d.checks.find((entry) => entry.id === n.label);
-	const rider = d.riders.find((entry) => entry.label === n.label);
-	return {
-		section: n.section,
-		...(seam
-			? seamFields(seam)
-			: check
-				? { command: check.argv, timeout: check.timeoutMs }
-				: rider
-					? {
-							text: rider.text,
-							origin: rider.origin,
-							disposition: rider.disposition,
-						}
-					: {
-							[n.label === "intent"
-								? "intent"
-								: n.section === "Rule"
-									? "rule"
-									: "text"]: n.body,
-							[n.label === "intent" ? "done when" : "falsifying probe"]:
-								n.probe || undefined,
-						}),
-		reference: n.reference,
-	};
-}
-function entryText(n: Entry, mark = "", fields: string[] = []) {
-	const heading = fields.length ? `Changed: ${fields.join(", ")}\n\n` : "";
-	return `### ${n.label}: ${n.section}${mark}\n\n${heading}${entryBody(n)}`;
 }
 function body(
 	a: Audit,
@@ -247,14 +201,11 @@ function body(
 		const change = !prev ? null : !old ? "new" : changed ? "changed" : null;
 		if (change) summary.push(`${label(n)} ${change}`);
 		const before = changed
-			? `\n\n#### Previously\n\n**${old.label}: ${old.section}**\n\n${entryBody(old)}`
+			? `\n\n#### Previously\n\n**${old.label}: ${old.section}**\n\n${nodeBody(old)}`
 			: "";
-		const fields =
-			prev && old && changed
-				? changedFields(entryFields(old, prev.draft), entryFields(n, r.draft))
-				: [];
+		const fields = prev && old && changed ? changedFields(old, n) : [];
 		sections[n.group].push(
-			entryText(n, change ? ` (${change})` : "", fields) + before,
+			renderNode(n, change ? ` (${change})` : "", fields) + before,
 		);
 	}
 	const removed = previous.filter(
@@ -273,7 +224,7 @@ function body(
 			considerations: sections.considerations.join("\n\n"),
 			history: prev
 				? precedingRound(
-						removed.map((p) => entryText(p)).join("\n\n"),
+						removed.map((p) => renderNode(p)).join("\n\n"),
 						repliesText(r, prev),
 						"###",
 					)

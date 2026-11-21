@@ -6,7 +6,7 @@ Start a Keel conversation in a Git project and describe a change. For a bug, per
 
 | Who | What they do | Keel tools |
 | --- | --- | --- |
-| Designer (the entry conversation) | Classifies the request, frames the arena, writes the synthesis and proposes live revisions. Records two readings if they lead to different results. Remains the owner's desk. | `dispatch`, `ground`, `frame_arena`, `start_experiment`, `record_experiment`, `publish_mandate`, `answer_challenger`, `publish_revision`, `revision_settled`, `request_cancel` (standing) |
+| Designer (the entry conversation) | Classifies the request, frames the arena, writes the synthesis and proposes live revisions. Records two readings if they lead to different results. Remains the owner's desk. | `dispatch`, `ground`, `frame_arena`, `start_experiment`, `record_experiment`, `publish_mandate`, `answer_challenger`, `publish_revision`, `request_cancel` (standing) |
 | Coordinator (one per work) | Plans goals and dependencies, briefs ready items against named Mandate nodes, and hands the merged build to Verify. It has `read` and does not implement. | `publish_plan`, `brief_item`, `handoff_build` |
 | Worker (one checkout per attempt) | Implements the brief inside its fences. Records rulings with their reference and cost if wrong. Publishes a clean committed build and names the block threads it addressed. Keel reads the commit from Git. | `dispatch`, `record_ruling` (standing), `publish_build` |
 | Verifier | Checks each published commit in a detached checkout, then checks the whole build. Names block threads and their evidence, and keeps lesser findings as notes. | `publish_verdict` |
@@ -46,7 +46,7 @@ Tell the work's designer what you found. The designer can file it on your behalf
 | No action | The investigator closes an observation that holds nothing and changes no shape. The reason appears at hand-over. |
 | Determined by an approved reference | `build` adds it to the active plan or seeds new work under the reference. There is no Mandate approval. `defer` or `drop` keeps the record without starting work. |
 | Precedent-setting work | `build` seeds Ground and Mandate review. `defer` or `drop` starts nothing. |
-| Wrong Mandate | In an active build, classification holds items with briefs that cite affected nodes, except for unlikely edge cases. After handoff it cannot hold landing. `build` opens or joins the work's one live revision; the designer can name a bound node that already settles a cause. `drop` or `defer` releases the finding's holds. |
+| Wrong Mandate | In an active build, classification holds items with briefs that cite affected nodes, except for unlikely edge cases. After handoff it cannot hold landing. `build` opens or joins a drafting or reviewed revision. A finding added during review withdraws the older decision and is shown in the new review. Approval closes that revision to new findings; they wait and open the next revision after the approved plan applies. `drop` or `defer` releases the finding's holds. |
 | Unapproved pattern cited by a ruling | A worker uses `pattern: true` when `follows` names a project pattern. `bless` makes it a project reference. `revoke` seeds work to make the pattern fail structurally and migrate its callers. `defer` keeps the finding for later. |
 
 The investigator groups findings by naming another finding with the same cause and decision. The decision retains its identity; joining evidence is shown in the queue conversation, and the answer covers every member. A later duplicate of a deferred finding reopens the original with both reports. A later ruling citing a revoked pattern goes to rework without another decision.
@@ -55,7 +55,7 @@ The investigator groups findings by naming another finding with the same cause a
 
 Items begin as goals and dependencies. The coordinator briefs ready items against the current build head, up to `max_workers`, and each item uses its own checkout. Only a merged dependency makes a dependent item ready. Review can proceed in parallel, but merges into the build branch are serialized.
 
-An unresolved Mandate node hold prevents full-set handoff, even if the affected item already merged. When you approve a mid-build Mandate revision, the coordinator can add, edit, reorder, or drop unstarted items. The revision and plan edits become active in the same commit. Unaffected items keep moving. A verified item is a record; correcting it takes a new item. A held item gets the changed authority and resumes only after its dependencies merge and its last hold clears.
+An unresolved Mandate node hold prevents full-set handoff, even if the affected item already merged. When you approve a mid-build Mandate revision, the coordinator can add, edit, reorder, or drop unstarted items. The revision review names the findings each changed node answers. If the designer proposes no change, it shows the existing nodes that settle the findings and explains why; the same three choices and numbered replies apply. The revision and plan edits become active in the same commit. Unaffected items keep moving. A verified item is a record; correcting it takes a new item. A held item gets the changed authority and resumes only after its dependencies merge and its last hold clears.
 
 ## Principles
 
