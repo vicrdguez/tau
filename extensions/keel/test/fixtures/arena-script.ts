@@ -15,12 +15,22 @@ export const judgeReport = JSON.stringify({
 		seat,
 		score: 9 - i,
 		reason: `Score justified for ${seat}`,
-		unaskedDecisions: `Judge saw naming default from ${seat}`,
+		unaskedDecisions: [`Naming default from ${seat}`],
 	})),
 });
 export const grafts = [
-	{ seat: seats[1], text: "Take the independent test boundary." },
+	{
+		seat: seats[1],
+		label: "contract",
+		text: "Take the independent test boundary.",
+	},
 ];
+export const candidateOutcome = (seat: string) => ({
+	source: seat,
+	n: 1,
+	kind: "not_taken",
+	reason: "The interface does not establish a naming default.",
+});
 export const objection = "Will the next implementation copy an unsafe default?";
 export const challengerReport = JSON.stringify({ objections: [objection] });
 export const dispositions = [

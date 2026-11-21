@@ -213,8 +213,16 @@ test("records the protocol, both receipts and the decision under the named node"
 	assert.ok("reject" in recordExperiment(experiment, comparison));
 });
 
-test("names only the winner's unasked choices as stable proposed riders", () => {
-	const result = recordExperiment(settled(), comparison);
+test("accepts prototype reports in JSON fences and preserves the winner's unasked decisions", () => {
+	const result = recordExperiment(
+		settled(
+			receipts.map((receipt) => ({
+				...receipt,
+				answer: `\`\`\`json\n${receipt.answer}\n\`\`\``,
+			})),
+		),
+		comparison,
+	);
 	assert.ok("experiment" in result);
 	assert.deepEqual(experimentRiders(result.experiment), [
 		{

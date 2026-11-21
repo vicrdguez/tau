@@ -102,6 +102,15 @@ test("protocol-first prototypes use separate scratch directories and put the com
 		s.turn("designer", "publish_mandate", {
 			base: seats[0],
 			grafts: [],
+			outcomes: [
+				{
+					source: seats[0],
+					n: 1,
+					kind: "not_taken",
+					reason: "The representation does not prescribe names.",
+				},
+				{ source: "experiment-1", n: 1, kind: "rider", label: "plain-naming" },
+			],
 			replies: [],
 			draft: {
 				intent: "Represent the book without losing bytes",
@@ -121,7 +130,14 @@ test("protocol-first prototypes use separate scratch directories and put the com
 				alternatives: "Compact records use more bytes",
 				seams: [],
 				settlements: [],
-				riders: [],
+				riders: [
+					{
+						label: "plain-naming",
+						text: "Use plain naming",
+						origin: "incidental",
+						disposition: "open",
+					},
+				],
 				references: [],
 			},
 		}),
@@ -150,11 +166,12 @@ test("protocol-first prototypes use separate scratch directories and put the com
 	const text = (basis?.data as { text: string }).text;
 	assert.match(
 		text,
-		/### representation: Rule[\s\S]*The plain specimen is smaller under the written rule/,
+		/## Evidence \(does not bind\)[\s\S]*representation[\s\S]*The plain specimen is smaller under the written rule/,
 	);
 	assert.match(
 		text,
-		/experiment-1-r1: Rider[\s\S]*Use plain naming[\s\S]*Disposition: open/,
+		/plain-naming: Rider[\s\S]*Use plain naming[\s\S]*Disposition: open/,
 	);
+	assert.match(text, /Use plain naming[\s\S]*Rider `plain-naming`/);
 	assert.ok(!text.includes("experiment-1-r2: Rider"));
 });

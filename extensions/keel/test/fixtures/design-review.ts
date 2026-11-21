@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import type { LaneEvent, World } from "../../src/kernel/lane.ts";
 import { design } from "../../src/lanes/design/index.ts";
-import { arenaFrame, candidate, judgeReport, seats } from "./arena-script.ts";
+import {
+	arenaFrame,
+	candidate,
+	candidateOutcome,
+	judgeReport,
+	seats,
+} from "./arena-script.ts";
 
 export const crossFamilyOptions = {
 	arena_seat_2: "candidate/second",
 	arena_judge: "judge/reader",
 };
-export const synthesis = { base: seats[0], grafts: [] };
+export const synthesis = {
+	base: seats[0],
+	grafts: [],
+	outcomes: [candidateOutcome(seats[0])],
+};
 export const reviewChoices = [
 	"approve",
 	"rework",

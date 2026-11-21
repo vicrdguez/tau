@@ -50,7 +50,7 @@ const judge = JSON.stringify({
 		seat,
 		score: 9 - i,
 		reason: `Judge's score for ${seat}`,
-		unaskedDecisions: `Judge's independent observation of ${seat}`,
+		unaskedDecisions: [`Judge's independent observation of ${seat}`],
 	})),
 });
 const objections = JSON.stringify({
@@ -103,7 +103,15 @@ const publish = {
 	draft,
 	base: "arena_seat_1",
 	grafts: [
-		{ seat: "arena_seat_2", text: "Attach the check to the placement call." },
+		{
+			seat: "arena_seat_2",
+			label: "L1",
+			text: "Attach the check to the placement call.",
+		},
+	],
+	outcomes: [
+		{ source: "arena_seat_1", n: 1, kind: "rider", label: "R1" },
+		{ source: "arena_seat_2", n: 1, kind: "node", label: "L1" },
 	],
 	replies: [],
 };
@@ -239,6 +247,8 @@ test("an optional third candidate joins in order and the judge receives every fu
 	assert.equal(job?.seat, "arena_judge");
 	assert.equal(job?.model, "judge/review");
 	for (const seat of names) assert.ok(job.question.includes(candidate(seat)));
+	for (const model of ["alpha/first", "beta/second", "gamma/third"])
+		assert.ok(!job.question.includes(model));
 	assert.ok(job.question.includes(frame.rubric));
 	assert.deepEqual(design.asks(judged, w), []);
 });
@@ -295,7 +305,7 @@ test("a timed-out child or a candidate that omits its unasked decisions cannot s
 		assert.match(ask(failed).basis, /arena_seat_2/);
 		const retried = owner(failed, "retry").state;
 		assert.notEqual(pending(retried).key, key);
-		assert.deepEqual(pending(retried).jobs, jobs);
+		assert.deepEqual(pending(retried).jobs, jobs.slice(1));
 		assert.deepEqual(
 			step(retried, { kind: "effect_failed", key, error: "Late failure" })
 				.state,
@@ -306,6 +316,179 @@ test("a timed-out child or a candidate that omits its unasked decisions cannot s
 			"arena_judge",
 		);
 	}
+});
+
+test("retry checks the failed seat's current provider against the actual successful seat and keeps its answer", () => {
+	const failed = complete(candidateTurn(), {
+		...candidates,
+		[seats[1]!]: null,
+	});
+	const retry = (state: State, w: World) =>
+		step(
+			state,
+			{
+				kind: "answered",
+				subject: ask(state).subject,
+				choice: "retry",
+				annotations: [],
+			},
+			w,
+		).state;
+	const conflict = retry(failed, {
+		...world,
+		options: {
+			...world.options,
+			arena_seat_1: "unrelated/changed",
+			arena_seat_2: "alpha/other",
+		},
+	});
+	assert.deepEqual(design.effects(conflict, world), []);
+	assert.match(ask(conflict).basis, /provider.*family|family.*provider/i);
+	const revised = retry(conflict, {
+		...world,
+		options: { ...world.options, arena_seat_2: "gamma/fixed" },
+	});
+	assert.deepEqual(
+		pending(revised).jobs.map(({ seat, model }) => [seat, model]),
+		[[seats[1], "gamma/fixed"]],
+	);
+	const judge = pending(complete(revised, candidates)).jobs[0]!;
+	assert.ok(judge.question.includes(candidate(seats[0]!)));
+});
+
+test("candidate headings are flexible and the judge can return fenced JSON with decimals", () => {
+	const report = `\`\`\`json\n${judge.replace('"score":9', '"score":7.5')}\n\`\`\``;
+	for (const answer of [
+		`# Title\n\n${candidate(seats[1]!)}`,
+		candidate(seats[1]!).replace(
+			"## Sketch",
+			"## Module map\n\nMap.\n\n## Sketch",
+		),
+		candidate(seats[1]!).replaceAll("## ", "### "),
+	]) {
+		const turn = complete(candidateTurn(), {
+			...candidates,
+			[seats[1]!]: answer,
+		});
+		assert.equal(pending(turn).jobs[0]?.seat, "arena_judge");
+		assert.match(input(complete(turn, { arena_judge: report })), /7\.5/);
+	}
+});
+
+test("base and graft decisions must each name one real outcome; no omissions, duplicates or nonexistent targets", () => {
+	const s = synthesisTurn();
+	for (const outcomes of [
+		[],
+		[publish.outcomes[0]!],
+		[publish.outcomes[1]!],
+		[...publish.outcomes, publish.outcomes[0]!],
+		[{ ...publish.outcomes[0]!, label: "missing" }, publish.outcomes[1]!],
+		[
+			{ source: seats[0]!, n: 1, kind: "not_taken", reason: " " },
+			publish.outcomes[1]!,
+		],
+	]) {
+		const result = design.reduce(s, { ...publish, outcomes }, world);
+		assert.ok("reject" in result, JSON.stringify(outcomes));
+		assert.match(result.reject, /unasked|outcome/i);
+	}
+});
+
+test("a winning prototype uses the same outcomes as candidates and cannot disappear from the draft", () => {
+	const framed = step(grounded(), {
+		kind: "start_experiment",
+		node: "L1",
+		question: "Which uses fewer reads?",
+		decisionRule: "Minimize reads.",
+		controls: ["Same orders"],
+		axis: "cache",
+		variants: ["local", "remote"],
+	}).state;
+	const { key } = pending(framed);
+	const observed = step(framed, {
+		kind: "effect_done",
+		key,
+		result: {
+			results: ["local", "remote"].map((variant) => ({
+				seat: "design_prototype",
+				conversation: variant,
+				error: null,
+				answer: JSON.stringify({
+					observation: variant,
+					evidence: "Counts from a repeated run.",
+					incidentalChoices: [`Cache ${variant} names.`],
+				}),
+			})),
+		},
+	}).state;
+	const compared = step(observed, {
+		kind: "record_experiment",
+		comparison: "Local uses fewer reads.",
+		winner: "local",
+	}).state;
+	const synthesizing = synthesisTurn(
+		complete(step(compared, frame).state, candidates),
+	);
+	const omitted = design.reduce(synthesizing, publish, world);
+	assert.ok("reject" in omitted);
+	assert.match(omitted.reject, /experiment-1/);
+	const challenge = challengeTurn(synthesizing, {
+		...publish,
+		outcomes: [
+			...publish.outcomes,
+			{
+				source: "experiment-1",
+				n: 1,
+				kind: "not_taken",
+				reason: "Cache names are not part of the interface.",
+			},
+		],
+	});
+	const basis = ask(
+		step(answeringTurn(challenge), answerChallenger).state,
+	).basis;
+	assert.match(
+		basis,
+		/Cache local names\.[\s\S]*Not taken: Cache names are not part of the interface/,
+	);
+	assert.doesNotMatch(basis, /experiment-1-r1: Rider/);
+});
+
+test("acted_on needs a changed draft and the owner sees that revision before deciding", () => {
+	const awaiting = answeringTurn();
+	const dispositions = answerChallenger.dispositions.map((d, i) =>
+		i
+			? d
+			: { ...d, status: "acted_on", reason: "Named the source of the limit." },
+	);
+	const unchanged = {
+		draft,
+		grafts: publish.grafts,
+		outcomes: publish.outcomes,
+	};
+	for (const revision of [undefined, unchanged]) {
+		const result = design.reduce(
+			awaiting,
+			{ ...answerChallenger, dispositions, ...(revision && { revision }) },
+			world,
+		);
+		assert.ok("reject" in result);
+		assert.match(result.reject, /changed draft/i);
+	}
+	const revision = {
+		...unchanged,
+		draft: {
+			...draft,
+			done: "Check against the configured account limit before contacting the venue.",
+		},
+	};
+	const reviewed = step(awaiting, {
+		...answerChallenger,
+		dispositions,
+		revision,
+	}).state;
+	assert.match(ask(reviewed).basis, /configured account limit/);
+	assert.match(ask(reviewed).basis, /acted_on: Named the source/);
 });
 
 test("a failed effect, out-of-order result, or incomplete judge report stays blocked rather than skipping a stage", () => {
@@ -400,7 +583,21 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 	);
 	const review = step(answering, answerChallenger).state;
 	const decision = ask(review);
-	for (const seat of seats) assert.ok(decision.basis.includes(candidate(seat)));
+	for (const seat of seats)
+		assert.ok(decision.basis.replace(/^> ?/gm, "").includes(candidate(seat)));
+	const heads = [...decision.basis.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+	assert.deepEqual(heads, [
+		"Mandate",
+		"Riders",
+		"What the base decided that the question did not ask",
+		"Challenger's objections",
+		"Evidence (does not bind)",
+	]);
+	assert.match(decision.basis, /arena_seat_2.*L1.*Attach the check/);
+	assert.match(
+		decision.basis,
+		/Judge's independent observation of arena_seat_1[^\n]*\n[^\n]*Rider.*R1/i,
+	);
 	for (const part of [
 		draft.intent,
 		"Attach the check to the placement call.",
@@ -426,14 +623,25 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 	assert.match(input(taken.state), /arena_seat_2/);
 	assert.match(input(taken.state), /Retain account ownership/);
 	assert.ok("reject" in design.reduce(taken.state, publish, world));
-	const second = { ...publish, base: "arena_seat_2", grafts: [] };
+	const second = {
+		...publish,
+		base: "arena_seat_2",
+		grafts: [],
+		outcomes: [publish.outcomes[1]!],
+	};
 	assert.ok("reject" in design.reduce(taken.state, second, world));
-	const review = step(taken.state, {
+	const challenging = step(taken.state, {
 		...second,
 		replies: [{ n: 1, status: "acted_on", reason: "Kept account ownership." }],
 	}).state;
+	assert.deepEqual(design.asks(challenging, world), []);
+	assert.match(
+		pending(challenging).jobs[0]!.question,
+		/Default of arena_seat_2/,
+	);
+	const review = step(answeringTurn(challenging), answerChallenger).state;
 	assert.deepEqual(design.effects(review, world), []);
-	assert.match(ask(review).basis, /challenged round 1.*arena_seat_1/i);
+	assert.match(ask(review).basis, /challenged round 2.*arena_seat_2/i);
 	assert.notEqual(ask(review).subject, ask(first).subject);
 	assert.match(ask(review).basis, /Retain account ownership/);
 	assert.match(ask(review).basis, /Kept account ownership/);
@@ -453,7 +661,10 @@ test("seeded and fresh arenas keep the old candidates, judge, challenger and rou
 		const fresh = choice === "arena_fresh";
 		assert.deepEqual(rerun.send ?? [], []);
 		assert.match(input(rerun.state), /Measure ownership independently/);
-		assert.equal(input(rerun.state).includes(candidate(seats[0]!)), !fresh);
+		assert.equal(
+			input(rerun.state).replace(/^> ?/gm, "").includes(candidate(seats[0]!)),
+			!fresh,
+		);
 		const next = step(rerun.state, {
 			...frame,
 			question: "What scopes the risk limit?",
@@ -466,7 +677,10 @@ test("seeded and fresh arenas keep the old candidates, judge, challenger and rou
 		assert.deepEqual(next.arenas[0], first.arenas[0]);
 		assert.notEqual(pending(next).key, pending(candidateTurn()).key);
 		const job = pending(next).jobs[0]!;
-		assert.equal(job.question.includes(candidate(seats[0]!)), !fresh);
+		assert.equal(
+			job.question.replace(/^> ?/gm, "").includes(candidate(seats[0]!)),
+			!fresh,
+		);
 		assert.equal(
 			job.question.includes("Measure ownership independently."),
 			!fresh,
@@ -485,6 +699,15 @@ test("rework retains the first challenge and round, and replies by annotation nu
 	const review = step(revised, {
 		...publish,
 		draft: newer,
+		outcomes: [
+			{
+				source: seats[0]!,
+				n: 1,
+				kind: "not_taken",
+				reason: "Dropped per owner direction.",
+			},
+			publish.outcomes[1]!,
+		],
 		replies: [{ n: 1, status: "acted_on", reason: "Dropped R1." }],
 	}).state;
 	assert.deepEqual(design.effects(review, world), []);

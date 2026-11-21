@@ -255,7 +255,24 @@ export async function openReview(
 		for (const part of parts)
 			assert.ok(text.includes(part), `Missing ${part} from ${text}`);
 	}
-	const synthesis = { base: seats[0], grafts };
+	const synthesis = {
+		base: seats[0],
+		grafts,
+		outcomes: [
+			{
+				source: seats[0],
+				n: 1,
+				kind: "not_taken",
+				reason: "Only the public shell entry points are named by the Mandate.",
+			},
+			{
+				source: seats[1],
+				n: 1,
+				kind: "not_taken",
+				reason: "The graft takes the proof boundary, not this naming default.",
+			},
+		],
+	};
 	const respond = () =>
 		turn("designer", "answer_challenger", { dispositions }, objection);
 	const challenge = () =>
@@ -355,7 +372,12 @@ export async function openReview(
 			readSeam.usage,
 			writeSeam.usage,
 			rule,
-			...seats.map(candidate),
+			...seats.map((seat) =>
+				candidate(seat)
+					.split("\n")
+					.map((line) => (line ? `> ${line}` : ">"))
+					.join("\n"),
+			),
 			grafts[0]!.text,
 			"Score justified for arena_seat_1",
 			objection,
@@ -414,7 +436,7 @@ export async function openReview(
 		assert.equal(
 			challenger.state.callCount,
 			1,
-			"challenge runs once for this arena",
+			"challenge runs once for the same base",
 		);
 		assert.equal(
 			git(cwd, "for-each-ref", "refs/heads/keel/"),

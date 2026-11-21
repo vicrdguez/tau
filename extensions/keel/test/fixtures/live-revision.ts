@@ -198,6 +198,14 @@ export async function openLiveRevision(
 			s.turn("designer", "publish_mandate", {
 				base: seats[0],
 				grafts: [],
+				outcomes: [
+					{
+						source: seats[0],
+						n: 1,
+						kind: "not_taken",
+						reason: "The design has no naming default.",
+					},
+				],
 				draft: {
 					intent,
 					done: "Book and statistics are exported.",
