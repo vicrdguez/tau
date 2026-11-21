@@ -7,7 +7,7 @@ import {
 } from "../../kernel/lane.ts";
 import type { Ruling } from "../build/public.ts";
 import { renderMandate } from "../design/public.ts";
-import { cleaning, type Review, type State } from "./state.ts";
+import { cleaning, held, queueHeld, type Review, type State } from "./state.ts";
 
 const dir = `${import.meta.dirname}/../../prose`;
 const inputs = Object.fromEntries(
@@ -112,7 +112,7 @@ export function agents(s: State): AgentDecl[] {
 	return s.checks
 		.filter((c) => c.phase === "verify" || c.phase === "diagnose")
 		.map((c) => {
-			const paused = s.holds.some((h) => h.item === c.item);
+			const paused = held(s, c.item);
 			return {
 				key: agentFor(c),
 				role: c.phase === "diagnose" ? "diagnoser" : "verifier",
@@ -143,6 +143,7 @@ export function effects(s: State): EffectDecl[] {
 			(j) =>
 				s.cancelled ||
 				(!s.holds.some((h) => h.job === j.key) &&
+					!(j.op.kind === "checkout" && queueHeld(s, j.item)) &&
 					(j.op.kind === "remove" || !cleaning(s, j.item))),
 		)
 		.map(({ key, op }) => ({

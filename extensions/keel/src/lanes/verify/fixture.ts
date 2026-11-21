@@ -76,6 +76,7 @@ type V1 = {
 	seq: number;
 	cancelled: boolean;
 	kept: string[];
+	queueHolds: { item: string; cause: string }[];
 	directions: string[];
 	diagnoses: string[];
 	repo: RepoV1 | null;
@@ -88,6 +89,8 @@ type V1 = {
 		base: Sha;
 		brief: string;
 		paths: string[];
+		nodes: string[];
+		obsolete: string | null;
 		rulings: RulingV1[];
 		addresses: string[];
 		phase:
@@ -158,6 +161,7 @@ export const verifyFixture = {
 		seq: 0,
 		cancelled: false,
 		kept: [],
+		queueHolds: [],
 		directions: [],
 		diagnoses: [],
 		repo: null,

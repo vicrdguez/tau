@@ -19,6 +19,7 @@ export type Publication = BuildSnapshot &
 				addresses: string[];
 				brief: string;
 				paths: string[];
+				nodes?: string[];
 		  }
 		| {
 				kind: "handoff";

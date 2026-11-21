@@ -17,6 +17,7 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { toBuild } from "../build/public.ts";
+import type { Mandate } from "../design/public.ts";
 import { fileHolding, type Resume, resumption } from "../queue/public.ts";
 import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
@@ -24,6 +25,7 @@ import type { Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
+	held,
 	type Job,
 	type Op,
 	type Review,
@@ -49,6 +51,14 @@ type Event =
 	  }
 	| { kind: "slot_granted" | "cancel" }
 	| { kind: "reset_counts"; item: string }
+	| { kind: "queue_hold"; item: string; cause: string }
+	| { kind: "queue_release"; cause: string; direction?: string }
+	| {
+			kind: "mandate_revised";
+			mandate: Mandate;
+			items: string[];
+			evidence: string;
+	  }
 	| {
 			kind: "verdict";
 			agent: string;
@@ -78,6 +88,32 @@ function transition(prev: State, world: World) {
 			event: e,
 		});
 	const note = (text: string) => notes.push({ agent: null, text });
+	function file(
+		source: "owner" | "verifier",
+		sha: Sha,
+		item: string | null,
+		text: string,
+		report: string,
+		nodes: string[],
+	) {
+		send.push({
+			lane: "queue",
+			work: null,
+			event: {
+				kind: "intake",
+				work,
+				source,
+				sha,
+				item,
+				text,
+				report,
+				nodes,
+				edgeCase: null,
+				pattern: null,
+				blocking: false,
+			},
+		});
+	}
 	const key = (name: string) => `verify/${work}/${name}/${++s.seq}`;
 	const find = (item: string) => s.checks.find((c) => c.item === item);
 	const enqueue = (item: string, op: Op) =>
@@ -151,10 +187,7 @@ function transition(prev: State, world: World) {
 	function mergeReady() {
 		if (s.cancelled || s.jobs.some((j) => j.op.kind === "merge_item")) return;
 		const c = s.checks.find(
-			(c) =>
-				c.phase === "ready" &&
-				!cleaning(s, c.item) &&
-				!s.holds.some((h) => h.item === c.item),
+			(c) => c.phase === "ready" && !cleaning(s, c.item) && !held(s, c.item),
 		);
 		if (!c) return;
 		const k = key("merge");
@@ -184,6 +217,61 @@ function transition(prev: State, world: World) {
 	function discard(j: Job) {
 		s.jobs = s.jobs.filter((other) => other !== j);
 	}
+	const running = (j: Job) => !!world.runningEffect?.(effectKey(j.key));
+	// A retry or an exhausted delivery may already have advanced Git. Preserve its pinned plan.
+	const unclaimedMerge = (j: Job) =>
+		j.op.kind === "merge_item" &&
+		!running(j) &&
+		j.key === j.op.key &&
+		!s.holds.some((h) => h.job === j.key);
+	function withdrawMerge(item: string) {
+		const job = s.jobs.find((j) => j.item === item && unclaimedMerge(j));
+		if (!job) return;
+		discard(job);
+		find(item)!.phase = "ready";
+	}
+	function returnObsolete(c: Review) {
+		if (
+			s.jobs.some(
+				(j) =>
+					j.item === c.item &&
+					(j.op.kind === "merge_item" ||
+						(j.op.kind === "checkout" && running(j))),
+			)
+		)
+			return;
+		for (const j of s.jobs.filter(
+			(j) => j.item === c.item && j.op.kind === "checkout",
+		))
+			discard(j);
+		for (const h of s.holds.filter(
+			(h) =>
+				h.item === c.item &&
+				(h.job === null || !s.jobs.some((j) => j.key === h.job)),
+		)) {
+			s.holds = s.holds.filter((other) => other !== h);
+			send.push({
+				lane: "queue",
+				work: null,
+				event: {
+					kind: "resolve_holding",
+					work,
+					lane: "verify",
+					cause: h.cause,
+				},
+			});
+		}
+		retire(c);
+		back(
+			c,
+			"rework",
+			c.obsolete!,
+			s.verdicts
+				.findLast((v) => v.item === c.item)
+				?.blocks.map((b) => b.thread) ?? [],
+		);
+		c.obsolete = null;
+	}
 	function clearIntegration(j: Job) {
 		const op = j.op;
 		if (op.kind === "merge_item" || op.kind === "take_trunk")
@@ -197,7 +285,7 @@ function transition(prev: State, world: World) {
 				if (s.holds.some((h) => h.job === j.key)) j.key = key("remove-retry");
 				continue;
 			}
-			if (world.runningEffect?.(effectKey(j.key))) continue;
+			if (running(j)) continue;
 			if (j.op.kind === "land" && s.landingUnconfirmed) {
 				if (s.holds.some((h) => h.job === j.key)) j.key = key("land-settle");
 				continue;
@@ -206,6 +294,7 @@ function transition(prev: State, world: World) {
 			clearIntegration(j);
 		}
 		s.holds = [];
+		s.queueHolds = [];
 		for (const c of s.checks) {
 			if (
 				!s.jobs.some(
@@ -227,7 +316,7 @@ function transition(prev: State, world: World) {
 							agentFor(c) === e.agent &&
 							e.tokens.includes(token(e.agent, c.turn)),
 					);
-					if (c && !s.holds.some((h) => h.item === c.item && h.job === null)) {
+					if (c && !held(s, c.item)) {
 						c.direction = "";
 						hold(
 							c.item,
@@ -243,16 +332,23 @@ function transition(prev: State, world: World) {
 						break;
 					if (e.choice !== "accept" && e.choice !== "reject")
 						return { state: prev };
-					if (
-						e.choice === "reject" &&
-						!e.annotations.some((n) => n.text.trim())
-					) {
+					const missing = e.annotations.filter((n) => n.text.trim());
+					if (e.choice === "reject" && !missing.length) {
 						note("Reject needs an annotation naming the missing check.");
 						break;
 					}
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
-					s.handover.missing =
-						e.choice === "reject" ? e.annotations.map((a) => a.text) : [];
+					if (e.choice === "reject") {
+						s.handover.missing = missing.map((a) => a.text);
+						file(
+							"owner",
+							s.handover.sha,
+							null,
+							missing.map((a) => `${a.n}. ${a.text}`).join("\n"),
+							`${s.mandate!.intent}\n${s.handoff!.summary}`,
+							[],
+						);
+					}
 					deliver("design", { kind: "closed" });
 					send.push(toBuild(work, { kind: "closed" }));
 					break;
@@ -290,6 +386,9 @@ function transition(prev: State, world: World) {
 			else if (op.kind === "remove" && r?.kind !== "removed")
 				s.kept.push(`${op.target.path}: ${JSON.stringify(r ?? e)}`);
 			else clearIntegration(j);
+		} else if (c.obsolete && op.kind === "checkout") {
+			discard(j);
+			returnObsolete(c);
 		} else if (
 			!r ||
 			r.kind === "occupied" ||
@@ -319,6 +418,11 @@ function transition(prev: State, world: World) {
 				case "take_trunk": {
 					clearIntegration(j);
 					if (r.kind === "conflict" || r.kind === "checks_failed") {
+						if (c.obsolete) {
+							c.obsolete += `\n${JSON.stringify(r, null, 2)}`;
+							returnObsolete(c);
+							break;
+						}
 						back(
 							c,
 							"integration",
@@ -331,6 +435,7 @@ function transition(prev: State, world: World) {
 					if (op.kind === "merge_item" && r.kind === "merged") {
 						s.head = r.sha;
 						c.phase = "merged";
+						c.obsolete = null;
 						send.push(
 							toBuild(work, { kind: "merged", item: c.item, head: r.sha }),
 						);
@@ -418,6 +523,48 @@ function transition(prev: State, world: World) {
 						`${e.lane}${e.item ? "/" + e.item : ""}: ${e.evidence}\nDirection: ${e.direction}`,
 					);
 				break;
+			case "queue_hold":
+				if (
+					!s.queueHolds.some((h) => h.item === e.item && h.cause === e.cause)
+				) {
+					s.queueHolds.push({ item: e.item, cause: e.cause });
+					withdrawMerge(e.item);
+				}
+				break;
+			case "queue_release": {
+				const items = s.queueHolds
+					.filter((h) => h.cause === e.cause)
+					.map((h) => h.item);
+				s.queueHolds = s.queueHolds.filter((h) => h.cause !== e.cause);
+				for (const item of items) {
+					const c = find(item);
+					if (!c || (c.phase !== "verify" && c.phase !== "diagnose")) continue;
+					if (e.direction)
+						c.direction = [c.direction, e.direction].filter(Boolean).join("\n");
+					if (!held(s, item)) c.turn = ++s.seq;
+				}
+				break;
+			}
+			case "mandate_revised": {
+				const proofChanged =
+					JSON.stringify(e.mandate.checks) !==
+					JSON.stringify(s.mandate?.checks);
+				s.mandate = e.mandate;
+				for (const c of s.checks) {
+					if (
+						c.scope !== "item" ||
+						c.phase === "merged" ||
+						c.phase === "returned"
+					)
+						continue;
+					const affected = e.items.includes(c.item);
+					if (proofChanged || affected) withdrawMerge(c.item);
+					if (!affected) continue;
+					c.obsolete = e.evidence;
+					returnObsolete(c);
+				}
+				break;
+			}
 			case "published":
 			case "handoff": {
 				const full = e.kind === "handoff",
@@ -452,6 +599,8 @@ function transition(prev: State, world: World) {
 					sha: full ? e.head : e.sha,
 					brief: full ? e.summary : e.brief,
 					paths: full ? [] : e.paths,
+					nodes: full ? [] : (e.nodes ?? []),
+					obsolete: null,
 					rulings: e.rulings,
 					addresses,
 					direction: full
@@ -483,9 +632,7 @@ function transition(prev: State, world: World) {
 			case "verdict": {
 				const c = s.checks.find(
 					(c) =>
-						c.phase === "verify" &&
-						agentFor(c) === e.agent &&
-						!s.holds.some((h) => h.item === c.item),
+						c.phase === "verify" && agentFor(c) === e.agent && !held(s, c.item),
 				);
 				if (!c) return { reject: "No active verification" };
 				const blocks = e.blocks,
@@ -520,6 +667,15 @@ function transition(prev: State, world: World) {
 					diagnose,
 					notes: e.notes,
 				});
+				for (const text of e.notes)
+					file(
+						"verifier",
+						c.sha,
+						c.scope === "item" ? c.item : null,
+						text,
+						e.text,
+						c.nodes,
+					);
 				// The agent that just answered has received its direction.
 				c.direction = "";
 				if (e.outcome === "pass") {
@@ -554,7 +710,7 @@ function transition(prev: State, world: World) {
 					(c) =>
 						c.phase === "diagnose" &&
 						agentFor(c) === e.agent &&
-						!s.holds.some((h) => h.item === c.item),
+						!held(s, c.item),
 				);
 				if (!c || ![e.premise, e.test, e.result].every((x) => x.trim()))
 					return {
@@ -596,10 +752,7 @@ function transition(prev: State, world: World) {
 					const j = s.jobs.find((j) => j.key === h.job)!;
 					j.key = key("retry");
 				}
-				if (
-					c.phase === "nonconvergent" &&
-					!s.holds.some((h) => h.item === c.item)
-				)
+				if (c.phase === "nonconvergent" && !held(s, c.item))
 					back(
 						c,
 						"rework",

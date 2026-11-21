@@ -18,6 +18,8 @@ export type Review = {
 	base: Sha;
 	brief: string;
 	paths: string[];
+	nodes: string[];
+	obsolete: string | null;
 	rulings: Ruling[];
 	addresses: string[];
 	phase:
@@ -73,6 +75,7 @@ export type State = {
 	seq: number;
 	cancelled: boolean;
 	kept: string[];
+	queueHolds: { item: string; cause: string }[];
 	directions: string[];
 	diagnoses: string[];
 	repo: RepoInfo | null;
@@ -111,6 +114,11 @@ export type State = {
 		missing: string[];
 	} | null;
 };
+export const queueHeld = (s: State, item: string) =>
+	s.queueHolds.some((h) => h.item === item);
+export const held = (s: State, item: string) =>
+	queueHeld(s, item) || s.holds.some((h) => h.item === item);
+
 /** Finish the preceding removal before acting on its successor. The full build depends on all items. */
 export function cleaning(s: State, item: string) {
 	return s.jobs.some(
@@ -128,6 +136,7 @@ export const VerifyDoc = defineState<State>({
 		seq: 0,
 		cancelled: false,
 		kept: [],
+		queueHolds: [],
 		directions: [],
 		diagnoses: [],
 		repo: null,
