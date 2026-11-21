@@ -31,9 +31,9 @@ import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import {
 	addDirection,
 	addQueueHold,
+	applyRevision,
 	bindFixes,
 	type FindingFix,
-	applyRevision,
 	releaseQueueHold,
 	revisionPlanHold,
 } from "./live-plan.ts";

@@ -2,11 +2,11 @@ import { arr, obj, oneOf, opt } from "tau/schema";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
 	type Ask,
-	type Message,
 	defineLane,
 	defineLaneTool,
 	type Expectation,
 	type Lane,
+	type Message,
 	prose,
 	type World,
 } from "../../kernel/lane.ts";
