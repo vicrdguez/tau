@@ -83,6 +83,24 @@ test("four lane models suffice; every role and seat can independently override i
 	assert.equal(defaults.trunk, "trunk");
 	assert.equal(defaults.base, "main");
 	assert.equal(defaults.max_workers, 3);
+	assert.deepEqual(
+		[
+			Reflect.get(defaults, "dispatch_rounds"),
+			Reflect.get(defaults, "dispatch_minutes"),
+		],
+		[64, 20],
+	);
+	const bounded = await read({
+		...lanes,
+		...{ dispatch_rounds: 5, dispatch_minutes: 2 },
+	});
+	assert.deepEqual(
+		[
+			Reflect.get(bounded, "dispatch_rounds"),
+			Reflect.get(bounded, "dispatch_minutes"),
+		],
+		[5, 2],
+	);
 	const overrides = Object.fromEntries(
 		laneRoles.flatMap(([, roles]) =>
 			roles.map((role) => [role, `custom/${role}`]),

@@ -29,13 +29,16 @@ const dispatch = dispatchTool({
 			: undefined,
 });
 const extension = defineExtension({ name: "probe", tools: [dispatch] });
-export async function probeStore(storage: Storage) {
+export async function probeStore(storage: Storage, now = Date.now) {
 	const registry = createRegistry();
 	registry.install(extension);
 	const provider = fauxProvider();
 	const models = createModels();
 	models.setProvider(provider.provider);
-	return { ...(await openStore(storage, { registry, models }, ctx)), provider };
+	return {
+		...(await openStore(storage, { registry, models, now }, ctx)),
+		provider,
+	};
 }
 
 if (import.meta.main) {

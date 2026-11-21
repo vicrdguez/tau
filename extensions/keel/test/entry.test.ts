@@ -4,6 +4,15 @@ import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { CodingTools, createRegistry, MemoryStorage } from "tau/durable";
 import { createModels, openStore } from "tau/testing";
 import { entry, extension, options } from "../src/index.ts";
+import { explorerDispatch } from "../src/roles/dispatch.ts";
+
+test("only the designer, worker and investigator can dispatch", () => {
+	assert.deepEqual([...explorerDispatch.roles].sort(), [
+		"designer",
+		"investigator",
+		"worker",
+	]);
+});
 
 // Check the module Tau loads, not the toy kernel. A missing task prevents
 // recovery; a toy or future lane tool advertises work Keel cannot perform.
