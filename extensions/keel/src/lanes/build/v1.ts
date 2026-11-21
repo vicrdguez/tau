@@ -58,6 +58,7 @@ type V1 = {
 		mandate: MandateV1;
 		causes: string[];
 		nodes: string[];
+		changes: string;
 		text: string;
 	} | null;
 	findings: {

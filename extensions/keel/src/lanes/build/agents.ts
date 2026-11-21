@@ -203,7 +203,9 @@ function coordInput(s: Build) {
 						.join("\n") || "None.";
 				return revise({
 					...facts,
-					before: renderMandate(s.mandate!, p.nodes),
+					before: [p.changes, renderMandate(s.mandate!, p.nodes)]
+						.filter(Boolean)
+						.join("\n\n"),
 					mandate: renderMandate(p.mandate),
 					findings: p.text || p.nodes.join(", "),
 					held: list((i) => held(s, i.id)),

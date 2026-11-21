@@ -21,6 +21,7 @@ export type RevisionProposal = {
 	mandate: Mandate;
 	causes: string[];
 	nodes: string[];
+	changes: string;
 	text?: string;
 };
 export type SupersedeReason = "mandate_revision" | "defect_fixed";
