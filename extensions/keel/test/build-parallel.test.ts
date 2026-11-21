@@ -167,7 +167,13 @@ test("build two dependents concurrently from the first merge, merge serially, an
 						probe: "Compare bytes",
 					},
 				],
-				checks: [],
+				checks: [
+					{
+						id: "book-bytes",
+						argv: ["grep", "-qx", "restored", "book"],
+						timeoutMs: 5000,
+					},
+				],
 			},
 		}),
 		s.turn("coordinator", "publish_plan", { items }),
