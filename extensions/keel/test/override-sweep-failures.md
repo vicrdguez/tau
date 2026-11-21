@@ -13,7 +13,7 @@
 
 - An unset interval runs a sweep; idle projects never run one; a tick stops after failure or repeats across restart.
 - A sweep interferes with a landing; a project finding holds work or cannot be investigated and built independently.
-- A sweep loses drift evidence, gives unreviewed or cancelled design authority, or cannot revisit a deferred batch once.
+- A sweep loses drift evidence or gives unreviewed or cancelled design authority.
 - A counterexample to a blessed pattern is discarded; filing alone revokes it.
 
 ## Principles

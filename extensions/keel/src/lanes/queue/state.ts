@@ -75,9 +75,7 @@ export type Finding = {
 	// An open decision's first finding, or the finding whose fix holds this filer.
 	group: number | null;
 	disposition: string | null;
-	deferredAt: number | null;
 	triageDirection: string;
-	revisit: boolean;
 };
 export type Queue = {
 	entries: Finding[];

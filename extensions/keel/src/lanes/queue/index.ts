@@ -191,7 +191,6 @@ export const queueLane = defineLane(
 					state: {
 						...state,
 						sweepTick: state.sweepTick + 1,
-						triage: triage.revisit(state.triage, world),
 					},
 					send: findings.map((f) =>
 						fileIntake({
@@ -295,7 +294,7 @@ export const queueLane = defineLane(
 		view: (state) => ({
 			patternRulings: state.triage.patterns,
 			priorFindings: state.triage.entries.flatMap((f) =>
-				f.intake.source === "sweeper" && !f.revisit
+				f.intake.source === "sweeper"
 					? [
 							{
 								id: f.id,

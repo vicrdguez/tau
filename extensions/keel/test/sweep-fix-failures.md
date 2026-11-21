@@ -10,7 +10,6 @@
 - Declined work leaves a check owed with no open decision.
 - An unchanged landing fails to return a check even though no encoding landed.
 - A project finding can disappear as no action, or the investigation input does not explain the rule.
-- A 30-day revisit repeats an owed check or misstates what defer and drop do.
 - An ordinary follow seed tells the designer how to encode a check it was not assigned.
 - An item reviewer sees owed checks; the full-set or landing input omits what to verify.
 - Ground or a queue seed fails to tell the project to arm the sweep when work starts.

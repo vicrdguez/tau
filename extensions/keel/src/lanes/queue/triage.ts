@@ -300,9 +300,7 @@ export function intake(
 		investigation: null,
 		group: null,
 		disposition: null,
-		deferredAt: null,
 		triageDirection: "",
-		revisit: false,
 	};
 	if (input.missingCheck) f = owedTriage(f);
 	if (
@@ -336,51 +334,6 @@ export function intake(
 		send: input.blocking ? [hold(f, [])] : [],
 		reply: `Filed finding #${f.id}.`,
 	};
-}
-
-const deferredAge = 30 * 86_400_000;
-export function revisit(q: Queue, world: World): Queue {
-	const due = q.entries.filter(
-		(f) => f.deferredAt !== null && world.now - f.deferredAt >= deferredAge,
-	);
-	if (!due.length) return q;
-	const ids = due.map((f) => f.id);
-	const filed = intake(
-		q,
-		{
-			work: null,
-			source: "sweeper",
-			item: null,
-			sha: null,
-			text: "Review long-deferred findings",
-			report: evidence(q, due),
-			nodes: [],
-			edgeCase: null,
-			pattern: null,
-			blocking: false,
-		},
-		world,
-	);
-	if (filed.reject !== undefined || filed.state === q) return q;
-	const entries = filed.state.entries.map((f) =>
-		ids.includes(f.id) ? { ...f, deferredAt: null } : f,
-	);
-	const first = entries.at(-1)!;
-	first.revisit = true;
-	first.status = "triage";
-	first.group = first.id;
-	first.investigation = {
-		classification: "sets_precedent",
-		cause: "long-deferred findings",
-		recommendation: "defer",
-		size: "review the listed findings",
-		evidence: "These findings have been deferred for at least 30 days.",
-		reference: null,
-		nodes: [],
-		sameAs: null,
-	};
-	first.basis = triageBasis(q, first, [first], context(world, null));
-	return { ...q, entries };
 }
 
 function shareDecision(f: Finding, i: Investigation, other: Finding) {
@@ -694,8 +647,6 @@ export function onFact(
 						related.find((f) => f.intake.work === entry.intake.work) === entry
 							? [entry.triageDirection, annotations].filter(Boolean).join("\n")
 							: (entry.triageDirection ?? ""),
-					deferredAt:
-						fact.choice === "defer" && !entry.revisit ? world.now : null,
 				};
 			}
 			return entry;
@@ -774,9 +725,8 @@ function triageBasis(
 	const nodes = reportedNodes(related);
 	const wrong = i.classification === "mandate_wrong";
 	const cause = distinct(related.map((f) => f.investigation!.cause)).join("; ");
-	const choices = first.revisit
-		? "Build starts new work with design and Mandate review. Defer and drop both close this list without scheduling work or listing these findings again."
-		: wrong && !live.active
+	const choices =
+		wrong && !live.active
 			? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
 			: actions(i.classification);
 	return triageDocument({

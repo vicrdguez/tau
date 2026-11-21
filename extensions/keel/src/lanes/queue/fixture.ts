@@ -61,9 +61,7 @@ type QueueV1 = {
 			} | null;
 			group: number | null;
 			disposition: string | null;
-			deferredAt: number | null;
 			triageDirection: string;
-			revisit: boolean;
 		}[];
 		patterns: {
 			name: string;
@@ -127,9 +125,7 @@ export const queueFixture = {
 					},
 					group: 1,
 					disposition: null,
-					deferredAt: null,
 					triageDirection: "",
-					revisit: false,
 				},
 			],
 			patterns: [],

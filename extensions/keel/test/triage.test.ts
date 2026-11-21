@@ -307,19 +307,8 @@ test("the project sweep is off by default; when enabled its interruptible effect
 	assert.deepEqual(q.ask(), []);
 });
 
-test("sweep history carries dropped and deferred drift evidence, not ordinary findings or the synthetic revisit", () => {
-	const facts = {
-		...activeWorld,
-		options: { ...activeWorld.options, sweep_minutes: 1 },
-	};
-	const q = queue(facts);
-	q.send({ kind: "sweep_configured" });
-	const tick = () =>
-		q.send({
-			kind: "effect_done",
-			key: q.effects()[0]!.key,
-			result: { findings: [] },
-		});
+test("sweep history carries dropped and deferred drift evidence, not ordinary findings", () => {
+	const q = queue();
 	q.file({ source: "owner", text: "Ordinary owner finding" });
 	q.send(q.investigation(1));
 	q.answer("defer");
@@ -333,9 +322,6 @@ test("sweep history carries dropped and deferred drift evidence, not ordinary fi
 		q.send(q.investigation(i + 2, "sets_precedent", { nodes: [] }));
 		q.answer(disposition);
 	}
-	facts.now += 31 * 86_400_000;
-	tick();
-	assert.match(q.ask()[0]!.title, /long-deferred findings/);
 	assert.deepEqual(
 		q.view().priorFindings.map((f) => [f.text, f.report, f.disposition]),
 		[
