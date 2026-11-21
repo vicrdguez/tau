@@ -125,11 +125,63 @@ function queue(world: World = activeWorld) {
 			view: () =>
 				l.view(s) as {
 					findingsFor(work: number): string;
+					owedChecks(except?: number[]): string;
 					patternRulings: { name: string; status: string }[];
 				},
 		};
 	});
 }
+
+test("an override goes to triage as the owner's owed check, with the rejected revision and original evidence", () => {
+	const q = queue();
+	q.file({
+		source: "owner",
+		missingCheck: true,
+		text: "Reject a zero-sized lot.",
+		item: null,
+		blocking: false,
+	});
+	assert.match(
+		q.ask()[0]!.basis,
+		/Reject a zero-sized lot\.[\s\S]*commit-one[\s\S]*calculations disagree/,
+	);
+	assert.deepEqual(q.ask()[0]!.choices, ["build", "defer", "drop"]);
+	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+	const [seed] = q.answer("build");
+	assert.equal(seed?.work, "new");
+	assert.deepEqual(seed?.event.owed, [1]);
+	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
+	q.send({ kind: "checks_encoded", ids: [1], sha: "new-trunk" });
+	assert.equal(q.view().owedChecks(), "");
+});
+
+test("two overrides that name the same outstanding check file once; deferring it leaves it owed", () => {
+	const q = queue();
+	const override = {
+		source: "owner",
+		missingCheck: true,
+		text: "Reject a zero-sized lot.",
+		item: null,
+		blocking: false,
+	};
+	q.file(override);
+	q.file({
+		...override,
+		work: 5,
+		sha: "commit-two",
+		text: "  Reject a zero-sized lot.  ",
+	});
+	assert.equal(q.ask().length, 1);
+	assert.equal(
+		q
+			.view()
+			.owedChecks()
+			.match(/Reject a zero-sized lot/g)?.length,
+		1,
+	);
+	assert.deepEqual(q.answer("defer"), []);
+	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
+});
 
 test("filing twice opens one investigation with the source revision, report, nodes and current plan; owner input schedules no work", () => {
 	const q = queue();

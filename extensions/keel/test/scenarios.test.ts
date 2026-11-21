@@ -79,6 +79,127 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 	await s.accept(trunk);
 });
 
+test("a rejected landing opens owed-check triage; the check's verified landed commit clears it from the next hand-over", async (t) => {
+	const { root } = await fixture(t);
+	const s = await openScenario(root, new MemoryStorage(), "rework");
+	const { harness } = s.store;
+	t.after(() => harness.close(ctx));
+	await s.start();
+	await s.settle();
+	async function ask(lane: string) {
+		const slots = Object.values(
+			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
+		);
+		const slot = slots.find((a) => a.lane === lane);
+		assert.ok(slot, `missing ${lane} decision`);
+		const d = await harness.commit((tx) => decision(tx, slot.decision), ctx);
+		assert.ok(d?.status === "open");
+		const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
+		return { d, text: String((basis!.data as JsonObject).text) };
+	}
+	const first = await ask("verify");
+	const before = git(root, "rev-parse", "trunk");
+	const check =
+		"Keep a runnable book-format regression check in the repository.";
+	const reject = (
+		d: typeof first.d,
+		annotations: { start: number; end: number; text: string }[],
+	) =>
+		fauxAnswer(s.store, d.id, {
+			basis: d.basis,
+			choice: "reject",
+			annotations,
+		});
+	assert.equal((await reject(first.d, [])).kind, "answered");
+	await s.settle();
+	const askedAgain = await ask("verify");
+	assert.notEqual(first.d.id, askedAgain.d.id);
+	assert.equal(
+		(await reject(askedAgain.d, [{ start: 0, end: 1, text: check }])).kind,
+		"answered",
+	);
+	await s.settle();
+	const triage = await ask("queue");
+	assert.ok(triage.text.includes(check) && triage.text.includes(before));
+	const goal = "Encode the accepted book format in a regression check.";
+	const proof = {
+		id: "format-check",
+		argv: ["sh", "check-book.sh"],
+		timeoutMs: 5000,
+	};
+	const pass = {
+		outcome: "pass",
+		text: "Ran the check against the checked-out candidate.",
+		blocks: [],
+		notes: [],
+	};
+	s.provider.setResponses([
+		s.turn(
+			"designer",
+			"ground",
+			{
+				route: "follow",
+				reference: check,
+				mandate: {
+					intent: goal,
+					nodes: [
+						{ label: "format", rule: check, probe: "Run sh check-book.sh" },
+					],
+					checks: [proof],
+				},
+			},
+			check,
+		),
+		s.turn("coordinator", "publish_plan", {
+			items: [{ id: "encode", kind: "encode", goal, deps: [] }],
+		}),
+		s.turn("coordinator", "brief_item", {
+			item: "encode",
+			goal,
+			evidence: check,
+			fences: "check-book.sh",
+			nodes: ["format"],
+		}),
+		s.turn("worker", "bash", {
+			command: `printf "%s\\n" "grep -qx repaired book" > check-book.sh && git add check-book.sh && git commit -m 'Check the book format'`,
+		}),
+		s.turn("worker", "publish_build", { summary: goal, addresses: [] }),
+		s.turn("verifier", "bash", { command: "sh check-book.sh" }),
+		s.turn("verifier", "publish_verdict", pass),
+		s.turn("coordinator", "handoff_build", {
+			summary: goal,
+			risk: "Only the book format is tested.",
+		}),
+		s.turn("verifier", "bash", { command: "sh check-book.sh" }),
+		s.turn(
+			"verifier",
+			"publish_verdict",
+			{ ...pass, encodedChecks: [2] },
+			check,
+		),
+	]);
+	assert.equal(
+		(
+			await fauxAnswer(s.store, triage.d.id, {
+				basis: triage.d.basis,
+				choice: "build",
+				annotations: [],
+			})
+		).kind,
+		"answered",
+	);
+	await s.settle();
+	const handover = await ask("verify");
+	const after = git(root, "rev-parse", "trunk");
+	assert.notEqual(after, before);
+	assert.equal(
+		git(root, "show", "trunk:check-book.sh"),
+		"grep -qx repaired book",
+	);
+	assert.ok(handover.text.includes(after));
+	assert.match(handover.text, /Checks still owed\s+None\./i);
+});
+
 test("precedent-setting work: two explorers, two candidates, judge and challenge, two annotation rounds, then land three dependent items", async (t) => {
 	const { root } = await fixture(t);
 	const base = await seedBookPolicy(root);

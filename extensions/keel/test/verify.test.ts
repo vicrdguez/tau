@@ -279,6 +279,38 @@ test("an unannotated hand-over rejection stays open and files nothing", () => {
 	assert.equal(x.asks()[0]?.subject, open?.subject);
 });
 
+test("a rejected hand-over files each nonblank annotation as an owed check with the original evidence", () => {
+	const x = flow();
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const [open] = x.asks();
+	const result = x.apply({
+		kind: "answered",
+		subject: open!.subject,
+		choice: "reject",
+		annotations: [
+			{ n: 1, text: "Check the lower bound." },
+			{ n: 2, text: " " },
+			{ n: 3, text: "Check the upper bound." },
+		],
+	});
+	const filings = result.send!.filter((m) => m.lane === "queue");
+	assert.deepEqual(
+		filings.map(({ event }) => [
+			event.source,
+			event.sha,
+			event.missingCheck,
+			event.text,
+		]),
+		[
+			["owner", "prepared", true, "Check the lower bound."],
+			["owner", "prepared", true, "Check the upper bound."],
+		],
+	);
+	assert.match(String(filings[0]?.event.report), /Balance every ledger/);
+	assert.deepEqual(x.asks(), []);
+});
+
 test("a classified item hold gates verifier tools and keeps siblings running until the last cause drops", () => {
 	const x = flow();
 	x.publish();
