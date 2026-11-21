@@ -406,8 +406,9 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	])
 		assert.ok(lead.includes(change), change);
 	assert.doesNotMatch(lead, /rider A (new|changed|removed)/i);
-	assert.match(current!, /S1: Seam \(changed\)/i);
-	assert.match(current!, /P1: Proof \(changed\)/i);
+	assert.match(current!, /S1: Seam \(changed\)\n\nChanged: owner\n/i);
+	assert.match(current!, /P1: Proof \(changed\)\n\nChanged: reference\n/i);
+	assert.match(current!, /B: Rider \(changed\)\n\nChanged: disposition\n/i);
 	assert.match(current!, /R2: Rule \(new\)[\s\S]*Reference: Construction ADR/i);
 	assert.match(current!, /B: Rider \(changed\)[\s\S]*Disposition: bind/i);
 	assert.match(current!, /D: Rider \(new\)[\s\S]*Disposition: open/i);
