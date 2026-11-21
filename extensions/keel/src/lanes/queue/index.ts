@@ -2,8 +2,8 @@ import { effectKey, subject, type WorkId } from "../../kernel/ids.ts";
 import {
 	type Accepted,
 	defineLane,
-	type Message,
 	type LaneEvent,
+	type Message,
 	prose,
 	type Reduction,
 } from "../../kernel/lane.ts";
@@ -13,8 +13,8 @@ import type { PrincipleSample } from "../build/public.ts";
 import type { AuthorityIndex } from "../design/public.ts";
 import { queueFixture } from "./fixture.ts";
 import {
-	fileIntake,
 	type FindingDisposition,
+	fileIntake,
 	type Holding,
 	type HoldingAddress,
 	type Intake,

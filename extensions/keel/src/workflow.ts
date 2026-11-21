@@ -5,7 +5,7 @@ import { project } from "./kernel/storage.ts";
 import type { EffectRunner } from "./kernel/tasks.ts";
 import { lanes, tools } from "./lanes/index.ts";
 import { queueLane } from "./lanes/queue/index.ts";
-import { sweepConfigured, type SweepHistory } from "./lanes/queue/public.ts";
+import { type SweepHistory, sweepConfigured } from "./lanes/queue/public.ts";
 import {
 	principleInputs,
 	principleSections,

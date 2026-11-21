@@ -13,9 +13,9 @@ import {
 	reviewedHistory,
 } from "../lanes/design/public.ts";
 import type { SweepFinding, SweepHistory } from "../lanes/queue/public.ts";
+import { projectPrinciplesText } from "../principles/catalog.ts";
 import { principleUsage } from "../principles/index.ts";
 import { nodeExec, readRepo } from "../repo/index.ts";
-import { projectPrinciplesText } from "../principles/catalog.ts";
 import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
 const dir = import.meta.dirname + "/../prose";
