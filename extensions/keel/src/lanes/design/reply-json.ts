@@ -1,21 +1,35 @@
-export function replyJson(answer: string): unknown {
-	const fenced =
-		/^ {0,3}(```+|~~~+)[^\r\n]*\r?\n([\s\S]*?)^ {0,3}\1[ \t]*\r?$/m.exec(
-			answer,
-		);
+function parse(text: string): unknown {
 	try {
-		if (fenced) return JSON.parse(fenced[2]!);
-		const start = answer.indexOf("{");
-		if (start < 0) return null;
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+export function replyJson(answer: string): unknown {
+	const fences =
+		/^ {0,3}(```+|~~~+)[^\r\n]*\r?\n([\s\S]*?)^ {0,3}\1[ \t]*\r?$/gm;
+	for (const fence of answer.matchAll(fences)) {
+		const value = parse(fence[2]!);
+		if (value !== undefined) return value;
+	}
+
+	// Start each candidate independently so an unmatched prose brace cannot hide a report.
+	for (
+		let start = answer.indexOf("{");
+		start !== -1;
+		start = answer.indexOf("{", start + 1)
+	) {
 		const body = answer.slice(start);
 		let depth = 0;
 		for (const token of body.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}]/g)) {
 			if (token[0] === "{") depth++;
-			if (token[0] === "}" && --depth === 0)
-				return JSON.parse(body.slice(0, token.index + 1));
+			if (token[0] === "}" && --depth === 0) {
+				const value = parse(body.slice(0, token.index + 1));
+				if (value !== undefined) return value;
+				break;
+			}
 		}
-	} catch {
-		return null;
 	}
 	return null;
 }
