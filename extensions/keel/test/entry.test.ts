@@ -11,7 +11,13 @@ test("Keel registers its recovery tasks and the real lane tools", () => {
 	assert.equal(extension.name, "keel");
 	assert.deepEqual(
 		extension.tasks?.map((task) => task.definition.name).sort(),
-		["keel.answer", "keel.deliver", "keel.effect", "keel.effect-result", "keel.stop"],
+		[
+			"keel.answer",
+			"keel.deliver",
+			"keel.effect",
+			"keel.effect-result",
+			"keel.stop",
+		],
 	);
 	const tools = extension.tools?.map((tool) => tool.name) ?? [];
 	for (const name of [

@@ -173,6 +173,7 @@ export function arenaEffect(arena: Arena, number: number): EffectDecl {
 	const { stage, jobs } = arena.runs.at(-1)!;
 	return {
 		key: effectKey(`arena/${number}/${stage}/${arena.runs.length}`),
+		interruptible: true,
 		spec: { kind: "arena_dispatch", jobs },
 	};
 }

@@ -21,7 +21,7 @@ export type AgentSlot = {
 };
 export type EffectSlot = {
 	task: TaskId;
-	status: "planned" | "running" | "cancelled" | "done";
+	status: "planned" | "running" | "stopping" | "cancelled" | "done";
 };
 export type Ledger = {
 	agents: Record<string, AgentSlot>;

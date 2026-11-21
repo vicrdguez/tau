@@ -111,6 +111,8 @@ const toyLane = defineLane(
 								? [{ lane: "shared", work: null, event: { kind: "forbidden" } }]
 								: [],
 					};
+				case "effect_stopped":
+					return { state: { ...s, facts: [...s.facts, "effect stopped"] } };
 				case "effect_failed":
 					return { state: { ...s, facts: [...s.facts, e.error] } };
 				case "agent_stalled":

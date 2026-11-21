@@ -173,7 +173,11 @@ export const designV1 = {
 			}[];
 		}[],
 		cancelRequested: false,
-		cleanup: null as { build: string[] | null; verify: string[] | null } | null,
+		cleanup: null as {
+			build: string[] | null;
+			verify: string[] | null;
+			dispatch: { key: string; stopped: boolean } | null;
+		} | null,
 		reference: "",
 		mandate: null as Mandate | null,
 		readings: [] as string[],

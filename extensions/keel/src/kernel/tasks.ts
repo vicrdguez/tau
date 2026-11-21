@@ -322,6 +322,64 @@ export function makeTasks(hooks: Hooks) {
 		},
 	});
 
+	// A parked waiter survives the effect's restarts without incurring cut-offs of its own.
+	const effectResult = defineTask<
+		Address & { key: EffectKey; task: TaskId },
+		{ phase: "wait" } | { phase: "report" },
+		null
+	>({
+		name: "keel.effect-result",
+		version: 1,
+		initial: () => ({ phase: "wait" }),
+		abort,
+		phases: {
+			wait: ({ input }, runtime, ctx) =>
+				runtime.commit(
+					() => ({
+						status: "waiting",
+						on: [input.task],
+						policy: "allSettled",
+						checkpoint: { phase: "report" },
+					}),
+					ctx,
+				),
+			report: ({ input }, runtime, ctx) =>
+				commitFact(
+					runtime,
+					async (tx, apply) => {
+						const slot = (await ledger(tx, input.work)).effects[
+							slotKey(input.lane, input.key)
+						];
+						if (slot?.task !== input.task) return completed;
+						const task = await tx.task(input.task);
+						if (task?.state.status !== "terminal")
+							throw new Error(`Effect ${input.task} has not settled`);
+						const outcome = task.state.outcome;
+						let fact: KernelEvent;
+						if (slot.status === "stopping") {
+							slot.status = "cancelled";
+							fact = { kind: "effect_stopped", key: input.key };
+						} else if (
+							(slot.status === "running" || slot.status === "planned") &&
+							outcome.status !== "completed"
+						) {
+							slot.status = "done";
+							fact = {
+								kind: "effect_failed",
+								key: input.key,
+								error:
+									outcome.error?.message ??
+									`Effect ${input.task} ended: ${outcome.status}`,
+							};
+						} else return completed;
+						await apply(tx, input, fact, runtime.now());
+						return completed;
+					},
+					ctx,
+				),
+		},
+	});
+
 	const deliver = defineTask<DeliverInput, Send | Watch, null>({
 		name: "keel.deliver",
 		version: 1,
@@ -450,13 +508,21 @@ export function makeTasks(hooks: Hooks) {
 		},
 	});
 
-	const stop = defineTask<StopInput, { phase: "stop" }, null>({
+	const stop = defineTask<
+		StopInput | { effect: ConversationId },
+		{ phase: "stop" },
+		null
+	>({
 		name: "keel.stop",
 		version: 1,
 		initial: () => ({ phase: "stop" }),
 		abort,
 		phases: {
 			stop: async ({ input, id }, runtime, ctx) => {
+				if ("effect" in input) {
+					await (await runtime.conversation(input.effect, ctx))?.abort(ctx);
+					return runtime.commit(() => completed, ctx);
+				}
 				const handle = await runtime.conversation(input.conversation, ctx);
 				// The last read before abort checks this exact stop intent, not just inactivity.
 				const slots =
@@ -474,5 +540,5 @@ export function makeTasks(hooks: Hooks) {
 			},
 		},
 	});
-	return { answer, effect, deliver, stop };
+	return { answer, effect, effectResult, deliver, stop };
 }

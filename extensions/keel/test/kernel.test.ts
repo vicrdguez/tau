@@ -463,10 +463,16 @@ test("a stale stop cannot abort a later run just because the agent is paused aga
 	assert.equal((await submission.wait(ctx)).status, "done");
 });
 
-test("a platform-faulted effect reports one failure and releases its running slot", { timeout: 3000 }, async (t) => {
+test("a platform-faulted effect reports one failure and releases its running slot", {
+	timeout: 3000,
+}, async (t) => {
 	const x = await toy({
 		async runEffect() {
-			return { get value(): string { throw new Error("could not read effect result"); } };
+			return {
+				get value(): string {
+					throw new Error("could not read effect result");
+				},
+			};
 		},
 	});
 	t.after(() => x.harness.close(ctx));

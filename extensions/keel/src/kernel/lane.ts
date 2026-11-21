@@ -14,7 +14,7 @@ import type { StateDef } from "./state.ts";
 export { prose } from "tau";
 export { defineLaneTool } from "./tool.ts";
 
-/** Tools and messages use lane-defined kinds. These four facts come from the kernel. */
+/** Tools and messages use lane-defined kinds. These facts come from the kernel. */
 export type KernelEvent =
 	| {
 			kind: "answered";
@@ -25,6 +25,7 @@ export type KernelEvent =
 	  }
 	| { kind: "effect_done"; key: EffectKey; result: JsonObject }
 	| { kind: "effect_failed"; key: EffectKey; error: string }
+	| { kind: "effect_stopped"; key: EffectKey }
 	| {
 			kind: "agent_stalled";
 			agent: AgentKey;
@@ -64,7 +65,12 @@ export type AgentDecl = {
 	expects: readonly Expectation[];
 };
 /** A key names one immutable plan, including across retries. A new plan needs a new key. */
-export type EffectDecl = { key: EffectKey; spec: JsonObject };
+export type EffectDecl = {
+	key: EffectKey;
+	spec: JsonObject;
+	/** Stop and join the task and its children when this declaration disappears. */
+	interruptible?: true;
+};
 export type Note = { text: string; agent: AgentKey | null };
 export type Accepted<S> = {
 	reject?: never;

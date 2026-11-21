@@ -210,20 +210,40 @@ export async function reconcile(
 		planned.add(key);
 		if (slots.effects[key] && slots.effects[key].status !== "cancelled")
 			continue;
+		const home = await anchor();
+		// A dispatch has its own abort scope. Stopping it must not stop the designer.
+		const placement = effect.interruptible
+			? {
+					conversationId: (
+						await tx.createConversation({ ownership: { kind: "ownerless" } })
+					).id,
+					ownership: { kind: "conversation" } as const,
+				}
+			: background(home);
 		const task = await tx.createTask(
 			tasks.effect,
 			{ ...address, ...effect, root: frame.root },
-			background(await anchor()),
+			placement,
 		);
 		slots.effects[key] = { task, status: "planned" };
+		await tx.createTask(
+			tasks.effectResult,
+			{ ...address, key: effect.key, task },
+			background(home),
+		);
 	}
 	for (const [key, slot] of Object.entries(slots.effects)) {
-		if (
-			key.startsWith(prefix) &&
-			!planned.has(key) &&
-			slot.status === "planned"
-		)
-			slot.status = "cancelled";
+		if (!key.startsWith(prefix) || planned.has(key)) continue;
+		if (slot.status === "planned") slot.status = "cancelled";
+		if (slot.status !== "running") continue;
+		const task = await tx.task(slot.task);
+		if (!task || task.background) continue;
+		slot.status = "stopping";
+		await tx.createTask(
+			tasks.stop,
+			{ effect: task.conversationId },
+			background(await anchor()),
+		);
 	}
 
 	for (const note of frame.notes) {

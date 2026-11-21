@@ -18,7 +18,10 @@ export type V1 = {
 	>;
 	effects: Record<
 		string,
-		{ task: TaskId; status: "planned" | "running" | "cancelled" | "done" }
+		{
+			task: TaskId;
+			status: "planned" | "running" | "stopping" | "cancelled" | "done";
+		}
 	>;
 };
 export type CurrentMatchesV1 = Check<
@@ -39,5 +42,8 @@ export const current = {
 			],
 		},
 	},
-	effects: { checkout: { task: 12 as TaskId, status: "running" } },
+	effects: {
+		checkout: { task: 12 as TaskId, status: "running" },
+		dispatch: { task: 13 as TaskId, status: "stopping" },
+	},
 } satisfies V1;

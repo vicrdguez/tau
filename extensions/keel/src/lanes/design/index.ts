@@ -1,6 +1,7 @@
 import { arr, obj, oneOf, opt } from "tau/schema";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
+	type Accepted,
 	type Ask,
 	defineLane,
 	defineLaneTool,
@@ -208,7 +209,11 @@ type State = {
 		| "closed"
 		| "cancelled";
 	cancelRequested: boolean;
-	cleanup: { build: string[] | null; verify: string[] | null } | null;
+	cleanup: {
+		build: string[] | null;
+		verify: string[] | null;
+		dispatch: { key: string; stopped: boolean } | null;
+	} | null;
 	reference: string;
 	mandate: Mandate | null;
 	audit: Audit | null;
@@ -290,7 +295,7 @@ const cancelNotes = prose(
 const cleanupNote = prose(
 	import.meta.dirname,
 	"../../prose/documents/cancel-cleanup.md",
-	["goal", "kept", "work"],
+	["goal", "kept", "work", "dispatch"],
 );
 const landed = prose(
 	import.meta.dirname,
@@ -372,6 +377,29 @@ function labels(value: unknown): value is string[] {
 		new Set(value).size === value.length &&
 		value.every((n) => typeof n === "string" && !!n.trim())
 	);
+}
+
+function finishCancellation(s: State, w: World): Accepted<State> {
+	const cleanup = s.cleanup;
+	if (!cleanup?.build || !cleanup.verify || cleanup.dispatch?.stopped === false)
+		return { state: s };
+	const kept = [...cleanup.build, ...cleanup.verify];
+	return {
+		state: { ...s, cleanup: null },
+		notes: [
+			{
+				agent: null,
+				text: cleanupNote({
+					work: String(w.work),
+					goal: goal(s),
+					kept: kept.length ? kept.join("\n") : "Nothing kept.",
+					dispatch: cleanup.dispatch
+						? "Keel stopped the dispatch stage and its children.\n\n"
+						: "",
+				}),
+			},
+		],
+	};
 }
 
 function cancelledAnnotations(s: State, w: World) {
@@ -663,23 +691,10 @@ export const design: Lane<State> = {
 					s.cleanup[e.lane] !== null
 				)
 					return { state: s };
-				const cleanup = { ...s.cleanup, [e.lane]: e.kept as string[] };
-				if (!cleanup.build || !cleanup.verify)
-					return { state: { ...s, cleanup } };
-				const kept = [...cleanup.build, ...cleanup.verify];
-				return {
-					state: { ...s, cleanup: null },
-					notes: [
-						{
-							agent: null,
-							text: cleanupNote({
-								work: String(w.work),
-								goal: goal(s),
-								kept: kept.length ? kept.join("\n") : "Nothing kept.",
-							}),
-						},
-					],
-				};
+				return finishCancellation(
+					{ ...s, cleanup: { ...s.cleanup, [e.lane]: e.kept as string[] } },
+					w,
+				);
 			}
 			case "queue_seed": {
 				if (s.phase !== "entry")
@@ -1129,13 +1144,19 @@ export const design: Lane<State> = {
 				return s.phase === "bound"
 					? { state: { ...s, phase: "landed", cancelRequested: false } }
 					: { state: s };
-			case "cancel":
+			case "cancel": {
 				if (
 					s.phase === "cancelled" ||
 					s.phase === "landed" ||
 					s.phase === "closed"
 				)
 					return { state: s };
+				const key =
+					s.phase === "dispatching"
+						? arenaEffect(currentArena(s), s.arenas.length).key
+						: s.phase === "experiment_running"
+							? experimentEffect(currentExperiment(s))?.key
+							: undefined;
 				return {
 					state: {
 						...s,
@@ -1143,10 +1164,16 @@ export const design: Lane<State> = {
 						cause: null,
 						direction: "",
 						cancelRequested: false,
-						cleanup: { build: null, verify: null },
+						cleanup: {
+							build: null,
+							verify: null,
+							dispatch:
+								key && w.runningEffect?.(key) ? { key, stopped: false } : null,
+						},
 					},
 					notes: cancelledAnnotations(s, w),
 				};
+			}
 			case "closed":
 				return {
 					state: {
@@ -1161,6 +1188,14 @@ export const design: Lane<State> = {
 		}
 	},
 	onFact(s, e, w) {
+		if (e.kind === "effect_stopped" && s.cleanup?.dispatch?.key === e.key)
+			return finishCancellation(
+				{
+					...s,
+					cleanup: { ...s.cleanup, dispatch: { key: e.key, stopped: true } },
+				},
+				w,
+			);
 		if (e.kind === "effect_done" || e.kind === "effect_failed") {
 			if (s.phase === "experiment_running") {
 				const experiment = finishExperiment(currentExperiment(s), e);

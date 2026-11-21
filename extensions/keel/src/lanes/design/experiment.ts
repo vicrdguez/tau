@@ -173,6 +173,7 @@ export function experimentEffect(experiment: Experiment): EffectDecl | null {
 	return experiment.outcome === null
 		? {
 				key: key(experiment),
+				interruptible: true,
 				spec: { kind: "arena_dispatch", jobs: experiment.jobs },
 			}
 		: null;
