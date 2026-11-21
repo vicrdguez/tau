@@ -100,7 +100,8 @@ function setup(
 		const plan = (
 			items: ReturnType<typeof goal>[],
 			replies: JsonObject[] = [],
-		) => send({ kind: "plan", items, replies });
+			fixes: JsonObject[] = [],
+		) => send({ kind: "plan", items, replies, fixes });
 		const brief = (item: string, label = "ledger") =>
 			send({
 				kind: "brief",
@@ -566,6 +567,53 @@ test("a worker whose publication is superseded is told the Mandate changed, not 
 	assert.match(input, /^The Mandate changed/);
 	assert.match(input, /The ledger crossing changed/);
 	assert.doesNotMatch(input, /Verification found a defect/);
+});
+
+test("a blocked defect filer stays held through fix validation and publication, then starts freshly from the merged head", () => {
+	const b = setup([goal("ledger")], 1);
+	b.brief("ledger");
+	b.ready();
+	b.send(hold("queue/1", "ledger"));
+	b.send({
+		kind: "plan_finding",
+		cause: "queue/1",
+		text: "Restore decimal input",
+		reference: "Current Mandate",
+		nodes: ["ledger"],
+	});
+	const fix = goal("decimal-fix");
+	const fixes = [{ cause: "queue/1", item: fix.id }];
+	for (const event of [
+		{ kind: "plan", items: [fix] },
+		{ kind: "plan", items: [{ ...fix, deps: ["ledger"] }], fixes },
+		{ kind: "plan", items: [fix], fixes: [{ cause: "queue/2", item: fix.id }] },
+	])
+		assert.ok("reject" in b.tryEvent(event));
+	b.plan([fix], [], fixes);
+	b.brief(fix.id, "report");
+	b.ready();
+	b.publish(fix.id);
+	assert.equal(b.worker("ledger")?.paused, true);
+	assert.ok(
+		!b
+			.effects()
+			.some((e) =>
+				String((e.spec.op as LaneEvent)?.branch).endsWith("/ledger-2"),
+			),
+	);
+	b.merge(fix.id);
+	const preparation = b
+		.effects()
+		.find((e) =>
+			String((e.spec.op as LaneEvent)?.branch).endsWith("/ledger-2"),
+		);
+	assert.equal((preparation?.spec.op as LaneEvent)?.base, tip);
+	b.done({ kind: "worktree", base: tip, principles: [] }, preparation?.key);
+	assert.match(b.worker("ledger")?.key ?? "", /ledger\/2$/);
+	assert.match(
+		b.worker("ledger")?.expects[0]?.input?.() ?? "",
+		/Restore decimal input/,
+	);
 });
 
 test("a hold on an already merged node blocks handoff until its disposition", () => {

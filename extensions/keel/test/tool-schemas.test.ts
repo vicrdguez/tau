@@ -23,7 +23,7 @@ const inputs: Record<string, string> = {
 		"finding classification nodes evidence size recommendation cause sameAs duplicateOf reference",
 	principle: "name",
 	publish_plan:
-		"items.id items.kind items.goal items.deps replies.n replies.status replies.reason",
+		"items.id items.kind items.goal items.deps replies.n replies.status replies.reason fixes.cause fixes.item",
 	brief_item: "item goal evidence fences nodes",
 	handoff_build: "summary risk",
 	record_ruling: "what why cost rank follows principles pattern",

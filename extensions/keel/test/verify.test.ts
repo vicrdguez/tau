@@ -414,6 +414,23 @@ test("a revision returns obsolete publications after a claimed checkout settles,
 	);
 });
 
+test("a merged defect fix retires the blocked verifier publication so the filer can reprepare", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	x.apply(findingHold("queue/1"));
+	const result = x.apply({
+		kind: "defect_fixed",
+		item: "bug",
+		evidence: "Decimal parsing is fixed.",
+	});
+	assert.equal(x.agents().length, 0);
+	assert.equal(
+		result.send?.find((m) => m.lane === "build")?.event.reason,
+		"defect_fixed",
+	);
+});
+
 test("a revision repins a queued merge's proof but records a claimed merge without rewriting it", () => {
 	for (const claimed of [false, true]) {
 		const x = flow();
