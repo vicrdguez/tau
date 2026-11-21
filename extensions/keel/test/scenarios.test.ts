@@ -89,6 +89,7 @@ test("precedent-setting work: two explorers, two candidates, judge and challenge
 	await s.rework();
 	await s.reworkRider();
 	await s.approveAndBuild();
+	await s.explorePreviousWork();
 	await assertLanded(root, base, `keel/${s.root.id}/build`, []);
 	assert.match(git(root, "show", "trunk:book-report.sh"), /read_book book/);
 });

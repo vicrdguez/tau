@@ -176,6 +176,14 @@ export async function openScriptedWorkflow(
 		explorer,
 		turn,
 		settle,
+		newDesigner: async () =>
+			harness.createConversation(
+				{
+					ownership: { kind: "ownerless" },
+					agent: { ...(await harness.commit(k.entry, ctx)), cwd },
+				},
+				ctx,
+			),
 	};
 }
 

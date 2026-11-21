@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { openNodeSqliteStorage } from "tau/durable";
-import { fauxAssistantMessage, fauxText } from "tau/testing";
-import { probeStore } from "./fixtures/dispatch-probe.ts";
+import { fauxAssistantMessage, type FauxResponseStep } from "tau/testing";
+import { probeStore, started } from "./fixtures/dispatch-probe.ts";
+import { dispatchPlanV1 } from "./state/dispatch.plan.ts";
 
 for (const expired of [false, true])
 	test(expired
@@ -36,7 +37,7 @@ for (const expired of [false, true])
 		const storage = await openNodeSqliteStorage(file);
 		const { harness, provider } = await probeStore(
 			storage,
-			() => Date.now() + (expired ? 2 * 60 * 60_000 : 0),
+			() => started + (expired ? 2 * 60 * 60_000 : 0),
 		);
 		try {
 			const tool = (
@@ -48,11 +49,23 @@ for (const expired of [false, true])
 					async (tx) =>
 						(await tx.scanConversations({ ownerTaskId: tool.id }, 10)).items
 							.map(({ id }) => id)
-							.sort(),
+							.sort((a, b) => a - b),
 					ctx,
 				);
 			const before = await children();
 			assert.equal(before.length, 2);
+			const plan = await storage.findDocument(
+				{ kind: "dispatch.plan", scope: { kind: "task", taskId: tool.id } },
+				"current",
+				ctx,
+			);
+			assert.ok(plan);
+			const saved = await storage.document(plan.id, "current", ctx);
+			assert.equal(saved?.version, 1);
+			assert.deepEqual(
+				saved?.value,
+				dispatchPlanV1(started + 20 * 60_000, before),
+			);
 			const submissions = async () =>
 				(
 					await Promise.all(
@@ -70,17 +83,42 @@ for (const expired of [false, true])
 					)
 				).flat();
 			const admitted = await submissions();
-			assert.ok(admitted.length >= 1 && admitted.length <= before.length);
+			assert.equal(
+				admitted.length,
+				1,
+				"the process died between the two admission commits",
+			);
 			assert.ok(
 				admitted.every(
 					({ status }) => status !== "done" && status !== "unanswered",
 				),
 			);
-			provider.setResponses([
-				fauxAssistantMessage([fauxText("first answer")]),
-				fauxAssistantMessage([fauxText("second answer")]),
-				fauxAssistantMessage("parent done"),
-			]);
+			const called: number[] = [];
+			const response: FauxResponseStep = ({ messages }, options) => {
+				const prompt = JSON.stringify(
+					messages.filter((m) => m.role === "user").at(-1),
+				);
+				const index = prompt.includes("first question")
+					? 0
+					: prompt.includes("second question")
+						? 1
+						: -1;
+				if (index < 0) return fauxAssistantMessage("parent done");
+				called.push(index);
+				if (!expired)
+					return fauxAssistantMessage(
+						index === 0 ? "first answer" : "second answer",
+					);
+				const signal = options?.signal;
+				assert.ok(signal);
+				signal.throwIfAborted();
+				return new Promise<never>((_, reject) =>
+					signal.addEventListener("abort", () => reject(signal.reason), {
+						once: true,
+					}),
+				);
+			};
+			provider.setResponses(Array.from({ length: 3 }, () => response));
 			harness.resume();
 			await harness.waitForTask(tool.id, ctx);
 			assert.deepEqual(await children(), before);
@@ -106,12 +144,16 @@ for (const expired of [false, true])
 					result.map(({ answer, error }) => [answer, error]),
 					Array.from({ length: 2 }, () => [null, "Dispatch child timed out."]),
 				);
+				assert.ok(
+					called.every((i) => before[i] === admitted[0]!.conversationId),
+					"no request for the unadmitted child",
+				);
 				return;
 			}
 			assert.deepEqual(
-				(JSON.parse(output.text) as { answer: string }[])
-					.map(({ answer }) => answer)
-					.sort(),
+				(JSON.parse(output.text) as { answer: string }[]).map(
+					({ answer }) => answer,
+				),
 				["first answer", "second answer"],
 			);
 		} finally {

@@ -17,6 +17,7 @@ import {
 import { dispatchTool } from "../../src/dispatch/index.ts";
 
 export const model = { provider: "faux", modelId: "faux-1" };
+export const started = 1_800_000_000_000;
 const dispatch = dispatchTool({
 	resolve: (_, _caller, { seat }) =>
 		seat === "reader"
@@ -51,18 +52,23 @@ if (import.meta.main) {
 				const value = Reflect.get(target, key, target);
 				return typeof value === "function" ? value.bind(target) : value;
 			}
-			return async (...args: Parameters<Storage["commit"]>) => {
-				const result = await target.commit(...args);
-				if (
-					args[0]
-						.slice(0, result.stored)
-						.flat()
-						.some(
-							(w) =>
-								w.type === "submission" &&
-								w.value.requestId?.startsWith("dispatch:"),
-						)
-				) {
+			return async (
+				...[batches, receive, context]: Parameters<Storage["commit"]>
+			) => {
+				const index = batches.findIndex((batch) =>
+					batch.some(
+						(w) =>
+							w.type === "submission" &&
+							w.value.requestId?.startsWith("dispatch:"),
+					),
+				);
+				// Storage may coalesce transactions. Write only the prefix through the first admission.
+				const result = await target.commit(
+					index < 0 ? batches : batches.slice(0, index + 1),
+					receive,
+					context,
+				);
+				if (index >= 0 && result.stored > index) {
 					writeSync(1, "committed:submission\n");
 					process.kill(process.pid, "SIGKILL");
 				}
@@ -70,7 +76,7 @@ if (import.meta.main) {
 			};
 		},
 	});
-	const { harness, provider } = await probeStore(storage);
+	const { harness, provider } = await probeStore(storage, () => started);
 	const root = await harness.root(ctx, {
 		agent: { model, extensions: [extension] },
 	});

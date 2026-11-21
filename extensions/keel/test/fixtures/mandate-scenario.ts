@@ -196,6 +196,7 @@ export async function openReview(
 	reworkRider(): Promise<void>;
 	decline(): Promise<void>;
 	approveAndBuild(): Promise<void>;
+	explorePreviousWork(): Promise<void>;
 }> {
 	const {
 		store,
@@ -207,6 +208,7 @@ export async function openReview(
 		explorer,
 		turn,
 		settle,
+		newDesigner,
 	} = await openScriptedWorkflow(cwd, storage, first);
 	const { harness } = store;
 	async function asks() {
@@ -571,9 +573,53 @@ export async function openReview(
 		await answer("handover", "accept");
 		assert.deepEqual(await subjects(), []);
 	}
+	async function explorePreviousWork() {
+		const later = await newDesigner();
+		let instructions = "";
+		explorer.setResponses([
+			({ messages }) => {
+				instructions = JSON.stringify(messages);
+				return fauxAssistantMessage(
+					"The reviewed writer validates before redirecting output.",
+				);
+			},
+		]);
+		provider.setResponses([
+			turn("designer", "dispatch", {
+				jobs: [
+					{
+						seat: "design_explorer",
+						question:
+							"Why does the shared writer validate before opening the file?",
+					},
+				],
+			}),
+			fauxAssistantMessage("I have the earlier work's evidence."),
+		]);
+		await later.submit(
+			{
+				type: "input",
+				content: "Find the approved writer pattern before Ground.",
+			},
+			ctx,
+		);
+		await settle();
+		expectAll(instructions, [
+			"priorWorks",
+			String(root.id),
+			"write-book",
+			redesigned,
+			ruling,
+		]);
+		assert.ok(
+			!instructions.includes("Naming default from arena_seat_1"),
+			"evidence is the bound Mandate, not rejected arena proposals",
+		);
+	}
 	return {
 		root,
 		harness,
+		explorePreviousWork,
 		start,
 		review,
 		subjects,
