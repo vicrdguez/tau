@@ -11,7 +11,7 @@ import { openNodeSqliteStorage } from "tau/durable";
 import { fauxAssistantMessage, fauxText } from "tau/testing";
 import { probeStore } from "./fixtures/dispatch-probe.ts";
 
-test("installed API: a killed tool joins its original children and finds the original submission", {
+test("dispatch: a killed toy tool joins its original children and finds the original submission", {
 	timeout: 20_000,
 }, async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "keel-dispatch-probe-"));
@@ -66,6 +66,7 @@ test("installed API: a killed tool joins its original children and finds the ori
 		provider.setResponses([
 			fauxAssistantMessage([fauxText("first answer")]),
 			fauxAssistantMessage([fauxText("second answer")]),
+			fauxAssistantMessage("parent done"),
 		]);
 		harness.resume();
 		await harness.waitForTask(tool.id, ctx);
@@ -83,10 +84,12 @@ test("installed API: a killed tool joins its original children and finds the ori
 		assert.equal(results[0]?.isError, false);
 		const output = results[0]?.content[0];
 		assert.ok(output?.type === "text");
-		assert.deepEqual(JSON.parse(output.text).sort(), [
-			"first answer",
-			"second answer",
-		]);
+		assert.deepEqual(
+			(JSON.parse(output.text) as { answer: string }[])
+				.map(({ answer }) => answer)
+				.sort(),
+			["first answer", "second answer"],
+		);
 	} finally {
 		await harness.close(ctx);
 	}
