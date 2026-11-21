@@ -15,7 +15,8 @@ const inputs: Record<string, string> = {
 	publish_mandate:
 		"draft.intent draft.done draft.seams.label draft.seams.callersNow draft.seams.callersLater draft.seams.usage draft.seams.signature draft.seams.owner draft.seams.dependencies draft.nodes.label draft.nodes.rule draft.nodes.probe draft.never draft.tradeoffs draft.alternatives draft.settlements.label draft.settlements.ruling draft.checks.id draft.checks.argv draft.checks.timeoutMs draft.riders.label draft.riders.text draft.riders.origin draft.riders.disposition draft.references.label draft.references.source replies.n replies.status replies.reason base grafts.seat grafts.text",
 	publish_revision:
-		"changes.intent changes.nodes.label changes.nodes.rule changes.nodes.probe changes.seams.label changes.seams.callersNow changes.seams.callersLater changes.seams.usage changes.seams.signature changes.seams.owner changes.seams.dependencies changes.checks.id changes.checks.argv changes.checks.timeoutMs changes.sections.label changes.sections.body replies.n replies.status replies.reason",
+		"changes.intent changes.nodes.label changes.nodes.rule changes.nodes.probe changes.remove changes.seams.label changes.seams.callersNow changes.seams.callersLater changes.seams.usage changes.seams.signature changes.seams.owner changes.seams.dependencies changes.checks.id changes.checks.argv changes.checks.timeoutMs changes.sections.label changes.sections.body replies.n replies.status replies.reason",
+	revision_settled: "cause node",
 	file_finding:
 		"text report nodes blocking source edgeCase.failure edgeCase.likelihood edgeCase.cost",
 	report_investigation:
