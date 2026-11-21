@@ -206,10 +206,11 @@ export function intake(
 		pattern,
 		blocking: e.blocking,
 	};
-	const prior = q.entries.find(
-		(f) => JSON.stringify(f.intake) === JSON.stringify(input),
+	const serialized = JSON.stringify(input);
+	const prior = q.entries.findLast(
+		(f) => JSON.stringify(f.intake) === serialized,
 	);
-	if (prior)
+	if (prior && prior.status !== "deferred")
 		return { state: q, reply: `Already filed as finding #${prior.id}.` };
 	const f: Finding = {
 		id: q.entries.length + 1,
@@ -317,7 +318,12 @@ export function classify(
 		reference: e.reference?.trim() || linked?.investigation?.reference || null,
 		duplicateOf: e.duplicateOf ?? null,
 	};
-	if (!classes.includes(i.classification) || !i.evidence || !i.size || !i.cause)
+	if (
+		!classes.includes(i.classification) ||
+		!i.evidence ||
+		!i.size ||
+		(!i.cause && !["duplicate", "no_action"].includes(i.classification))
+	)
 		return {
 			reject:
 				"Name the class, evidence, estimated size and the decision cause or earlier finding.",
@@ -633,7 +639,7 @@ function actions(classification: Investigation["classification"]) {
 		case "determined":
 			return "Build adds work to the related active build or starts new work under the approved reference. Defer parks it. Drop closes it.";
 		case "mandate_wrong":
-			return "Build asks the designer to propose a revision. Defer releases holds and lets a later duplicate reopen the decision. Drop releases holds and closes the issue.";
+			return "Build asks the designer to propose a revision, or starts follow-up design if the build has handed off. Defer releases holds and lets a later duplicate reopen the decision. Drop releases holds and closes the issue.";
 		case "unapproved_pattern":
 			return "Bless makes this an approved reference. Revoke starts work to make the pattern fail structurally. Defer parks the finding.";
 		default:

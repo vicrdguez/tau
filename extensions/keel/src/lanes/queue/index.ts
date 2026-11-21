@@ -25,6 +25,7 @@ const withTriage = (
 ): Accepted<QueueState> => {
 	const next = pending(result.state)?.id;
 	const changed = next !== pending(state.triage)?.id;
+	// Route the new head separately so its work is loaded, not the preceding investigation’s.
 	return {
 		...result,
 		state: {

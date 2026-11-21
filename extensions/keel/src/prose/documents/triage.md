@@ -1,4 +1,6 @@
-Decide what to do about {{cause}} for {{work}}.
+Decide what to do about {{cause}}.
+
+Work: {{work}}
 
 {{choices}}
 

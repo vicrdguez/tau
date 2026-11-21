@@ -54,7 +54,6 @@ export function context(world: World, work: WorkId | null) {
 				} | null);
 	return {
 		active: build?.phase === "active",
-		phase: build?.phase ?? "missing",
 		plan:
 			build?.plan.map(({ id, goal, stage, nodes, deps }) => ({
 				id,
