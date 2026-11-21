@@ -90,8 +90,9 @@ export const explorerDispatch: NonNullable<
 				rulings: design ? workRulings(view("build")) : [],
 				priorWorks: history.slice(-3).map(({ work, mandate, nodes, view }) => ({
 					work,
-					...(mandate ? { mandate } : { revisionNodes: nodes }),
-					rulings: workRulings(view("build")),
+					...(mandate
+						? { mandate, rulings: workRulings(view("build")) }
+						: { revisionNodes: nodes }),
 				})),
 				earlierWorks: history
 					.slice(0, -3)
