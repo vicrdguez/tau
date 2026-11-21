@@ -60,6 +60,7 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 				kind: "bound",
 				mandate: {
 					...mandate,
+					considerations: null,
 					delegated: [],
 					encodeRequired: false,
 					approvalNotes: [],
@@ -71,6 +72,7 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 	assert.equal(state.reference, bound.reference);
 	assert.deepEqual(state.mandate, {
 		...mandate,
+		considerations: null,
 		delegated: [],
 		encodeRequired: false,
 		approvalNotes: [],

@@ -229,10 +229,9 @@ test("approving binds riders proposed to bind, delegates open riders and preserv
 	assert.deepEqual(approved.send?.[0]?.event.mandate, m);
 	assert.equal(m.encodeRequired, true);
 	assert.deepEqual(m.approvalNotes, [`Use exact counts.\n> ${rule.probe}`]);
-	assert.deepEqual(
-		m.delegated.map(({ label, text }) => ({ label, text })),
-		[{ label: "B", text: "Sort imports." }],
-	);
+	assert.deepEqual(m.delegated, [
+		{ label: "B", text: "Sort imports.", origin: "incidental" },
+	]);
 	assert.deepEqual(
 		m.nodes.find((n) => n.label === "R1"),
 		rule,
