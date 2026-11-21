@@ -100,8 +100,7 @@ function setup(
 		const plan = (
 			items: ReturnType<typeof goal>[],
 			replies: JsonObject[] = [],
-			fixes: JsonObject[] = [],
-		) => send({ kind: "plan", items, replies, fixes });
+		) => send({ kind: "plan", items, replies });
 		const brief = (item: string, label = "ledger") =>
 			send({
 				kind: "brief",
@@ -124,8 +123,9 @@ function setup(
 			});
 		};
 		const merge = (item: string) => {
-			send({ kind: "merged", item, head: tip });
+			const routes = send({ kind: "merged", item, head: tip });
 			done({ kind: "removed" });
+			return routes;
 		};
 		send({ kind: "bound", mandate: initial });
 		done({
@@ -412,7 +412,7 @@ test("revision activation and the edited plan take effect together, retaining a 
 	assert.deepEqual(b.coord()?.tools, ["handoff_build"]);
 });
 
-test("the approved revision holds every affected brief, including a removed node the investigator did not name", () => {
+test("the revision holds affected briefs that the investigator did not name and cannot leave one citing a removed node", () => {
 	const first = goal("first");
 	const report = goal("report");
 	const b = setup([first, report]);
@@ -427,17 +427,15 @@ test("the approved revision holds every affected brief, including a removed node
 		mandate: { ...revised, nodes: [revised.nodes[0]!] },
 	});
 	assert.equal(b.worker(report.id)?.paused, true);
-	const correction = goal("new-reporter");
-	b.plan([first, { ...report, deps: [correction.id] }, correction], reply);
+	const result = b.tryEvent({
+		kind: "plan",
+		items: [first, report],
+		replies: reply,
+	});
+	assert.match("reject" in result ? result.reject : "", /report.*removed/i);
 	assert.equal(b.worker(report.id)?.paused, true);
-	b.brief(correction.id);
-	b.ready();
-	b.publish(correction.id);
-	b.merge(correction.id);
-	const input = b.worker(report.id)?.expects[0]?.input?.() ?? "";
-	assert.match(input, /New ledger crossing/);
-	assert.doesNotMatch(input, /Stable reporting/);
-	assert.doesNotMatch(input, /Mandate nodes: report/);
+	const { plan } = b.view() as { plan: { id: string; nodes: string[] }[] };
+	assert.deepEqual(plan.find((i) => i.id === report.id)?.nodes, ["report"]);
 });
 
 test("a verified item awaiting merge is a record: require a separate correction depending on it", () => {
@@ -631,7 +629,7 @@ test("a worker whose publication is superseded is told the Mandate changed, not 
 	assert.doesNotMatch(input, /Verification found a defect/);
 });
 
-test("a blocked defect filer stays held through fix validation and publication, then starts freshly from the merged head", () => {
+test("a blocked defect filer waits for all planned items to merge and then starts freshly from the merged head", () => {
 	const b = setup([goal("ledger")], 1);
 	b.brief("ledger");
 	b.ready();
@@ -644,14 +642,8 @@ test("a blocked defect filer stays held through fix validation and publication, 
 		nodes: ["ledger"],
 	});
 	const fix = goal("decimal-fix");
-	const fixes = [{ cause: "queue/1", item: fix.id }];
-	for (const event of [
-		{ kind: "plan", items: [fix] },
-		{ kind: "plan", items: [{ ...fix, deps: ["ledger"] }], fixes },
-		{ kind: "plan", items: [fix], fixes: [{ cause: "queue/2", item: fix.id }] },
-	])
-		assert.ok("reject" in b.tryEvent(event));
-	b.plan([fix], [], fixes);
+	const tests = goal("decimal-proof", [fix.id]);
+	b.plan([fix, tests]);
 	b.brief(fix.id, "report");
 	b.ready();
 	b.publish(fix.id);
@@ -663,7 +655,13 @@ test("a blocked defect filer stays held through fix validation and publication, 
 				String((e.spec.op as LaneEvent)?.branch).endsWith("/ledger-2"),
 			),
 	);
-	b.merge(fix.id);
+	assert.ok(b.merge(fix.id).every((m) => m.lane !== "queue"));
+	assert.equal(b.worker("ledger")?.paused, true);
+	b.brief(tests.id, "report");
+	b.ready();
+	b.publish(tests.id);
+	assert.equal(b.worker("ledger")?.paused, true);
+	assert.ok(b.merge(tests.id).some((m) => m.lane === "queue"));
 	const preparation = b
 		.effects()
 		.find((e) =>
@@ -676,6 +674,100 @@ test("a blocked defect filer stays held through fix validation and publication, 
 		b.worker("ledger")?.expects[0]?.input?.() ?? "",
 		/Restore decimal input/,
 	);
+});
+
+test("a blocked filer linked after a non-blocking defect was planned waits for its remaining items", () => {
+	const b = setup([goal("ledger")]);
+	b.brief("ledger");
+	b.ready();
+	b.send({
+		kind: "plan_finding",
+		cause: "queue/1",
+		text: "Fix rounding",
+		reference: "Mandate",
+		nodes: ["ledger"],
+	});
+	const fix = goal("fix");
+	b.plan([fix]);
+	b.brief(fix.id, "report");
+	b.ready();
+	b.send(hold("queue/2", "ledger"));
+	b.send({ kind: "link_defect", cause: "queue/1", linked: "queue/2" });
+	assert.equal(b.worker("ledger")?.paused, true);
+	b.publish(fix.id);
+	assert.equal(b.worker("ledger")?.paused, true);
+	b.merge(fix.id);
+	b.done({ kind: "worktree", base: tip, principles: [] });
+	assert.equal(b.worker("ledger")?.key, "worker/ledger/2");
+	assert.equal(b.worker("ledger")?.paused, false);
+});
+
+test("an appended plan cannot depend on either held filer, directly or through existing dependencies", () => {
+	const b = setup(
+		[goal("writer"), goal("stats"), goal("reader", ["writer"])],
+		3,
+	);
+	b.brief("writer");
+	b.ready();
+	b.brief("stats", "report");
+	b.ready();
+	b.send(hold("queue/1", "writer"));
+	b.send(hold("queue/2", "stats"));
+	b.send({
+		kind: "plan_finding",
+		text: "Address framing",
+		reference: "Mandate",
+		nodes: ["ledger"],
+	});
+	for (const id of ["writer", "stats", "reader"])
+		assert.ok(
+			"reject" in b.tryEvent({ kind: "plan", items: [goal("fix", [id])] }),
+			id,
+		);
+	b.plan([goal("fix")]);
+});
+
+test("a revision cannot introduce a dependency on a filer held by another cause", () => {
+	const writer = goal("writer");
+	const existing = goal("reader");
+	const b = setup([writer, existing]);
+	b.brief(writer.id, "report");
+	b.ready();
+	b.send(hold("queue/2", writer.id));
+	b.send(proposal);
+	const result = b.tryEvent({
+		kind: "plan",
+		items: [writer, { ...existing, deps: [writer.id] }],
+		replies: reply,
+	});
+	assert.ok("reject" in result);
+	b.plan([writer, existing], reply);
+});
+
+test("a revision cannot drop an unmerged item that a defect holds a filer for", () => {
+	const writer = goal("writer");
+	const b = setup([writer]);
+	b.brief(writer.id, "report");
+	b.ready();
+	b.send(hold("queue/2", writer.id));
+	b.send({
+		kind: "plan_finding",
+		cause: "queue/2",
+		text: "Fix framing",
+		reference: "Mandate",
+		nodes: ["report"],
+	});
+	const fix = goal("fix");
+	const check = goal("check", [fix.id]);
+	b.plan([fix, check]);
+	b.send(proposal);
+	const result = b.tryEvent({
+		kind: "plan",
+		items: [writer, fix],
+		replies: reply,
+	});
+	assert.match("reject" in result ? result.reject : "", /check/);
+	b.plan([writer, fix, check], reply);
 });
 
 test("a hold on an already merged node blocks handoff until its disposition", () => {

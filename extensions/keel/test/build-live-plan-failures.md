@@ -14,3 +14,9 @@ Exercise the Build reducer, public view, agent inputs and effect/message declara
 - A pivot cannot edit, reorder or drop unstarted items, or a held worker loses its attempt or resumes before its new dependencies merge.
 - A revision unlocks a publication with outstanding dependencies, or loses the review-policy reevaluation of an Encode publication held at Build.
 - A hold on an already merged node permits handoff before its disposition.
+- A filer resumes or its finding closes after only part of the fix plan has merged.
+- A filer linked to a non-blocking defect after planning resumes before the same plan merges.
+- Two held filers' fixes depend directly or indirectly on either filer, including via an already planned item.
+- A revised plan depends on a defect-held filer or drops an outstanding item planned for that defect.
+- An approved revision drops a node still cited by a started item and silently strips the brief's authority.
+- Approval notes from separate decisions lose their source or borrow another decision's reply number.
