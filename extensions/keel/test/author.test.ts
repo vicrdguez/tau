@@ -54,7 +54,7 @@ const lane: Lane<ReturnType<typeof plan.initial>> = {
 											.filter((k) => !s.answered.includes(token(k, 1)))
 											.map((k) => ({
 												token: token(k, 1),
-												tools: ["brief", "ambiguous"],
+												tools: ["brief"],
 												input: () => `Prepare ${k}`,
 											}))
 									: [],
@@ -137,17 +137,7 @@ const brief = defineLaneTool({
 	lane: "plan",
 	roles: ["designer"],
 	name: "brief",
-	description: "Brief the named item",
-	parameters: obj({ item: str() }),
-	expectation: (args) => token(args.item, 1),
-	terminate: true,
-	event: (_, __, self) => ({ kind: "brief", token: self.token }),
-});
-const ambiguous = defineLaneTool({
-	lane: "plan",
-	roles: ["designer"],
-	name: "ambiguous",
-	description: "No selector",
+	description: "Brief the current item",
 	parameters: obj({}),
 	terminate: true,
 	event: (_, __, self) => ({ kind: "brief", token: self.token }),
@@ -161,7 +151,7 @@ const principle = defineTool({
 async function setup(t: TestContext) {
 	const x = await toy({
 		lanes: [defineLane(lane, fixture), queueLane],
-		tools: [adopt, file, brief, ambiguous],
+		tools: [adopt, file, brief],
 		plainTools: [{ roles: ["designer"], tool: principle }],
 		sections: [
 			{
@@ -288,7 +278,7 @@ test("queue seed creates a different anchored work; rejected seed leaks no conve
 		"grounded",
 	);
 });
-test("when two handoffs are open an unqualified call is refused; a named handoff can answer the earlier input", async (t) => {
+test("when two handoffs for the same tool are open, the latest input cannot disambiguate them", async (t) => {
 	const { x, call } = await setup(t);
 	await x.deliver("plan", x.root.id, { kind: "two" });
 	for (const delivery of await x.tasks("keel.deliver"))
@@ -303,12 +293,15 @@ test("when two handoffs are open an unqualified call is refused; a named handoff
 				}),
 			ctx,
 		);
-	assert.equal((await call("ambiguous")).isError, true);
-	assert.equal((await call("brief", { item: "foreign" })).isError, true);
-	assert.equal((await call("brief", { item: "A" })).isError, false);
+	const result = await call("brief");
+	assert.equal(result.isError, true);
+	assert.match(
+		JSON.stringify(result.content),
+		/Ambiguous open expectation for brief/,
+	);
 	assert.deepEqual(
 		(await x.harness.snapshot(stateDoc(plan), x.root.id, ctx))?.answered,
-		[token("A", 1)],
+		[],
 	);
 });
 test("an effect can recover its own child without receiving authority over task progress", async (t) => {
