@@ -27,7 +27,7 @@ const inputs: Record<string, string> = {
 	file_finding:
 		"text report nodes blocking source edgeCase.failure edgeCase.likelihood edgeCase.cost",
 	report_investigation:
-		"finding classification nodes evidence size recommendation cause sameAs duplicateOf reference",
+		"finding classification nodes evidence size recommendation cause sameAs reference",
 	principle: "name",
 	publish_plan:
 		"items.id items.kind items.goal items.deps replies.n replies.status replies.reason fixes.cause fixes.item",

@@ -41,8 +41,8 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 			await first.openTriage();
 			const triage = await first.review("triage/");
 			save("triage", triage.text);
-			assert.match(triage.text, /Held items:[^\n]*writer/);
-			assert.match(triage.text, /Keeps running:[^\n]*stats/);
+			assert.match(triage.text, /The filer could not continue item writer\./);
+			assert.doesNotMatch(triage.text, /Held items:|Keeps running:/);
 			assert.match(triage.text, /write_book value/);
 			assert.doesNotMatch(triage.text, /Reference: Book reader contract/);
 			return {
