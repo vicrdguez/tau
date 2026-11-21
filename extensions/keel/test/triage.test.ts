@@ -396,50 +396,26 @@ test("owner and sweep findings reopen a blessed pattern without withdrawing auth
 	}
 });
 
-test("one sweep decision lists all long-deferred findings, and a later tick does not list them again", () => {
+test("a sweep keeps prior deferrals in its history without asking about them again after 30 days", () => {
 	const facts = {
 		...activeWorld,
 		options: { ...activeWorld.options, sweep_minutes: 1 },
 	};
 	const q = queue(facts);
 	q.send({ kind: "sweep_configured" });
-	for (const [i, text] of [
-		"First old finding",
-		"Second old finding",
-	].entries()) {
-		q.file({ text });
-		q.send(q.investigation(i + 1));
-		q.answer("defer");
-	}
-	q.file(missing);
+	q.file({ text: "An old drift finding", work: null, source: "sweeper" });
+	q.send(q.investigation(1));
 	q.answer("defer");
 	facts.now += 31 * 86_400_000;
-	const sweep = () =>
-		q.send({
-			kind: "effect_done",
-			key: q.effects()[0]!.key,
-			result: { findings: [] },
-		});
-	sweep();
-	const oldDeferrals = q
-		.ask()
-		.find((a) => a.title.includes("long-deferred findings"));
-	assert.ok(oldDeferrals);
+	q.send({
+		kind: "effect_done",
+		key: q.effects()[0]!.key,
+		result: { findings: [] },
+	});
+	assert.deepEqual(q.ask(), []);
 	assert.match(
-		oldDeferrals.basis,
-		/First old finding[\s\S]*Second old finding/,
-	);
-	assert.doesNotMatch(oldDeferrals.basis, /Reject a zero-sized lot/);
-	assert.match(
-		oldDeferrals.basis,
-		/Defer and drop both close this list without scheduling work or listing these findings again/,
-	);
-	q.answer("defer", oldDeferrals.subject);
-	facts.now += 31 * 86_400_000;
-	sweep();
-	assert.deepEqual(
-		q.ask().map((a) => a.subject),
-		["triage/3"],
+		JSON.stringify(q.view().priorFindings),
+		/An old drift finding.*deferred/,
 	);
 });
 
@@ -1216,6 +1192,23 @@ test("cancelling work closes its pending revision findings rather than leaving t
 	assert.match(
 		q.view().findingsFor(4),
 		/Needs an active revision \(cancelled\)/,
+	);
+});
+
+test("wrong-Mandate triage identifies the decision, shows the reports before their node text, and explains releasing the blocked item", () => {
+	const q = queue();
+	q.file({ blocking: true });
+	q.send(q.investigation(1, "mandate_wrong"));
+	q.file({ text: "Are reversed postings lost?", nodes: ["totals"] });
+	q.send(q.investigation(2, "mandate_wrong", { nodes: ["totals"], sameAs: 1 }));
+	const [ask] = q.ask();
+	assert.deepEqual(ask?.choices, ["build", "defer", "drop"]);
+	assert.match(ask!.title, /wrong Mandate/i);
+	assert.match(ask!.basis, /defer and drop.*blocked item.*same obstacle/i);
+	assert.match(ask!.basis, /Which rounding boundary\?[\s\S]*Round once\./);
+	assert.match(
+		ask!.basis,
+		/Are reversed postings lost\?[\s\S]*Totals include reversed postings\./,
 	);
 });
 

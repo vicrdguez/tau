@@ -57,8 +57,10 @@ async function start(
 		const r = await send(lane, event);
 		assert.ok(!("reject" in r), JSON.stringify(r));
 	};
-	const fact = (fact: KernelEvent) =>
-		commit((tx) => s.transact(tx, { lane: "build", work, fact }, 1));
+	const fact = (fact: KernelEvent, lane = "build") =>
+		commit((tx) =>
+			s.transact(tx, { lane, work: lane === "queue" ? null : work, fact }, 1),
+		);
 	const asks = async () =>
 		Object.values(
 			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
@@ -484,6 +486,45 @@ test("a synthetic cycle among held unfinished items opens one decision, not one 
 	assert.match(text, /right.*Right cannot continue.*depends on left/);
 	await x.answer("finding/", "cancel");
 	assert.deepEqual(await x.asks(), []);
+});
+
+test("cancelling a stalled investigation of a non-blocking note exposes the work's otherwise silent wait", async (t) => {
+	const x = await start(t, ["left", "right"]);
+	await x.brief("left");
+	await x.brief("right");
+	await x.file("left", "A non-blocking note about left", false);
+	// As in the synthetic-cycle test, stand in for an unknown build dead end.
+	await x.changeBuild((s) => {
+		s.items[0]!.deps = ["right"];
+		s.items[1]!.deps = ["left"];
+	});
+	for (const item of ["left", "right"])
+		await x.must("build", {
+			kind: "queue_hold",
+			item,
+			nodes: [],
+			cause: `queue/${item === "left" ? 91 : 92}`,
+		});
+	assert.deepEqual(await x.asks(), [], "investigation is still progress");
+	await x.fact(
+		{
+			kind: "agent_stalled",
+			agent: agentKey("investigator"),
+			tokens: [token("investigate/1", 0)],
+			cause: "stopped",
+			lastWords: "",
+		},
+		"queue",
+	);
+	assert.deepEqual(
+		(await x.asks()).map((a) => a.local),
+		["investigate/1/0"],
+	);
+	await x.answer("investigate/", "cancel");
+	const { d, text } = await x.readAsk("finding/");
+	assert.deepEqual(d.choices, ["resume", "cancel"]);
+	assert.match(text, /left.*depends on right/);
+	assert.match(text, /right.*depends on left/);
 });
 
 test("a pending Verify checkout is progress for an unfinished build", async (t) => {
