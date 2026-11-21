@@ -7,7 +7,7 @@ Use `report_investigation` once for the finding in your input. Give a concise si
 - `defect_in_scope`: the behaviour violates a node of the current Mandate and the build can take another item.
 - `determined`: an approved reference settles the answer. Name the reference.
 - `sets_precedent`: no approved reference settles the answer.
-- `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them.
+- `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them. An unlikely edge case does not hold them until the owner answers `build`.
 - `unapproved_pattern`: a ruling cites a pattern the owner has not approved.
 - `no_action`: an observation needs no change, holds nothing and did not come from the owner. Give the reason in the evidence. The owner sees it at hand-over or as a note if the hand-over is already written.
 
