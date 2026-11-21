@@ -386,7 +386,17 @@ export async function openLiveRevision(
 			s.turn(
 				"designer",
 				"publish_revision",
-				{ changes: { seams: [revised] }, replies: [] },
+				{
+					changes: { seams: [revised] },
+					answers: [
+						{
+							cause: "queue/1",
+							nodes: ["wire"],
+							reason: "The framed call distinguishes the new export format.",
+						},
+					],
+					replies: [],
+				},
 				finding,
 				report,
 				"wire",

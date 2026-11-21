@@ -100,7 +100,6 @@ test("the public workflow entry starts a designer with its own model and coding 
 		"read",
 		"record_experiment",
 		"request_cancel",
-		"revision_settled",
 		"start_experiment",
 	]);
 	assert.deepEqual(

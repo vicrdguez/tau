@@ -22,8 +22,7 @@ const inputs: Record<string, string> = {
 		"route reference readings audit.exists audit.gaps.label audit.gaps.text audit.contradictions.label audit.contradictions.text mandate.intent mandate.nodes.label mandate.nodes.rule mandate.nodes.probe mandate.checks.id mandate.checks.argv mandate.checks.timeoutMs",
 	publish_mandate: `${synthesis} replies.n replies.status replies.reason base`,
 	publish_revision:
-		"changes.intent changes.nodes.label changes.nodes.rule changes.nodes.probe changes.remove changes.seams.label changes.seams.callersNow changes.seams.callersLater changes.seams.usage changes.seams.signature changes.seams.owner changes.seams.dependencies changes.checks.id changes.checks.argv changes.checks.timeoutMs changes.sections.label changes.sections.body replies.n replies.status replies.reason",
-	revision_settled: "cause node",
+		"changes.intent changes.nodes.label changes.nodes.rule changes.nodes.probe changes.remove changes.seams.label changes.seams.callersNow changes.seams.callersLater changes.seams.usage changes.seams.signature changes.seams.owner changes.seams.dependencies changes.checks.id changes.checks.argv changes.checks.timeoutMs changes.sections.label changes.sections.body replies.n replies.status replies.reason answers.cause answers.nodes answers.reason",
 	file_finding:
 		"text report nodes blocking source edgeCase.failure edgeCase.likelihood edgeCase.cost",
 	report_investigation:

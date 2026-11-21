@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
@@ -91,14 +92,24 @@ const draft = {
 };
 const request = {
 	kind: "revise_mandate",
-	causes: ["finding-1", "finding-2"],
+	causes: ["queue/1", "queue/2"],
 	nodes: ["R1"],
 	text: "F9 reproduces a report split on an embedded newline at abc123.",
 };
+const answerCauses = (
+	causes: string[],
+	nodes: string[],
+	reason = "The revised contract covers this case.",
+) => causes.map((cause) => ({ cause, nodes, reason }));
 const publish = {
 	kind: "publish_revision",
 	changes: { nodes: [correction] },
+	answers: answerCauses(request.causes, ["R1"]),
 	replies: [],
+};
+const render = (name: string, basis: string) => {
+	if (process.env.KEEL_RENDER_REWORK)
+		writeFileSync(`/tmp/keel-queue-rework2-${name}.md`, basis);
 };
 const reply = { n: 1, status: "acted_on", reason: "Test a tab too." };
 const note = { n: 1, text: "Keep escapes readable." };
@@ -217,7 +228,7 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 	const x = pending();
 	const old = x.mandate();
 	const turn = x.turn();
-	assert.deepEqual(turn?.tools, ["publish_revision", "revision_settled"]);
+	assert.deepEqual(turn?.tools, ["publish_revision"]);
 	for (const part of [request.text, "R1", rule.rule])
 		assert.ok(x.input().includes(part));
 	assert.deepEqual(x.asks(), []);
@@ -250,7 +261,12 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 		{
 			lane: "build",
 			work,
-			event: { ...request, kind: "propose_revision", mandate: next },
+			event: {
+				...request,
+				kind: "propose_revision",
+				mandate: next,
+				changes: "R1: rule, falsifying probe",
+			},
 		},
 	]);
 	assert.deepEqual(x.mandate(), old);
@@ -264,11 +280,10 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 	assert.deepEqual(x.mandate(), next);
 });
 
-test("a revision refuses empty, unchanged, malformed or duplicated edits", () => {
+test("a revision refuses invalid labels, malformed or duplicated edits", () => {
 	const x = pending();
 	for (const changes of [
-		{},
-		{ nodes: [rule] },
+		{ nodes: [{ ...rule, label: "intent" }] },
 		{ nodes: [{ ...correction, probe: " " }] },
 		{ nodes: [correction, correction] },
 		{ checks: [{ ...small.checks[0]!, timeoutMs: 0 }] },
@@ -303,12 +318,14 @@ test("a seam revision needs the usage-first contract and preserves proof, riders
 				x.send({
 					...publish,
 					changes: { seams: [{ ...seam, owner: "Export boundary", ...patch }] },
+					answers: answerCauses(request.causes, ["S1"]),
 				}),
 		);
 	}
 	x.act({
 		...publish,
 		changes: { seams: [{ ...seam, owner: "Export boundary" }] },
+		answers: answerCauses(request.causes, ["S1"]),
 	});
 	const [ask] = x.asks();
 	const text = ask!.basis;
@@ -349,7 +366,7 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 		evidence: "Check the premise",
 		direction: "Use the fixture.",
 	});
-	assert.deepEqual(x.turn()?.tools, ["publish_revision", "revision_settled"]);
+	assert.deepEqual(x.turn()?.tools, ["publish_revision"]);
 	assert.notEqual(x.turn()?.token, token);
 	for (const part of [note.text, "Use the fixture."])
 		assert.ok(x.input().includes(part));
@@ -371,26 +388,49 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	assert.equal(x.asks()[0]?.subject, second.subject);
 });
 
-test("build answers join an open revision, and declining releases all joined causes", () => {
-	const x = pending();
+test("a cause joining review withdraws the unanswered text; the new review attributes both reports without inventing history", () => {
+	const x = run();
+	const [a, b] = request.causes as [string, string];
+	x.act(follow);
 	const old = x.mandate();
-	x.act(publish);
+	x.act({ ...request, causes: [a] });
+	x.act({ ...publish, answers: answerCauses([a], ["R1"]) });
 	const first = x.asks()[0]!;
-	const second = {
-		...request,
-		causes: ["finding-3"],
-		text: "Another report about the same node.",
-	};
-	x.act(second);
+	const evidence = "The reader needs the timestamp's clock named.";
+	x.act({ ...request, causes: [b], nodes: ["R2"], text: evidence });
 	assert.deepEqual(x.asks(), []);
-	assert.match(x.input(), /Another report about the same node/);
+	assert.ok(x.input().includes(evidence));
 	assert.ok(x.input().includes(request.text));
 	assert.deepEqual(x.answer(first.subject, "approve").send ?? [], []);
-	x.act(publish);
-	const declined = x.answer(x.asks()[0]!.subject, "decline", [note]);
+	x.act({
+		...publish,
+		changes: {
+			nodes: [
+				correction,
+				{ ...untouched, rule: "Keep the UTC report timestamp." },
+			],
+		},
+		answers: [
+			...answerCauses(
+				[a],
+				["R1"],
+				"Escaping keeps embedded newlines in the record.",
+			),
+			...answerCauses([b], ["R2"], "The contract identifies the clock as UTC."),
+		],
+	});
+	const next = x.asks()[0]!;
+	assert.notEqual(next.subject, first.subject);
+	assert.ok(next.basis.includes(evidence));
+	assert.ok(next.basis.includes(request.text));
+	assert.match(next.basis, /Finding #1: R1\. Escaping/);
+	assert.match(next.basis, /Finding #2: R2\. The contract/);
+	assert.doesNotMatch(next.basis, /Since round|Previously|preceding round/);
+	render("revision", next.basis);
+	const declined = x.answer(next.subject, "decline", [note]);
 	assert.deepEqual(
 		declined.send?.filter((m) => m.lane === "build").map((m) => m.event.cause),
-		[...request.causes, ...second.causes],
+		request.causes,
 	);
 	assert.equal(
 		declined.send?.find((m) => m.lane === "queue")?.event.disposition,
@@ -398,41 +438,88 @@ test("build answers join an open revision, and declining releases all joined cau
 	);
 	assert.deepEqual(x.mandate(), old);
 	assert.equal(x.turn(), undefined);
-	const third = {
-		...request,
-		text: "New cause on the ledger.",
-		causes: ["finding-4"],
-	};
-	x.act(third);
-	assert.match(x.input(), /New cause on the ledger/);
-	assert.doesNotMatch(x.input(), /Another report about the same node/);
 });
 
-test("a cause already answered by a bound node needs no owner decision and releases only that cause", () => {
+test("an already-settled proposal still owes numbered replies and releases causes only through approval and application", () => {
 	const x = pending();
-	x.act({ ...request, causes: ["finding-3"], text: "The second concern." });
-	const token = x.turn()!.token;
-	const settlement = {
-		kind: "revision_settled",
-		cause: "finding-3",
-		node: "R1",
-	};
-	assert.ok("reject" in x.send({ ...settlement, node: "unknown" }));
-	assert.ok("reject" in x.send({ ...settlement, cause: "unknown" }));
-	const result = x.act(settlement);
-	assert.deepEqual(
-		result.send?.filter((m) => m.lane === "build").map((m) => m.event.cause),
-		["finding-3"],
-	);
-	assert.equal(
-		result.send?.find((m) => m.lane === "queue")?.event.disposition,
-		"already settled by R1",
-	);
-	assert.notEqual(x.turn()?.token, token);
-	assert.deepEqual(x.asks(), []);
+	const old = x.mandate();
 	x.act(publish);
-	const approved = x.answer(x.asks()[0]!.subject, "approve").send?.[0]?.event;
-	assert.deepEqual(approved?.causes, request.causes);
+	x.answer(x.asks()[0]!.subject, "rework", [note]);
+	const unchanged = {
+		...publish,
+		changes: {},
+		answers: [
+			...answerCauses(
+				[request.causes[0]!],
+				["P1"],
+				"The existing proof compares the serialized bytes.",
+			),
+			...answerCauses(
+				[request.causes[1]!],
+				["R1"],
+				"The rule governs the emitted record, not the input.",
+			),
+		],
+	};
+	assert.ok("reject" in x.send(unchanged));
+	assert.equal(x.asks().length, 0);
+	assert.deepEqual(x.act({ ...unchanged, replies: [reply] }).send ?? [], []);
+	const ask = x.asks()[0]!;
+	assert.deepEqual(ask.choices, ["approve", "rework", "decline"]);
+	for (const detail of [
+		note.text,
+		reply.reason,
+		"No change",
+		"Finding #1: P1",
+		"Finding #2: R1",
+		"compares the serialized bytes",
+		old.checks[0]!.argv[0]!,
+	])
+		assert.ok(ask.basis.includes(detail), detail);
+	render("no-change", ask.basis);
+	const approval = x.answer(ask.subject, "approve", [note]);
+	assert.deepEqual(
+		approval.send?.map((m) => m.event.kind),
+		["propose_revision"],
+	);
+	assert.deepEqual(approval.send?.[0]?.event.causes, request.causes);
+	assert.deepEqual(approval.send?.[0]?.event.nodes, []);
+	assert.deepEqual(x.mandate(), old);
+	const applied = x.act({ kind: "revision_activated", causes: request.causes });
+	assert.deepEqual(applied.send?.[0]?.event.causes, request.causes);
+	assert.match(
+		String(applied.send?.[0]?.event.disposition),
+		/no Mandate change/i,
+	);
+	assert.deepEqual(x.mandate(), { ...old, approvalNotes: [note.text] });
+	assert.equal(x.turn(), undefined);
+});
+
+test("revision proposals refuse missing, duplicate or foreign answers, unknown labels, blank reasons and unattributed edits", () => {
+	const x = pending();
+	const [a, b] = request.causes as [string, string];
+	for (const answers of [
+		[],
+		answerCauses([a], ["R1"]),
+		answerCauses([a, a], ["R1"]),
+		answerCauses([a, "unknown"], ["R1"]),
+		answerCauses([a, b], ["unknown"]),
+		answerCauses([a, b], ["R1"], " "),
+		answerCauses([a, b], ["R2"]),
+	])
+		assert.ok(
+			"reject" in x.send({ ...publish, answers }),
+			JSON.stringify(answers),
+		);
+	assert.ok(
+		"reject" in
+			x.send({
+				...publish,
+				changes: {},
+				answers: answerCauses([a, b], ["unknown"]),
+			}),
+	);
+	assert.deepEqual(x.asks(), []);
 });
 
 test("a revision shows and applies all differences, including an unreported addition and removal", () => {
@@ -443,6 +530,7 @@ test("a revision shows and applies all differences, including an unreported addi
 			nodes: [correction, { ...untouched, label: "R3" }],
 			remove: ["R2"],
 		},
+		answers: answerCauses(request.causes, ["R1", "R2", "R3"]),
 	});
 	const ask = x.asks()[0]!;
 	assert.match(ask.basis, /R3: Rule \(new\)/);
@@ -451,6 +539,10 @@ test("a revision shows and applies all differences, including an unreported addi
 	assert.doesNotMatch(ask.basis, /R1: Rule \(new\)/);
 	const approval = x.answer(ask.subject, "approve").send?.[0]?.event;
 	assert.deepEqual(approval?.nodes, ["R1", "R2", "R3"]);
+	assert.equal(
+		approval?.changes,
+		"R1: rule, falsifying probe; R2: removed; R3: added",
+	);
 	assert.deepEqual(
 		(approval?.mandate as { nodes: { label: string }[] }).nodes.map(
 			(n) => n.label,
@@ -461,7 +553,11 @@ test("a revision shows and applies all differences, including an unreported addi
 
 test("triage evidence remains usable when an intervening revision removed a reported label", () => {
 	const x = pending();
-	x.act({ ...publish, changes: { remove: ["R2"] } });
+	x.act({
+		...publish,
+		changes: { remove: ["R2"] },
+		answers: answerCauses(request.causes, ["R2"]),
+	});
 	x.answer(x.asks()[0]!.subject, "approve");
 	x.act({ kind: "revision_activated", causes: request.causes });
 	x.act({
@@ -471,56 +567,60 @@ test("triage evidence remains usable when an intervening revision removed a repo
 		text: "The old timestamp report.",
 	});
 	assert.match(x.input(), /The old timestamp report/);
-	const closed = x.act({
-		kind: "revision_settled",
-		cause: "finding-8",
-		node: "R1",
-	});
-	assert.equal(
-		closed.send?.find((m) => m.lane === "queue")?.event.disposition,
-		"already settled by R1",
-	);
-	assert.equal(x.turn(), undefined);
-});
-
-test("a cause arriving while the approved plan is owed withdraws that plan and returns to the designer", () => {
-	const x = pending();
-	x.act(publish);
-	x.answer(x.asks()[0]!.subject, "approve", [note]);
-	const joined = x.act({
-		...request,
-		causes: ["finding-5"],
-		text: "Evidence before activation.",
-	});
-	assert.equal(joined.send?.[0]?.event.kind, "withdraw_revision");
-	assert.match(x.input(), /Evidence before activation/);
-	x.act(publish);
-	const approved = x.answer(x.asks()[0]!.subject, "approve").send?.[0]?.event;
-	assert.deepEqual(approved?.causes, [...request.causes, "finding-5"]);
-	assert.equal(
-		(approved?.mandate as { approvalNotes: string[] }).approvalNotes.length,
-		1,
-	);
-});
-
-test("declining a replacement draft still sends prior approval annotations to the coordinator", () => {
-	const x = pending();
-	x.act(publish);
-	x.answer(x.asks()[0]!.subject, "approve", [note]);
 	x.act({
-		...request,
-		causes: ["finding-6"],
-		text: "Evidence revisits the approved draft.",
+		...publish,
+		changes: {},
+		answers: answerCauses(["finding-8"], ["R1"]),
 	});
+	assert.match(x.asks()[0]!.basis, /finding-8: R1/);
+});
+
+test("causes after approval wait without changing it, then join the next revision against the newly bound Mandate", () => {
+	const x = pending();
 	x.act(publish);
-	const declined = x.answer(x.asks()[0]!.subject, "decline");
-	assert.ok(
-		String(
-			declined.send?.find((m) => m.event.kind === "approval_followup")?.event
-				.notes,
-		).includes(note.text),
+	const first = x.asks()[0]!;
+	const approval = x.answer(first.subject, "approve", [note]);
+	assert.deepEqual(
+		(approval.send?.[0]?.event.mandate as { approvalNotes: string[] })
+			.approvalNotes,
+		[note.text],
 	);
-	assert.deepEqual(x.mandate().nodes[0], rule);
+	const late = ["queue/5", "queue/6"];
+	for (const cause of late) {
+		const waiting = x.act({
+			...request,
+			causes: [cause],
+			text: `Late evidence ${cause}.`,
+		});
+		assert.deepEqual(waiting.send ?? [], []);
+		assert.equal(x.turn(), undefined);
+		assert.deepEqual(x.asks(), []);
+	}
+	x.act({ kind: "revision_activated", causes: [...request.causes, ...late] });
+	assert.equal(x.turn(), undefined);
+	const applied = x.act({ kind: "revision_activated", causes: request.causes });
+	assert.deepEqual(applied.send?.[0]?.event.causes, request.causes);
+	assert.deepEqual(x.mandate().nodes[0], correction);
+	for (const cause of late)
+		assert.ok(x.input().includes(`Late evidence ${cause}.`));
+	assert.ok(x.input().includes(correction.rule));
+	const nextRule = {
+		...correction,
+		rule: "Emit one escaped line, followed by the checksum.",
+	};
+	x.act({
+		...publish,
+		changes: { nodes: [nextRule] },
+		answers: answerCauses(late, ["R1"]),
+	});
+	const next = x.asks()[0]!;
+	assert.notEqual(next.subject, first.subject);
+	const approved = x.answer(next.subject, "approve").send?.[0]?.event;
+	assert.deepEqual(approved?.causes, late);
+	assert.deepEqual(
+		(approved?.mandate as { approvalNotes: string[] }).approvalNotes,
+		[],
+	);
 });
 
 test("cancel names the current rework annotation as not pursued, and omits a reply already given", () => {
