@@ -245,6 +245,28 @@ test("X2: a fix blocked on its own finding leads to one decision", async (t) => 
 	assert.match((await x.readAsk("finding/")).text, /fix.*Parser defect/);
 });
 
+for (const filer of ["direct", "transitive", "fix"] as const) {
+	test(`A-1: an investigator cannot link the ${filer} filer to its own fix`, async (t) => {
+		const x = await start(t, filer === "fix" ? ["writer"] : ["writer", "stats"]);
+		await x.brief("writer");
+		if (filer !== "fix") await x.brief("stats", "R2");
+		await x.file("writer", "The parser loses its escape.");
+		assert.ok(!("reject" in (await x.classify(1))));
+		const items = filer === "transitive"
+			? [goal("reader", ["stats"]), goal("fix", ["reader"])]
+			: [goal("fix", filer === "direct" ? ["stats"] : [])];
+		assert.ok(!("reject" in (await x.plan(items))));
+		if (filer === "fix") await x.brief("fix");
+		const item = filer === "fix" ? "fix" : "stats";
+		await x.file(item, "The same defect would block the fix if linked.");
+		const linked = await x.classify(2, { sameAs: 1 });
+		assert.match("reject" in linked ? linked.reject : "", new RegExp(`${item}.*fix.*without linking`, "i"));
+		assert.ok(!("reject" in (await x.classify(2))), "the investigator can report a separate defect");
+		assert.ok(!("reject" in (await x.plan([goal("different-fix")]))));
+		assert.equal((await x.build())?.coordinator.item, "different-fix");
+	});
+}
+
 test("X3: a coordinator stalled on an approved removal reports the held item in one decision", async (t) => {
 	const x = await start(t, ["stats"]);
 	await x.brief("stats", "R2");
