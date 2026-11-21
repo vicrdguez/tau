@@ -262,10 +262,10 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	const approvals = [
 		{
 			revision: null,
-			notes: replies.map((r) => ({
-				...r,
-				text: reviewed.approvalNotes[r.n - 1],
-			})),
+			notes: [
+				{ ...replies[1], text: "Cover cash ties" },
+				{ ...replies[0], text: "Keep the integer seam" },
+			],
 		},
 	];
 	assert.ok(
