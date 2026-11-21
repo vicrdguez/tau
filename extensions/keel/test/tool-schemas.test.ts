@@ -20,7 +20,7 @@ const inputs: Record<string, string> = {
 		"items.id items.kind items.goal items.deps replies.n replies.status replies.reason",
 	brief_item: "item goal evidence fences nodes",
 	handoff_build: "summary risk",
-	record_ruling: "what why cost rank follows principles",
+	record_ruling: "what why cost rank follows principles pattern",
 	publish_build: "summary addresses",
 	publish_verdict:
 		"outcome text blocks.thread blocks.ground blocks.evidence notes",
