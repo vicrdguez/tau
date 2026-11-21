@@ -223,6 +223,8 @@ test("a classified node is durable before it has a brief, cannot start a checkou
 	assert.deepEqual(b.effects(), []);
 	b.publish("other");
 	b.merge("other");
+	assert.match(b.coord()?.input?.() ?? "", new RegExp(tip));
+	b.brief("affected");
 	assert.equal((b.effects()[0]?.spec.op as JsonObject)?.base, tip);
 });
 
