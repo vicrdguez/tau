@@ -63,6 +63,7 @@ test("the public workflow entry starts a designer with its own model and coding 
 	);
 	const agent = await conversation.agent(ctx);
 	assert.deepEqual(agent.model, { provider: "designer", modelId: "chosen" });
+	assert.match(agent.instructions ?? "", /`file_finding` with `source: \"owner\"`/);
 	assert.deepEqual(agent.tools.map((tool) => tool.name).sort(), [
 		"bash",
 		"file_finding",
