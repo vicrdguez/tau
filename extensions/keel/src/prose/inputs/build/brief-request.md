@@ -3,7 +3,6 @@ Goal: {{goal}}
 Dependencies: {{deps}}
 {{reason}}
 
-Bound Mandate:
 {{mandate}}
 
 {{direction}}

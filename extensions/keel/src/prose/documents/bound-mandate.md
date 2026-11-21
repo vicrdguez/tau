@@ -6,7 +6,7 @@
 
 ### Delegated riders
 
-You may settle these choices within the binding nodes.
+Workers settle these choices within the binding nodes. Verifiers check the choices against those nodes.
 
 {{delegated}}
 

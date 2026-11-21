@@ -13,7 +13,7 @@ Start a Keel conversation in a Git project and describe a change. For a bug, per
 | Diagnoser | After the same block survives two **claimed** fixes, independently tests the shared premise before the owner is asked. | `publish_diagnosis` |
 | Investigator (one per project) | Reproduces or measures, checks the queue and plan for duplicates, and recommends a route. Does not design the fix. | `report_investigation` |
 
-Bound agents can use the standing `file_finding` tool. Designers, verifiers, diagnosers and the investigator have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. The item verifier sees which files under `.keel/principles/` and `.keel/playbooks/` the build changed, as reported by Git. These should be unchanged unless the item was tasked with creating or changing them. A weakened check is a block.
+Bound agents can use the standing `file_finding` tool. Designers, verifiers, diagnosers and the investigator have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. Item, full-set and landing reviews all show the changed `.keel/principles/` and `.keel/playbooks/` paths reported by Git. These should be unchanged unless an item under review was tasked with creating or changing them. A weakened check is a block.
 
 ## Review a Mandate
 

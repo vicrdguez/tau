@@ -17,6 +17,6 @@ Earlier verdicts:
 Changed principles and playbooks reported by Git:
 {{changedPolicyFiles}}
 
-Expect these files to be unchanged unless the item's task was to create or change them.
+Expect these files to be unchanged unless an item under review was tasked with creating or changing them.
 
 Threads this build claims to address: {{addresses}}

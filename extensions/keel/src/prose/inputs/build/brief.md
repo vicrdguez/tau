@@ -2,7 +2,6 @@ Your worktree is ready at {{path}} on branch {{branch}}.
 
 {{brief}}
 
-Bound Mandate:
 {{mandate}}
 
 {{direction}}
