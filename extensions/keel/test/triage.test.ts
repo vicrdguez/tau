@@ -13,7 +13,7 @@ const plan = [
 		deps: [],
 	},
 ];
-const world: World = {
+const activeWorld: World = {
 	work: null,
 	root: "/checkout",
 	now: 1,
@@ -44,7 +44,7 @@ const filing = {
 	pattern: null,
 	blocking: false,
 };
-function queue() {
+function queue(world: World = activeWorld) {
 	return queueLane.use((l) => {
 		let s = l.state.initial();
 		const attempt = (e: LaneEvent) => drive(l, s, e, world);
@@ -131,6 +131,14 @@ test("an unlikely edge case without likelihood and a blocking filing without an 
 	])
 		assert.ok("reject" in q.attempt({ ...filing, ...over }));
 	assert.deepEqual(q.agents(), []);
+	assert.ok(
+		"reject" in
+			q.attempt({
+				...filing,
+				blocking: true,
+				edgeCase: { failure: "overflow", likelihood: "rare", cost: "new type" },
+			}),
+	);
 });
 test("a blocking filer holds only itself; classification holds named nodes immediately and drop releases the cause", () => {
 	const q = queue();
@@ -243,6 +251,84 @@ test("a blessed pattern is an approved reference across works; revoke seeds stru
 		}
 	}
 });
+test("determined work whose original build closed seeds new follow work with its reference", () => {
+	let phase = "active";
+	const q = queue({
+		...activeWorld,
+		view: (lane) =>
+			lane === "build" ? { phase, plan } : activeWorld.view(lane),
+	});
+	q.file();
+	q.send(q.investigation());
+	phase = "closed";
+	const [seed] = q.answer("build");
+	assert.equal(seed?.lane, "design");
+	assert.equal(seed?.work, "new");
+	assert.equal(seed?.event.kind, "queue_seed");
+	assert.equal(seed?.event.route, "follow");
+	assert.equal(seed?.event.reference, "signed spec");
+	assert.match(String(seed?.event.text), /Use the ledger boundary/);
+});
+
+test("approving triage asks the designer of the same work for a revision and keeps both causes held", () => {
+	const q = queue();
+	const [own] = q.file({ blocking: true });
+	q.send(q.investigation(1, "mandate_wrong"));
+	q.file({
+		text: "Try a half-cent",
+		report: "The smallest amount that disagrees.",
+	});
+	const [second] = q.send(
+		q.investigation(2, "mandate_wrong", { batchWith: [1] }),
+	);
+	const out = q.answer("build");
+	assert.equal(out.length, 1);
+	assert.equal(out[0]?.lane, "design");
+	assert.equal(out[0]?.work, 4);
+	assert.equal(out[0]?.event.kind, "revise_mandate");
+	assert.deepEqual(out[0]?.event.causes, [
+		own?.event.cause,
+		second?.event.cause,
+	]);
+	assert.deepEqual(out[0]?.event.nodes, ["sums"]);
+	assert.match(
+		String(out[0]?.event.text),
+		/smallest amount[\s\S]+Use the ledger boundary/,
+	);
+});
+
+test("an investigation must answer the head finding and name its evidence, authority and affected nodes", () => {
+	const q = queue();
+	q.file();
+	q.file({ text: "Second" });
+	for (const report of [
+		q.investigation(2),
+		q.investigation(1, "determined", { reference: " " }),
+		q.investigation(1, "mandate_wrong", { nodes: [] }),
+		q.investigation(1, "mandate_wrong", { nodes: ["not-in-mandate"] }),
+		q.investigation(1, "duplicate", { duplicateOf: 1 }),
+		q.investigation(1, "determined", { evidence: " " }),
+	])
+		assert.ok("reject" in q.attempt(report), JSON.stringify(report));
+	assert.deepEqual(q.ask(), []);
+	assert.match(
+		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		/Which rounding boundary/,
+	);
+});
+
+test("a deferred Mandate finding releases its causes just as a dropped one does", () => {
+	const q = queue();
+	q.file();
+	const [hold] = q.send(q.investigation(1, "mandate_wrong"));
+	assert.deepEqual(
+		q.answer("defer").map((m) => [m.lane, m.work, m.event.kind, m.event.cause]),
+		[["build", 4, "queue_release", hold?.event.cause]],
+	);
+	assert.deepEqual(q.ask(), []);
+	assert.match(JSON.stringify(q.state()), /deferred/);
+});
+
 test("investigator stop is left to the owner; resume declares a fresh input for the same finding", () => {
 	const q = queue();
 	q.file();
