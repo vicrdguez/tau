@@ -556,6 +556,40 @@ test("handoff keeps original and revision approval notes with unique numbers and
 	]);
 });
 
+test("the coordinator answers notes from a withdrawn approval without adding work or changing the Mandate", () => {
+	const item = goal("ledger");
+	const b = setup([item]);
+	b.send({
+		kind: "approval_followup",
+		notes: ["Check the equivalent bound rule."],
+	});
+	assert.match(
+		b.coord()?.input?.() ?? "",
+		/1\. Check the equivalent bound rule/,
+	);
+	assert.ok("reject" in b.tryEvent({ kind: "plan", items: [], replies: [] }));
+	const reply = {
+		n: 1,
+		status: "considered",
+		reason: "Already covered by the bound rule.",
+	};
+	b.plan([], [reply]);
+	b.brief(item.id);
+	b.ready();
+	b.publish(item.id);
+	b.merge(item.id);
+	const handoff = b.send({
+		kind: "handoff",
+		summary: "Ledger done",
+		risk: "None",
+	})[0]!.event;
+	assert.deepEqual((handoff.mandate as Mandate).approvalNotes, [
+		"Check the equivalent bound rule.",
+	]);
+	assert.deepEqual(handoff.approvalReplies, [reply]);
+	assert.deepEqual((handoff.mandate as Mandate).nodes, mandate.nodes);
+});
+
 test("a stalled worker resumes with both the revision instructions and the owner's new direction", () => {
 	const item = goal("ledger");
 	const b = setup([item]);

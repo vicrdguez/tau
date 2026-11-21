@@ -497,6 +497,26 @@ test("a cause arriving while the approved plan is owed withdraws that plan and r
 	);
 });
 
+test("declining a replacement draft still sends prior approval annotations to the coordinator", () => {
+	const x = pending();
+	x.act(publish);
+	x.answer(x.asks()[0]!.subject, "approve", [note]);
+	x.act({
+		...request,
+		causes: ["finding-6"],
+		text: "Evidence revisits the approved draft.",
+	});
+	x.act(publish);
+	const declined = x.answer(x.asks()[0]!.subject, "decline");
+	assert.ok(
+		String(
+			declined.send?.find((m) => m.event.kind === "approval_followup")?.event
+				.notes,
+		).includes(note.text),
+	);
+	assert.deepEqual(x.mandate().nodes[0], rule);
+});
+
 test("cancel names the current rework annotation as not pursued, and omits a reply already given", () => {
 	const x = run();
 	x.act({ kind: "ground", route: "precedent", reference, audit });
