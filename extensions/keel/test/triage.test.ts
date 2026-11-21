@@ -188,6 +188,67 @@ test("two overrides that name the same outstanding check file once; deferring it
 	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
 });
 
+test("the owner's desk can overrule a verified result later, but an unverified result or agent cannot create an obligation", () => {
+	const accepted = {
+		sha: "landed-result",
+		evidence: "Original verifier ran a single book probe.",
+	};
+	const q = queue({
+		...activeWorld,
+		view: (lane, work) =>
+			lane === "verify" && Number(work) === 4
+				? { passedResult: () => accepted }
+				: null,
+	});
+	const override = {
+		...filing,
+		overridePassed: true,
+		source: "owner",
+		item: null,
+		text: "Include the reverse posting.",
+	};
+	assert.ok("reject" in q.attempt({ ...override, source: "worker" }));
+	assert.ok("reject" in q.attempt({ ...override, work: 5 }));
+	assert.deepEqual(q.send(override), []);
+	assert.match(
+		q.ask()[0]!.basis,
+		/Include the reverse posting\.[\s\S]*landed-result[\s\S]*Original verifier ran a single book probe/,
+	);
+	assert.doesNotMatch(q.ask()[0]!.basis, /commit-one/);
+});
+
+test("a fresh override after drop reopens the same still-owed check with both hand-overs' evidence", () => {
+	const q = queue();
+	const override = {
+		source: "owner",
+		missingCheck: true,
+		text: "Reject a zero-sized lot.",
+		item: null,
+		blocking: false,
+	};
+	q.file(override);
+	q.answer("drop");
+	assert.match(q.view().owedChecks(), /Reject a zero-sized lot/);
+	q.file({
+		...override,
+		work: 5,
+		sha: "commit-two",
+		report: "The later verifier missed it again.",
+	});
+	assert.equal(q.ask().length, 1);
+	assert.match(
+		q.ask()[0]!.basis,
+		/commit-one[\s\S]*commit-two[\s\S]*missed it again/,
+	);
+	assert.equal(
+		q
+			.view()
+			.owedChecks()
+			.match(/Reject a zero-sized lot/g)?.length,
+		1,
+	);
+});
+
 test("the project sweep is off by default; when enabled its interruptible effect sleeps and failure re-arms it", () => {
 	const off = queue();
 	off.send({ kind: "sweep_configured" });
