@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { type TestContext, test } from "node:test";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";

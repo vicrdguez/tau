@@ -23,12 +23,7 @@ import {
 	renderNode,
 	repliesCover,
 } from "./public.ts";
-import {
-	type Answer,
-	annotation,
-	notPursued,
-	precedingRound,
-} from "./rounds.ts";
+import { type Answer, annotation, notPursued } from "./rounds.ts";
 
 export const changesSchema = obj({
 	intent: opt(text),
@@ -217,19 +212,23 @@ function mandateEdits(base: Mandate, next: Mandate) {
 	});
 }
 
-const answersText = (r: RevisionRound) =>
-	r.answers
-		.map(
-			({ cause, nodes, reason }) =>
-				`- ${cause.replace(/^queue\/(\d+)$/, "Finding #$1")}: ${nodes.join(", ")}. ${reason.trim()}`,
-		)
+export const answersText = (r: RevisionRound, evidence: string) => {
+	const lines = evidence.split("\n");
+	return r.answers
+		.map(({ cause, nodes, reason }) => {
+			const label = cause.replace(/^queue\/(\d+)$/, "Finding #$1");
+			const heading = lines.find((line) => line.startsWith(`### ${label}: `));
+			return `- ${heading ? heading.slice(4) : label}: ${nodes.join(", ")}. ${reason.trim()}`;
+		})
 		.join("\n");
+};
 const cited = (round: RevisionRound) => round.answers.flatMap((a) => a.nodes);
 
 const dir = import.meta.dirname + "/../../prose";
 const review = prose(dir, "documents/revision-review.md", [
 	"summary",
 	"disposition",
+	"activation",
 	"evidence",
 	"before",
 	"after",
@@ -287,6 +286,9 @@ export function revisionAsk(
 			disposition: current.nodes.length
 				? "Approve these Mandate changes"
 				: "Approve keeping the Mandate unchanged",
+			activation: current.nodes.length
+				? "Approval takes effect when the coordinator publishes the plan."
+				: "Approval without notes releases the holds. If you add approval notes, the coordinator answers them in the plan before releasing the holds.",
 			summary: previous
 				? `Since round ${r.rounds.length - 1}: ${
 						mandateEdits(previous.mandate, current.mandate)
@@ -302,17 +304,14 @@ export function revisionAsk(
 			before:
 				renderMandate(base, cited(current)) || "No existing nodes change.",
 			after: proposed.join("\n\n") || "No change to the Mandate.",
-			answers: answersText(current),
-			history: previous
-				? precedingRound(
-						renderMandate(previous.mandate, removed),
-						owed(previous)
-							.map((a) => {
-								const reply = current.replies.find((n) => n.n === a.n)!;
-								return `${annotation(a)}\n\n   ${reply.status}: ${reply.reason}`;
-							})
-							.join("\n"),
-					)
+			answers: answersText(current, r.text),
+			history: current.replies.length
+				? `## Replies to the preceding round\n\n${owed(previous)
+						.map((a) => {
+							const reply = current.replies.find((n) => n.n === a.n)!;
+							return `${annotation(a)}\n\n   ${reply.status}: ${reply.reason}`;
+						})
+						.join("\n")}`
 				: "",
 		}),
 		choices: ["approve", "rework", "decline"],
@@ -346,7 +345,7 @@ export function revisionTurn(
 						after:
 							renderMandate(previous.mandate, previous.nodes) ||
 							"No change to the Mandate.",
-						answers: answersText(previous),
+						answers: answersText(previous, r.text),
 						annotations:
 							owed(previous)
 								.map((a) => annotation(a))

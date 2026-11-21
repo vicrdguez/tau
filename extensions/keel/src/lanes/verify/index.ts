@@ -109,7 +109,10 @@ function transition(prev: State, world: World) {
 		notes: Note[] = [];
 	const work = world.work!;
 	const queue = world.view("queue") as
-		| (QueueChecks & { findingsFor?(id: typeof work): string })
+		| (QueueChecks & {
+				findingsFor?(id: typeof work): string;
+				directionsFor?(id: typeof work): string[];
+		  })
 		| null;
 	const deliver = (lane: "design" | "trunk", e: LaneEvent) =>
 		send.push({
@@ -261,6 +264,7 @@ function transition(prev: State, world: World) {
 						(v) => v.scope !== "item" && v.outcome === "pass",
 					)?.encodedChecks ?? []);
 		if (encoded.length) send.push(checksEncoded(work, encoded, sha));
+		s.directions.push(...(queue?.directionsFor?.(work) ?? []));
 		s.handover = {
 			sha,
 			unchanged,

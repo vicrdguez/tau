@@ -320,6 +320,7 @@ export function intake(
 		disposition: null,
 		encodedAt: null,
 		deferredAt: null,
+		triageDirection: "",
 		revisits: [],
 	};
 	if (input.missingCheck) owedTriage(q, f, world);
@@ -705,6 +706,12 @@ export function onFact(
 				return {
 					...entry,
 					...next,
+					triageDirection:
+						annotations &&
+						entry.intake.work !== null &&
+						related.find((f) => f.intake.work === entry.intake.work) === entry
+							? [entry.triageDirection, annotations].filter(Boolean).join("\n")
+							: (entry.triageDirection ?? ""),
 					deferredAt:
 						fact.choice === "defer" && !entry.revisits.length
 							? world.now
@@ -725,7 +732,6 @@ export function onFact(
 				]
 			: q.patterns,
 	};
-	if (pending(state)?.id !== f?.id) state.stall = null;
 	if (revising)
 		return {
 			state,
@@ -797,7 +803,7 @@ function triageBasis(
 	const i = first.investigation!;
 	const nodes = reportedNodes(related);
 	return triageDocument({
-		cause: i.cause,
+		cause: distinct(related.map((f) => f.investigation!.cause)).join("; "),
 		work: first.goal ?? "the project queue",
 		choices: first.intake.missingCheck
 			? "Build starts work to encode this check. Defer or drop closes this decision but the check remains owed."
@@ -815,7 +821,9 @@ function triageBasis(
 			.filter(Boolean)
 			.join("\n\n"),
 		nodes:
-			live.mandate && nodes.length ? renderMandate(live.mandate, nodes) : "",
+			live.mandate && nodes.length
+				? `## Mandate nodes\n\n${renderMandate(live.mandate, nodes)}`
+				: "",
 	});
 }
 

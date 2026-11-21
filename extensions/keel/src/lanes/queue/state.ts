@@ -78,6 +78,7 @@ export type Finding = {
 	disposition: string | null;
 	encodedAt: Sha | null;
 	deferredAt: number | null;
+	triageDirection: string;
 	revisits: number[];
 };
 export type Queue = {

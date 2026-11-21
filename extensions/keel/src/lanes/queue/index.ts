@@ -336,6 +336,14 @@ export const queueLane = defineLane(
 			checks: (ids: number[]) =>
 				triage.checks(state.triage, (f) => ids.includes(f.id)),
 			investigation: pending(state.triage) ? state.triage.context : null,
+			directionsFor: (work: WorkId) =>
+				state.triage.entries.flatMap((f) =>
+					f.intake.work === work && f.triageDirection
+						? [
+								`Triage finding #${f.id}: ${f.intake.text}\n${f.triageDirection}`,
+							]
+						: [],
+				),
 			findingsFor: (work: WorkId) =>
 				[
 					...triage.findingSummary(state.triage, work),

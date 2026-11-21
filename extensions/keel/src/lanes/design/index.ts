@@ -55,6 +55,7 @@ import {
 } from "./public.ts";
 import {
 	active,
+	answersText,
 	type Changes,
 	causeAnswersSchema,
 	changesSchema,
@@ -609,7 +610,10 @@ export const design: Lane<State> = {
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {
 				if (r.phase !== "applied") return [];
-				return [`- Revision ${i + 1}: ${r.rounds.at(-1)!.changes}`];
+				const round = r.rounds.at(-1)!;
+				return [
+					`- Revision ${i + 1}: ${round.changes}${round.nodes.length ? "" : `\n${answersText(round, r.text).replace(/^- /gm, "  - ")}`}`,
+				];
 			})
 			.join("\n"),
 		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
@@ -1175,6 +1179,12 @@ export const design: Lane<State> = {
 				const state = amend(s, index, {
 					rounds: [...revision.rounds.slice(0, -1), round],
 				});
+				const release = (disposition: string) => [
+					...revision.causes.map((cause) =>
+						toBuild(w.work!, { kind: "queue_release", cause }),
+					),
+					closeFindings(w.work!, revision.causes, disposition),
+				];
 				switch (e.choice) {
 					case "rework":
 						return {
@@ -1185,15 +1195,17 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: amend(state, index, { phase: "declined" }),
-							send: [
-								...revision.causes.map((cause) =>
-									toBuild(w.work!, { kind: "queue_release", cause }),
-								),
-								closeFindings(w.work!, revision.causes, "revision declined"),
-							],
+							send: release("revision declined"),
 							notes: [{ agent: null, text: declinedRevision(answer) }],
 						};
 					case "approve":
+						if (!round.nodes.length && !answer.annotations.length)
+							return {
+								state: amend({ ...state, seq: s.seq + 1 }, index, {
+									phase: "applied",
+								}),
+								send: release("revision applied (no Mandate change)"),
+							};
 						return {
 							state: amend(state, index, { phase: "approved" }),
 							send: [
