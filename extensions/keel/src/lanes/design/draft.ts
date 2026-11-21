@@ -9,33 +9,31 @@ export const auditSchema = obj({
 	gaps: arr(observation),
 	contradictions: arr(observation),
 });
+export const ruleSchema = obj({ label: text, rule: text, probe: text });
+export const checkSchema = obj({
+	id: text,
+	argv: arr(str(), { minItems: 1 }),
+	timeoutMs: int({ minimum: 1, maximum: 2147483647 }),
+});
+export const seamSchema = obj({
+	label: text,
+	callersNow: text,
+	callersLater: text,
+	usage: text,
+	signature: text,
+	owner: text,
+	dependencies: text,
+});
 const common = {
 	intent: text,
-	nodes: arr(obj({ label: text, rule: text, probe: text })),
-	checks: arr(
-		obj({
-			id: text,
-			argv: arr(str(), { minItems: 1 }),
-			timeoutMs: int({ minimum: 1, maximum: 2147483647 }),
-		}),
-		{ minItems: 1 },
-	),
+	nodes: arr(ruleSchema),
+	checks: arr(checkSchema, { minItems: 1 }),
 };
 export const smallDraft = obj(common);
 export const reviewedDraft = obj({
 	...common,
 	done: text,
-	seams: arr(
-		obj({
-			label: text,
-			callersNow: text,
-			callersLater: text,
-			usage: text,
-			signature: text,
-			owner: text,
-			dependencies: text,
-		}),
-	),
+	seams: arr(seamSchema),
 	never: text,
 	tradeoffs: text,
 	alternatives: text,
@@ -110,6 +108,19 @@ export function validAudit(a: Audit) {
 	);
 }
 const reserved = ["intent", "never", "tradeoffs", "alternatives"];
+export const validRule = (n: Draft["nodes"][number]) =>
+	validText(n.rule) && validText(n.probe);
+export const validCheck = (c: Draft["checks"][number]) =>
+	c.argv[0]?.trim() &&
+	c.argv.every((a) => !a.includes("\0")) &&
+	Number.isSafeInteger(c.timeoutMs) &&
+	c.timeoutMs > 0 &&
+	c.timeoutMs <= 2147483647;
+const fenced = (v: string) =>
+	/^```[^\s`]+\n[\s\S]*\S[\s\S]*\n```$/u.test(v.trim());
+export const validSeam = (s: Draft["seams"][number]) =>
+	Object.values(s).every(validText) && fenced(s.usage) && fenced(s.signature);
+export const renderSeam = (s: Draft["seams"][number]) => seamText(s).trim();
 export function validSmall(d: Pick<Draft, "intent" | "nodes" | "checks">) {
 	return (
 		validText(d.intent) &&
@@ -118,16 +129,9 @@ export function validSmall(d: Pick<Draft, "intent" | "nodes" | "checks">) {
 			...d.nodes.map((n) => n.label),
 			...d.checks.map((c) => c.id),
 		]) &&
-		d.nodes.every((n) => validText(n.rule) && validText(n.probe)) &&
+		d.nodes.every(validRule) &&
 		d.checks.length > 0 &&
-		d.checks.every(
-			(c) =>
-				c.argv[0]?.trim() &&
-				c.argv.every((a) => !a.includes("\0")) &&
-				Number.isSafeInteger(c.timeoutMs) &&
-				c.timeoutMs > 0 &&
-				c.timeoutMs <= 2147483647,
-		)
+		d.checks.every(validCheck)
 	);
 }
 export function draftError(d: Draft, a: Audit) {
@@ -145,16 +149,7 @@ export function draftError(d: Draft, a: Audit) {
 		return "Use distinct labels, rules paired with probes and usable timed commands.";
 	if (![d.done, d.never, d.tradeoffs, d.alternatives].every(validText))
 		return "Give a done predicate, anti-criteria, tradeoffs and alternatives.";
-	const fenced = (v: string) =>
-		/^```[^\s`]+\n[\s\S]*\S[\s\S]*\n```$/u.test(v.trim());
-	if (
-		d.seams.some(
-			(s) =>
-				!Object.values(s).every(validText) ||
-				!fenced(s.usage) ||
-				!fenced(s.signature),
-		)
-	)
+	if (!d.seams.every(validSeam))
 		return "Give both callers, fenced caller code and signatures in the project language, ownership and allowed dependencies for each seam.";
 	const issues = issueLabels(a);
 	if (
@@ -216,7 +211,7 @@ export function nodes(
 				}).trim(),
 			);
 		}),
-		...d.seams.map((s) => node(s.label, "Seam", seamText(s).trim())),
+		...d.seams.map((s) => node(s.label, "Seam", renderSeam(s))),
 		...d.nodes.map((n) => node(n.label, "Rule", n.rule, n.probe)),
 		node("never", "Anti-criteria", d.never),
 		...d.checks.map((c) => node(c.id, "Proof", proofText(c))),
