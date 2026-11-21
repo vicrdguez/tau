@@ -349,13 +349,14 @@ test("declining releases only that proposal's causes and the next request waits 
 	x.act(second);
 	assert.deepEqual(x.asks(), [first]);
 	const declined = x.answer(first!.subject, "decline", [note]);
-	assert.deepEqual(declined.send, [
-		{
-			lane: "queue",
-			work: null,
-			event: { kind: "revision_declined", work, causes: request.causes },
-		},
-	]);
+	assert.deepEqual(
+		declined.send,
+		request.causes.map((cause) => ({
+			lane: "build",
+			work,
+			event: { kind: "queue_release", cause },
+		})),
+	);
 	assert.deepEqual(x.mandate(), old);
 	assert.ok(x.input().includes(second.text));
 	x.act(publish);
