@@ -15,6 +15,7 @@ import {
 	newItem,
 	queueHeld,
 	queueMatches,
+	validateDependencies,
 	validateGraph,
 } from "./state.ts";
 
@@ -44,7 +45,6 @@ export function addQueueHold(
 			nodes: [],
 			evidence: "",
 			forwarded: [],
-			fix: null,
 		};
 		s.queueHolds.push(h);
 	}
@@ -111,33 +111,6 @@ export function releaseQueueHold(
 		: [];
 }
 
-export type FindingFix = { cause: string; item: string };
-export function bindFixes(s: Build, goals: Goal[], fixes: FindingFix[]) {
-	const due = s.findings
-		.slice(0, s.coordinator.findings)
-		.flatMap((f) =>
-			s.queueHolds.filter((h) => h.cause === f.cause && h.fix === null),
-		);
-	const byId = new Map([...s.items, ...goals].map((g) => [g.id, g]));
-	if (
-		new Set(fixes.map((f) => f.cause)).size !== due.length ||
-		fixes.length !== due.length
-	)
-		return "Name one new item to fix each held defect using fixes.";
-	for (const h of due) {
-		const id = fixes.find((f) => f.cause === h.cause)?.item;
-		if (!id || !goals.some((g) => g.id === id))
-			return `Name a new fix item for ${h.cause}.`;
-		const blocked = new Set(h.items);
-		const dependsOnBlocked = (id: string): boolean =>
-			blocked.has(id) || (byId.get(id)?.deps ?? []).some(dependsOnBlocked);
-		if (dependsOnBlocked(id))
-			return `Fix ${h.cause} without depending on its blocked item.`;
-		h.fix = id;
-	}
-	return null;
-}
-
 export const record = (i: Item) =>
 	i.verified || i.stage === "cleaning" || i.stage === "merged";
 
@@ -149,12 +122,18 @@ function revisionPlan(
 ) {
 	if (!repliesCover(p.mandate.approvalNotes.length, replies))
 		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
-	const graph = validateGraph([], goals);
+	const graph =
+		validateGraph([], goals) ??
+		validateDependencies(s, goals, goals, [...p.causes, revisionPlanHold]);
 	if (graph) return graph;
 	const byId = new Map(goals.map((g) => [g.id, g]));
 	const oldIds = new Set(s.items.map((i) => i.id));
 	const newGoals = goals.filter((g) => !oldIds.has(g.id));
+	const labels = new Set(mandateLabels(p.mandate));
 	for (const i of s.items) {
+		const removed = i.brief?.nodes.find((n) => !labels.has(n));
+		if (removed)
+			return `Item ${i.id} cites ${removed}, a removed Mandate node.`;
 		if (i.stage === "planned") continue;
 		const g = byId.get(i.id);
 		if (!g || g.kind !== i.kind || g.goal !== i.goal)
@@ -168,9 +147,9 @@ function revisionPlan(
 		if (affected && record(i) && !newGoals.some((g) => g.deps.includes(i.id)))
 			return `Add a new correction that depends on verified item ${i.id}; keep its record intact.`;
 	}
-	for (const h of s.queueHolds) {
-		if (h.fix && !byId.has(h.fix))
-			return `Keep item ${h.fix} until it fixes ${h.cause}.`;
+	for (const f of s.findings) {
+		const missing = f.items.find((id) => !byId.has(id));
+		if (missing) return `Keep item ${missing} planned for ${f.cause}.`;
 	}
 	const encode =
 		s.items.find((i) => i.kind === "encode" && i.stage !== "planned") ??
@@ -196,7 +175,6 @@ export function applyRevision(
 	const old = new Map(s.items.map((i) => [i.id, i]));
 	const evidence = p.text || `Changed Mandate nodes: ${p.nodes.join(", ")}`;
 	const superseded: string[] = [];
-	const retained = new Set(mandateLabels(p.mandate));
 	s.items = goals.map((g) => {
 		const i = old.get(g.id);
 		if (!i) return newItem(g);
@@ -212,8 +190,6 @@ export function applyRevision(
 				}),
 			);
 			if (i.stage === "published") superseded.push(i.id);
-			if (i.brief) i.brief.nodes = i.brief.nodes.filter((n) => retained.has(n));
-			i.awaitingNodes = i.awaitingNodes.filter((n) => retained.has(n));
 			if (i.input === "brief" && i.stage === "building") i.input = "resume";
 			// Revised dependencies gate this attempt.
 			i.parked = true;

@@ -20,6 +20,7 @@ import {
 } from "../../repo/index.ts";
 import { mandateLabels, type Reply, repliesCover } from "../design/public.ts";
 import {
+	closeFindings,
 	fileHolding,
 	fileIntake,
 	type Resume,
@@ -32,8 +33,6 @@ import {
 	addDirection,
 	addQueueHold,
 	applyRevision,
-	bindFixes,
-	type FindingFix,
 	releaseQueueHold,
 	revisionPlanHold,
 } from "./live-plan.ts";
@@ -53,6 +52,7 @@ import {
 	parked,
 	queueHeld,
 	repoHeld,
+	unplannedFinding,
 	validatePlan,
 	workerKey,
 } from "./state.ts";
@@ -63,7 +63,7 @@ export { buildTools } from "./tools.ts";
 type Event =
 	| BuildUpdate
 	| Resume
-	| { kind: "plan"; items: Goal[]; replies?: Reply[]; fixes?: FindingFix[] }
+	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
 	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
 	| { kind: "handoff"; summary: string; risk: string }
 	| {
@@ -127,10 +127,10 @@ function schedule(s: Build, w: World) {
 		c.revising = false;
 		return;
 	}
-	if (s.revision || s.findings.length) {
+	if (s.revision || unplannedFinding(s)) {
 		coordinator(s, "publish_plan");
 		c.revising = !!s.revision;
-		c.findings = s.revision ? 0 : s.findings.length;
+		c.finding = !s.revision;
 		return;
 	}
 	if (s.items.every((i) => i.stage === "merged")) {
@@ -505,7 +505,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 		case "plan_finding": {
 			const hold = s.queueHolds.find((h) => h.cause === e.cause);
 			if (hold) hold.evidence = e.text;
-			s.findings.push({ ...e, cause: e.cause ?? null });
+			s.findings.push({ ...e, cause: e.cause ?? null, items: [] });
 			yieldCoordinator(s);
 			break;
 		}
@@ -555,11 +555,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			const replies = e.replies ?? [];
 			const owed = approvalFollowup(s);
 			if (owed.length) {
-				if (
-					e.items.length ||
-					e.fixes?.length ||
-					!repliesCover(owed.length, replies)
-				)
+				if (e.items.length || !repliesCover(owed.length, replies))
 					return {
 						reject: "Reply to each owed annotation without changing the plan.",
 					};
@@ -579,12 +575,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				return activation;
 			}
 			const reject = validatePlan(s, e.items, replies);
-			const fixError = reject ?? bindFixes(s, e.items, e.fixes ?? []);
-			if (fixError) return { reject: fixError };
+			if (reject) return { reject };
 			if (!s.items.length) s.approvalReplies = replies;
 			s.items.push(...e.items.map(newItem));
-			s.findings.splice(0, c.findings);
-			c.findings = 0;
+			const finding = c.finding ? unplannedFinding(s)! : null;
+			if (finding?.cause) finding.items = e.items.map((i) => i.id);
+			else if (finding) s.findings = s.findings.filter((f) => f !== finding);
+			c.finding = false;
 			coordinator(s, null);
 			break;
 		}
@@ -730,40 +727,55 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			i.stage = "cleaning";
 			i.retry = 0;
 			const send: Message[] = [];
-			for (const h of s.queueHolds.filter((h) => h.fix === i.id)) {
-				for (const item of s.items.filter((item) =>
-					h.items.includes(item.id),
-				)) {
-					if (item.stage === "published")
-						send.push({
-							lane: "verify",
-							work: w.work,
-							event: {
-								kind: "defect_fixed",
-								item: item.id,
-								evidence: h.evidence,
-							},
-						});
-					else if (item.stage === "building") item.refreshAfterFix = true;
+			for (const f of s.findings) {
+				if (
+					!f.cause ||
+					!f.items.includes(i.id) ||
+					f.items.some(
+						(id) =>
+							!s.items.some(
+								(item) =>
+									item.id === id &&
+									(item.stage === "merged" || item.stage === "cleaning"),
+							),
+					)
+				)
+					continue;
+				const hold = s.queueHolds.find((h) => h.cause === f.cause);
+				if (hold) {
+					hold.evidence ||= f.text;
+					for (const item of s.items.filter((item) =>
+						hold.items.includes(item.id),
+					)) {
+						if (item.stage === "published")
+							send.push({
+								lane: "verify",
+								work: w.work,
+								event: {
+									kind: "defect_fixed",
+									item: item.id,
+									evidence: hold.evidence,
+								},
+							});
+						else if (item.stage === "building") item.refreshAfterFix = true;
+					}
+					send.push(
+						...releaseQueueHold(
+							s,
+							f.cause,
+							"The defect plan merged. Start from the new build head.",
+							w,
+						),
+					);
 				}
 				send.push(
-					...releaseQueueHold(
-						s,
-						h.cause,
-						`Fix ${i.id} merged. Start from the new build head.`,
-						w,
+					closeFindings(
+						w.work!,
+						[f.cause],
+						`defect fixed (${f.items.join(", ")} merged)`,
 					),
 				);
-				send.push({
-					lane: "queue",
-					work: null,
-					event: {
-						kind: "defect_merged",
-						work: w.work,
-						cause: h.cause,
-						item: i.id,
-					},
-				});
+				s.findings = s.findings.filter((other) => other !== f);
 			}
 			send.push(...settleMovedPreparations(s, w));
 			schedule(s, w);

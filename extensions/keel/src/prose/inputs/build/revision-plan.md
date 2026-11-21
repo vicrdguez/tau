@@ -23,4 +23,4 @@ Current plan:
 
 {{annotations}}
 {{direction}}
-Call `publish_plan` with the complete plan in the new order, including entries you keep. Add, edit, reorder or drop unstarted items. Keep started IDs, kinds and goals. You may change the dependencies of a held, affected item that has not been verified. For each affected verified item, add a new correction that depends on it. Keep the verified item and its dependencies unchanged.
+Call `publish_plan` with the complete plan in the new order, including entries you keep. Add, edit, reorder or drop unstarted items. Keep started IDs, kinds and goals. You may change the dependencies of a held, affected item that has not been verified. For each affected verified item, add a new correction that depends on it. Keep the verified item and its dependencies unchanged. Keep the items already planned for a defect. Plan dependencies around any holds that will remain after this revision applies.

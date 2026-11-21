@@ -8,6 +8,7 @@ import {
 	held,
 	type Item,
 	parked,
+	unplannedFinding,
 	workerKey,
 } from "./state.ts";
 
@@ -181,6 +182,7 @@ function coordInput(s: Build) {
 					goal,
 					deps,
 					stage,
+					held: held(s, id),
 					verified: verified || stage === "merged" || stage === "cleaning",
 					briefNodes: brief?.nodes ?? [],
 					publication,
@@ -225,11 +227,11 @@ function coordInput(s: Build) {
 					annotations: approval(p.mandate.approvalNotes),
 				});
 			}
-			if (c.findings)
+			if (c.finding)
 				return discover({
 					...facts,
 					plan: planRecord(),
-					findings: JSON.stringify(s.findings.slice(0, c.findings), null, 2),
+					findings: JSON.stringify(unplannedFinding(s), null, 2),
 				});
 			return c.reason
 				? correction({ ...facts, plan: planRecord(), reason: fullContext(s) })

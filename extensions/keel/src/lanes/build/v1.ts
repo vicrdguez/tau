@@ -61,6 +61,7 @@ type V1 = {
 		reference: string;
 		nodes: string[];
 		cause: string | null;
+		items: string[];
 	}[];
 	queueHolds: {
 		cause: string;
@@ -68,7 +69,6 @@ type V1 = {
 		nodes: string[];
 		evidence: string;
 		forwarded: string[];
-		fix: string | null;
 	}[];
 	repo: RepoV1 | null;
 	branches: { base: string; trunk: string } | null;
@@ -91,7 +91,7 @@ type V1 = {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
-		findings: number;
+		finding: boolean;
 		revising: boolean;
 		pendingDirection: string;
 		reason: {
@@ -182,7 +182,7 @@ export const buildV1 = {
 			tool: null,
 			item: null,
 			seq: 0,
-			findings: 0,
+			finding: false,
 			revising: false,
 			reason: null,
 			pendingDirection: "",

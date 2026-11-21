@@ -64,14 +64,16 @@ export type Build = {
 	mandate: Mandate | null;
 	approvalReplies: Reply[];
 	revision: (RevisionProposal & { text: string }) | null;
-	findings: (Omit<PlanFinding, "cause"> & { cause: string | null })[];
+	findings: (Omit<PlanFinding, "cause"> & {
+		cause: string | null;
+		items: string[];
+	})[];
 	queueHolds: {
 		cause: string;
 		items: string[];
 		nodes: string[];
 		evidence: string;
 		forwarded: string[];
-		fix: string | null;
 	}[];
 	repo: RepoInfo | null;
 	branches: { base: string; trunk: string } | null;
@@ -94,7 +96,7 @@ export type Build = {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
-		findings: number;
+		finding: boolean;
 		revising: boolean;
 		pendingDirection: string;
 		reason: {
@@ -142,7 +144,7 @@ export const buildDoc = defineState({
 			tool: null,
 			item: null,
 			seq: 0,
-			findings: 0,
+			finding: false,
 			revising: false,
 			reason: null,
 			pendingDirection: "",
@@ -157,6 +159,9 @@ export const approvalFollowup = (s: Build) =>
 	s.items.length
 		? s.mandate!.approvalNotes.slice(s.approvalReplies.length)
 		: [];
+
+export const unplannedFinding = (s: Build) =>
+	s.findings.find((f) => f.items.length === 0);
 
 export const repoHeld = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
@@ -255,7 +260,36 @@ export function validatePlan(
 			goals.some((g) => g !== first && !g.deps.includes(first.id)))
 	)
 		return "Begin with an Encode item and make every other item depend directly on it.";
-	return validateGraph(existing, goals);
+	return (
+		validateGraph(existing, goals) ??
+		validateDependencies(s, goals, [...existing, ...goals])
+	);
+}
+
+/** Check the submitted goals, following their dependencies through the whole plan. */
+export function validateDependencies(
+	s: Build,
+	goals: Goal[],
+	plan: Goal[],
+	releasing: string[] = [],
+) {
+	const byId = new Map(plan.map((g) => [g.id, g]));
+	const deps = new Set(goals.flatMap((g) => g.deps));
+	for (const id of deps) {
+		const item = s.items.find((i) => i.id === id);
+		if (
+			item &&
+			item.stage !== "merged" &&
+			item.stage !== "cleaning" &&
+			(repoHeld(s, id) ||
+				s.queueHolds.some(
+					(h) => !releasing.includes(h.cause) && queueMatches(h, item),
+				))
+		)
+			return `Do not depend on held item ${id}.`;
+		for (const d of byId.get(id)!.deps) deps.add(d);
+	}
+	return null;
 }
 
 export function validateGraph(existing: Goal[], goals: Goal[]) {
