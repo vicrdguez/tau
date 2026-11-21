@@ -41,23 +41,46 @@ export function readCheckoutHead(exec: Exec, cwd: string): Promise<Sha | null> {
 	return new Git(exec, cwd).checkoutHead();
 }
 
-function roles(base: string, trunk: string) {
-	if (
-		branch(base).toLowerCase() === branch(trunk).toLowerCase() ||
-		trunk.toLowerCase() === "main" ||
-		[base, trunk].some((s) => /^(?:HEAD$|(?:refs|keel)(?:\/|$))/i.test(s))
-	)
+function optionBranch(option: "base" | "trunk", value: string) {
+	const invalid = `Invalid \`${option}\` option ${JSON.stringify(value)}`;
+	if (option === "trunk" && value.toLowerCase() === "main")
+		throw new TypeError(`${invalid}: trunk cannot be main.`);
+	if (/^(?:HEAD$|(?:refs|keel)(?:\/|$))/i.test(value))
 		throw new TypeError(
-			"base and trunk must be distinct short branch names outside keel; trunk cannot be main",
+			`${invalid}: use a short branch name outside Keel's namespace.`,
 		);
+	try {
+		return branch(value);
+	} catch (cause) {
+		throw new TypeError(`${invalid}: use a short branch name.`, { cause });
+	}
+}
+
+function branchOptions(base: string, trunk: string) {
+	if (base.toLowerCase() === trunk.toLowerCase())
+		throw new TypeError(
+			"The `base` and `trunk` options must name distinct branches.",
+		);
+	return {
+		base: optionBranch("base", base),
+		trunk: optionBranch("trunk", trunk),
+	};
 }
 
 export async function readRepo(
 	exec: Exec,
 	cwd: string,
-	{ base = "main", trunk = "trunk" }: { base?: string; trunk?: string } = {},
+	{
+		base = "main",
+		trunk = "trunk",
+		forBuild = false,
+	}: {
+		base?: string;
+		trunk?: string;
+		forBuild?: boolean;
+	} = {},
 ): Promise<RepoInfo> {
-	roles(base, trunk);
+	const names = branchOptions(base, trunk);
 	const g = new Git(exec, cwd);
 	const root = await realpath(
 		(await g.output("rev-parse", "--show-toplevel")).replace(/\n$/, ""),
@@ -67,16 +90,22 @@ export async function readRepo(
 			await g.output("rev-parse", "--path-format=absolute", "--git-common-dir")
 		).replace(/\n$/, ""),
 	);
-	const baseHead = await g.head(branch(base));
-	if (baseHead === null) throw Error("base branch is absent: " + base);
-	return {
-		root,
-		commonDir,
-		base: branch(base),
-		trunk: branch(trunk),
-		baseHead,
-		trunkHead: await g.head(branch(trunk)),
-	};
+	const baseHead = await g.head(names.base);
+	if (baseHead === null)
+		throw Error(
+			`The \`base\` option names branch ${base}, which does not exist.`,
+		);
+	const trunkHead = await g.head(names.trunk);
+	if (
+		forBuild &&
+		trunkHead !== null &&
+		trunkHead !== baseHead &&
+		!(await g.ancestor(baseHead, trunkHead))
+	)
+		throw Error(
+			`The branch named by the \`trunk\` option (${trunk}) does not descend from the branch named by the \`base\` option (${base}).`,
+		);
+	return { root, commonDir, ...names, baseHead, trunkHead };
 }
 
 /** The caller serializes conflicting ref updates; see README.md. */
@@ -86,7 +115,7 @@ export function converge(
 	op: RepoOp,
 ): Promise<RepoResult> {
 	return report(async (): Promise<RepoResult> => {
-		roles(repo.base, repo.trunk);
+		branchOptions(repo.base, repo.trunk);
 		key(op.key);
 		const g = new Git(exec, repo.commonDir);
 		switch (op.kind) {

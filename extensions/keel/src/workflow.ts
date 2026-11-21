@@ -62,7 +62,7 @@ const sweep = sweepDispatch(async (tx) => {
 
 // Specs are authored by lane declarations and committed by the kernel, not supplied by agents.
 // Discovery pins the repository before the *next* operation is planned. Never rediscover it on retry.
-export const runRepoEffect: EffectRunner = async ({ root, spec }) => {
+export const runRepoEffect: EffectRunner = async ({ lane, root, spec }) => {
 	if (spec.kind === "read_repo") {
 		const { base, trunk } = spec;
 		if (typeof base !== "string" || typeof trunk !== "string")
@@ -71,7 +71,11 @@ export const runRepoEffect: EffectRunner = async ({ root, spec }) => {
 			);
 		return {
 			kind: "repo",
-			repo: await readRepo(nodeExec, root, { base, trunk }),
+			repo: await readRepo(nodeExec, root, {
+				base,
+				trunk,
+				forBuild: lane === "build",
+			}),
 		};
 	}
 	const { repo, op } = spec as { repo: RepoInfo; op: RepoOp };
