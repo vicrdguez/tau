@@ -474,8 +474,8 @@ function mandateAsk(s: State): Ask {
 			.join("\n\n") || "No objections.";
 	const experiments = s.experiments.slice(0, round.experimentCount);
 	const tail = [
-		"## What the base decided that the question did not ask\n\n" +
-			outcomesText(round, unaskedSources(arena, round, experiments)),
+		"## Unasked decisions from the base, graft sources and experiments\n\n" +
+			outcomesText(s.audit!, round, unaskedSources(arena, round, experiments)),
 		challengeText({
 			model: arena.runs[round.challenge - 1]!.jobs[0]!.model,
 			round: String(challenged + 1),
@@ -903,6 +903,7 @@ export const design: Lane<State> = {
 					synthesisSources(proposal),
 					synthesisBody(s.audit, groundContext(s), proposal),
 					outcomesText(
+						s.audit,
 						proposal,
 						unaskedSources(arena, proposal, s.experiments),
 					),

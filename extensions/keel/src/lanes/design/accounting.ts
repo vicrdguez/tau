@@ -1,7 +1,14 @@
 import { arr, int, obj, oneOf, opt } from "tau/schema";
-import { type Arena, candidateDecisions, candidateNames } from "./arena.ts";
+import {
+	type Arena,
+	candidateDecisions,
+	candidateNames,
+	candidateUnasked,
+	quote,
+} from "./arena.ts";
 import { type Audit, nodes, reviewedDraft, text } from "./draft.ts";
 import { type Experiment, experimentDecisions } from "./experiment.ts";
+import { nodeBody } from "./public.ts";
 import type { Synthesis } from "./rounds.ts";
 
 export const synthesisParts = {
@@ -37,7 +44,7 @@ export function normalizeOutcomes(value: unknown): Outcome[] {
 		: [];
 }
 
-type Source = { id: string; decisions: string[] };
+type Source = { id: string; decisions: string[]; own?: string };
 export function unaskedSources(
 	arena: Arena,
 	s: Synthesis,
@@ -47,6 +54,7 @@ export function unaskedSources(
 		...[...new Set([s.base, ...s.grafts.map((g) => g.seat)])].map((seat) => ({
 			id: seat,
 			decisions: candidateDecisions(arena, seat),
+			own: candidateUnasked(arena, seat),
 		})),
 		...experiments
 			.map((e) => ({
@@ -113,21 +121,28 @@ export function accountingError(
 	return null;
 }
 
-export function outcomesText(s: Synthesis, sources: Source[]) {
+export function outcomesText(audit: Audit, s: Synthesis, sources: Source[]) {
+	const entries = nodes(s.draft, audit, "Proposed ruling");
 	return sources
-		.map(
-			({ id, decisions }) =>
+		.map(({ id, decisions, own }) => {
+			const list = decisions
+				.map((d, i) => {
+					const o = s.outcomes.find((o) => o.source === id && o.n === i + 1)!;
+					if (!o.label) return `${i + 1}. ${d}\n   Not taken: ${o.reason}`;
+					const rider = s.draft.riders.find((r) => r.label === o.label);
+					const body = rider
+						? `${rider.text}\n\nDisposition: ${rider.disposition}`
+						: nodeBody(entries.find((n) => n.label === o.label)!);
+					return `${i + 1}. ${d}\n   ${rider ? "Rider" : "Node"} \`${o.label}\`\n\n${quote(body).replace(/^/gm, " ".repeat(String(i + 1).length + 2))}`;
+				})
+				.join("\n\n");
+			return (
 				`### ${id}\n\n` +
-				(decisions
-					.map((d, i) => {
-						const o = s.outcomes.find((o) => o.source === id && o.n === i + 1)!;
-						const outcome =
-							o.kind === "not_taken"
-								? `Not taken: ${o.reason}`
-								: `${o.kind === "node" ? "Node" : "Rider"} \`${o.label}\``;
-						return `${i + 1}. ${d}\n   ${outcome}`;
-					})
-					.join("\n\n") || "None reported."),
-		)
+				(own
+					? `Candidate's unasked decisions:\n\n${quote(own)}\n\nJudge's list and outcomes:\n\n`
+					: "") +
+				(list || "None reported.")
+			);
+		})
 		.join("\n\n");
 }

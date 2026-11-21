@@ -244,23 +244,17 @@ function receipts(fact: EffectFact, run: Run): Receipt[] | string {
 	return results;
 }
 
-function candidateValid(answer: string) {
-	for (const heading of answer.matchAll(
-		/^ {0,3}(#{1,6})[ \t]+Unasked decisions[ \t]*(?:#+[ \t]*)?\r?\n/gim,
-	)) {
-		const nextSection = new RegExp(
-			`^ {0,3}#{1,${heading[1]!.length}}[ \\t]+`,
-			"m",
+function unaskedText(answer: string) {
+	const heading =
+		/^ {0,3}(#{1,6})[ \t]+Unasked decisions[ \t]*(?:#+[ \t]*)?\r?\n/im.exec(
+			answer,
 		);
-		if (
-			answer
-				.slice(heading.index + heading[0].length)
-				.split(nextSection, 1)[0]
-				?.trim()
-		)
-			return true;
-	}
-	return false;
+	if (!heading) return "";
+	const next = new RegExp(`^ {0,3}#{1,${heading[1]!.length}}[ \\t]+`, "m");
+	return answer
+		.slice(heading.index + heading[0].length)
+		.split(next, 1)[0]!
+		.trim();
 }
 function judgeReport(answer: string) {
 	const report = judgeSchema.validate(replyJson(answer));
@@ -274,7 +268,7 @@ function objections(answer: string) {
 }
 function formatError(arena: Arena, stage: Run["stage"], answer: string) {
 	if (stage === "candidates")
-		return candidateValid(answer)
+		return unaskedText(answer)
 			? null
 			: "Supply a non-empty Unasked Decisions section.";
 	if (stage === "challenger")
@@ -375,7 +369,9 @@ export function candidateDecisions(arena: Arena, seat: string) {
 		(row) => row.seat === seat,
 	)!.unaskedDecisions;
 }
-const quote = (text: string) =>
+export const candidateUnasked = (arena: Arena, seat: string) =>
+	unaskedText(candidateAnswer(arena, seat));
+export const quote = (text: string) =>
 	text
 		.split("\n")
 		.map((line) => (line ? `> ${line}` : ">"))
@@ -397,7 +393,7 @@ export function arenaEvidence(
 			`Model: ${run.jobs[0]!.model}. Recommended base: ${report.base}.`,
 			...report.scores.map(
 				(s) =>
-					`#### ${s.seat}: ${s.score}/10\n\n${s.reason}\n\nUnasked decisions:\n\n${s.unaskedDecisions.map((d, i) => `${i + 1}. ${d}`).join("\n") || "None."}`,
+					`#### ${s.seat}: ${s.score}/10\n\n${quote(s.reason)}\n\nUnasked decisions:\n\n${s.unaskedDecisions.map((d, i) => `${i + 1}. ${d}`).join("\n") || "None."}`,
 			),
 		].join("\n\n"),
 		candidates: candidateJobs(arena)

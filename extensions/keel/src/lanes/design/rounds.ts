@@ -241,12 +241,17 @@ export function reviewAsk(
 ): Ask {
 	const r = history.at(-1)!;
 	const document = body(a, reference, history);
+	const prev = history.at(-2);
+	const switched =
+		prev?.arena === r.arena && prev.base !== r.base
+			? ` Base switched to \`${r.base}\`, replacing \`${prev.base}\`.`
+			: "";
 	return {
 		subject: mainKey(history.length),
 		title: `Review Mandate: ${r.draft.intent.trim().split("\n", 1)[0]}`,
 		basis: review({
 			round: String(history.length),
-			changes: document.changes,
+			changes: switched + document.changes,
 			body: document.body.trimEnd() + "\n\n" + evidence,
 		}),
 		choices: [
