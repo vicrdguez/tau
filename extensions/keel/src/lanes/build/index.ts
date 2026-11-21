@@ -415,7 +415,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				agent.role === "coordinator"
 					? null
 					: s.items.find((i) => workerKey(i) === agent.key)!.id;
-			const stalled = `${agent.key} ${e.cause}: ${e.lastWords}`;
+			const stalled = `${agent.key} ${e.cause}: ${e.lastWords}${!id && s.coordinator.tool === "publish_plan" && e.refusal ? `\nKeel refused the plan: ${e.refusal}` : ""}`;
 			return hold(s, w, id, "stall", id ? stalled : waitingPicture(s, stalled));
 		}
 

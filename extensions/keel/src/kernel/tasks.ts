@@ -7,6 +7,7 @@ import {
 	configure,
 	defineEntry,
 	defineTask,
+	type EntryId,
 	type JsonObject,
 	LiveDoc,
 	type SubmissionDraft,
@@ -104,6 +105,46 @@ async function openAgent(tx: Tx, input: DeliverInput) {
 		slot.open.some((expect) => expect.token === input.token)
 		? slot
 		: undefined;
+}
+
+async function turnRefusal(
+	tx: Tx,
+	input: DeliverInput,
+	tools: string[],
+	answer: EntryId | undefined,
+) {
+	// A nudge can continue without writing a new input. Stop at the preceding turn.
+	const query = {
+		conversationId: input.conversation,
+		...(answer !== undefined && { maxEntryId: answer }),
+		order: "descending" as const,
+	};
+	let cursor: Cursor | undefined;
+	let refusal: string | undefined;
+	do {
+		const page = await tx.scanEntries(query, 32, cursor);
+		for (const entry of page.items) {
+			if (entry.kind === "keel.input") {
+				const data = entry.data as { token?: string } | undefined;
+				if (data?.token !== input.token) return undefined;
+				if (refusal) return refusal;
+			}
+			for (const message of entry.model ?? []) {
+				if (
+					message.role !== "toolResult" ||
+					!message.isError ||
+					!tools.includes(message.toolName)
+				)
+					continue;
+				refusal ??=
+					message.content
+						.flatMap((part) => (part.type === "text" ? [part.text] : []))
+						.join("\n") || undefined;
+			}
+		}
+		cursor = page.next;
+	} while (cursor);
+	return undefined;
 }
 
 type Attempt = "first" | "repeat" | "continue";
@@ -464,7 +505,8 @@ export function makeTasks(hooks: Hooks) {
 				await commitFact(
 					runtime,
 					async (tx, apply) => {
-						if (!(await openAgent(tx, input))) return completed;
+						const slot = await openAgent(tx, input);
+						if (!slot) return completed;
 						if (attempt === "first" && settled.reason !== "aborted")
 							return {
 								status: "running",
@@ -488,6 +530,8 @@ export function makeTasks(hooks: Hooks) {
 										: [],
 								)
 								.join("\n") ?? "";
+						const tools = slot.open.find((e) => e.token === input.token)!.tools;
+						const refusal = await turnRefusal(tx, input, tools, settled.answer);
 						await apply(
 							tx,
 							input,
@@ -495,6 +539,7 @@ export function makeTasks(hooks: Hooks) {
 								kind: "agent_stalled",
 								agent: input.key,
 								tokens: [input.token],
+								...(refusal && { refusal }),
 								cause:
 									settled.reason === "aborted"
 										? "stopped"

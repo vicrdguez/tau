@@ -32,6 +32,7 @@ export type KernelEvent =
 			tokens: Token[];
 			cause: "failed" | "stopped" | "unfulfilled";
 			lastWords: string;
+			refusal?: string;
 	  };
 export type LaneEvent = JsonObject & { kind: string };
 export type Delivery = { lane: string; work: WorkId | null; event: LaneEvent };
