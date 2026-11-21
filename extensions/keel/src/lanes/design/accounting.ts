@@ -1,4 +1,4 @@
-import { arr, int, obj, oneOf, opt } from "tau/schema";
+import { arr, int, obj, opt } from "tau/schema";
 import {
 	type Arena,
 	candidateDecisions,
@@ -18,7 +18,6 @@ export const synthesisParts = {
 		obj({
 			source: text,
 			n: int({ minimum: 1 }),
-			kind: oneOf(["node", "rider", "not_taken"]),
 			label: opt(text),
 			reason: opt(text),
 		}),
@@ -28,21 +27,7 @@ export const synthesisParts = {
 export type Outcome = {
 	source: string;
 	n: number;
-	kind: "node" | "rider" | "not_taken";
-	label: string | null;
-	reason: string | null;
-};
-export function normalizeOutcomes(value: unknown): Outcome[] {
-	return Array.isArray(value)
-		? value.map(({ source, n, kind, label, reason }) => ({
-				source,
-				n,
-				kind,
-				label: label ?? null,
-				reason: reason ?? null,
-			}))
-		: [];
-}
+} & ({ label: string } | { reason: string });
 
 type Source = { id: string; decisions: string[]; own?: string };
 export function unaskedSources(
@@ -93,6 +78,8 @@ export function accountingError(
 	for (const experiment of newExperiments)
 		if (experiment.comparison && !nodeLabels.has(experiment.protocol.node))
 			return `Include the Mandate node ${experiment.protocol.node} for the recorded experiment.`;
+	if (!Array.isArray(s.outcomes))
+		return "Supply the unasked-decision outcomes.";
 	const sources = unaskedSources(arena, s, experiments);
 	for (const { id, decisions } of sources) {
 		for (const [i] of decisions.entries()) {
@@ -102,13 +89,10 @@ export function accountingError(
 			if (!outcome || extra.length)
 				return `Give exactly one outcome for unasked decision ${i + 1} from ${id}.`;
 			const valid =
-				outcome.kind === "not_taken"
-					? !!outcome.reason?.trim() && outcome.label === null
-					: outcome.reason === null &&
-						!!outcome.label &&
-						(outcome.kind === "node"
-							? nodeLabels.has(outcome.label)
-							: outcome.kind === "rider" && riderLabels.has(outcome.label));
+				"label" in outcome
+					? !("reason" in outcome) &&
+						(nodeLabels.has(outcome.label) || riderLabels.has(outcome.label))
+					: !!outcome.reason?.trim();
 			if (!valid)
 				return `Give unasked decision ${i + 1} from ${id} a real node or rider label, or explain why it was not taken.`;
 		}
@@ -128,7 +112,8 @@ export function outcomesText(audit: Audit, s: Synthesis, sources: Source[]) {
 			const list = decisions
 				.map((d, i) => {
 					const o = s.outcomes.find((o) => o.source === id && o.n === i + 1)!;
-					if (!o.label) return `${i + 1}. ${d}\n   Not taken: ${o.reason}`;
+					if (!("label" in o))
+						return `${i + 1}. ${d}\n   Not taken: ${o.reason}`;
 					const rider = s.draft.riders.find((r) => r.label === o.label);
 					const body = rider
 						? `${rider.text}\n\nDisposition: ${rider.disposition}`

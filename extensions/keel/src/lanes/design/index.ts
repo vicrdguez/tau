@@ -16,7 +16,6 @@ import { toBuild } from "../build/public.ts";
 import { closeFindings, fileHolding, resumption } from "../queue/public.ts";
 import {
 	accountingError,
-	normalizeOutcomes,
 	outcomesText,
 	synthesisParts,
 	unaskedSources,
@@ -882,7 +881,7 @@ export const design: Lane<State> = {
 					replies: e.replies as Reply[],
 					base: String(e.base ?? ""),
 					grafts: e.grafts as Synthesis["grafts"],
-					outcomes: normalizeOutcomes(e.outcomes),
+					outcomes: e.outcomes as Synthesis["outcomes"],
 					experimentCount: s.experiments.length,
 				};
 				const error = proposalError(s, proposal);
@@ -941,7 +940,7 @@ export const design: Lane<State> = {
 							...original,
 							draft: revision.draft,
 							grafts: revision.grafts,
-							outcomes: normalizeOutcomes(revision.outcomes),
+							outcomes: revision.outcomes,
 						}
 					: original;
 				if (

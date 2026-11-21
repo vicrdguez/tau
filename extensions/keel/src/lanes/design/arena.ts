@@ -93,6 +93,7 @@ function familyError(
 	candidates: Job[],
 	judge: string | null,
 	options: StaticFacts["options"],
+	retry?: Job[],
 ) {
 	const provider = (model: string) => model.split("/", 1)[0];
 	const problems: string[] = [];
@@ -101,14 +102,24 @@ function familyError(
 		const matches = candidates.filter(
 			({ model }) => provider(model) === family,
 		);
-		if (matches.length > 1 && matches[0] === candidate)
-			problems.push(
-				`Set ${matches.map(({ seat }) => `\`${seat}\``).join(", ")} to different providers (currently \`${family}\`).`,
-			);
-	}
-	if (judge && provider(judge) === provider(options.designer ?? options.design))
+		if (matches.length < 2 || matches[0] !== candidate) continue;
+		const changeable = retry
+			? matches.filter((job) => retry.some(({ seat }) => seat === job.seat))
+			: matches;
+		if (!changeable.length) continue;
+		const seats = changeable.map(({ seat }) => `\`${seat}\``).join(", ");
 		problems.push(
-			"Set `arena_judge` to a different provider from the `designer` model (which defaults to `design`).",
+			changeable.length === matches.length
+				? `Set ${seats} to different providers (currently \`${family}\`).`
+				: `Set ${seats} to ${changeable.length === 1 ? "a different provider from" : "distinct providers other than"} \`${family}\`.`,
+		);
+	}
+	const designerFamily = provider(options.designer ?? options.design);
+	if (judge && provider(judge) === designerFamily)
+		problems.push(
+			retry
+				? `Set \`arena_judge\` to a different provider from \`${designerFamily}\`.`
+				: "Set `arena_judge` to a different provider from the `designer` model (which defaults to `design`).",
 		);
 	return problems.length
 		? [
@@ -187,6 +198,7 @@ export function retryArena(
 			: [],
 		run.stage === "judge" ? jobs[0]!.model : null,
 		w.options,
+		jobs,
 	);
 	return error ? refuse(arena, error) : dispatch(plan(arena, run.stage, jobs));
 }

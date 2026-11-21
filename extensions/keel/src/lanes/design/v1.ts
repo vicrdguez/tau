@@ -97,13 +97,10 @@ type Synthesis = {
 	replies: Reply[];
 	base: string;
 	grafts: { seat: string; label: string; text: string }[];
-	outcomes: {
-		source: string;
-		n: number;
-		kind: "node" | "rider" | "not_taken";
-		label: string | null;
-		reason: string | null;
-	}[];
+	outcomes: ({ source: string; n: number } & (
+		| { label: string }
+		| { reason: string }
+	))[];
 	experimentCount: number;
 };
 type DesignerPhase =
