@@ -651,6 +651,40 @@ test("publish compares against the build the worker took, excluding sibling chan
 	assert.equal(deleted.base, merged.sha);
 	assert.deepEqual(deleted.changedPolicyFiles, [policy]);
 });
+test("a correction compares with the build and pinned trunk it took, reporting its own edits", async (t) => {
+	const f = await fixture(t);
+	await f.item();
+	git(f.root, "switch", f.branch);
+	await writeFile(join(f.root, "sibling"), "sibling code\n");
+	git(f.root, "add", "sibling");
+	git(f.root, "commit", "-m", "sibling item");
+	git(f.worker.path, "merge", "--no-edit", f.branch);
+	git(f.root, "switch", "trunk");
+	await mkdir(join(f.root, ".keel/principles"), { recursive: true });
+	const own = ".keel/principles/edited.md";
+	const inherited = ".keel/principles/other-work.md";
+	for (const path of [own, inherited, "other-work"])
+		await writeFile(join(f.root, path), "landed work\n");
+	git(f.root, "add", "-A");
+	git(f.root, "commit", "-m", "other work lands");
+	const trunk = (await readRepo(nodeExec, f.root)).trunkHead!;
+	const notTaken = await readPublishable(nodeExec, f.repo, f.worker, trunk);
+	assert.deepEqual(notTaken, await f.publish());
+	git(f.worker.path, "merge", "--no-edit", trunk);
+	await writeFile(join(f.worker.path, own), "worker's own edit\n");
+	git(f.worker.path, "commit", "-am", "make the correction");
+	git(f.root, "commit", "--allow-empty", "-m", "trunk advances again");
+	const result = await readPublishable(nodeExec, f.repo, f.worker, trunk);
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.changedPolicyFiles, [own]);
+	assert.equal(
+		git(f.root, "diff", "--name-only", result.base, result.sha),
+		`${own}\nbook`,
+	);
+	const unpinned = await f.publish();
+	assert.equal(unpinned.kind, "ok");
+	assert.deepEqual(unpinned.changedPolicyFiles, [own, inherited]);
+});
 test("git ignores inherited redirection/config, replacement refs and a graft at publish", async (t) => {
 	const f = await fixture(t);
 	const merge = await f.item();

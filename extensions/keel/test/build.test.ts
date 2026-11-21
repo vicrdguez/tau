@@ -4,6 +4,7 @@ import type { ConversationId, JsonObject } from "tau/durable";
 import { workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { buildLane, buildTools } from "../src/lanes/build/index.ts";
+import type { buildView } from "../src/lanes/build/state.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
 import { drive } from "./fixtures/drive.ts";
 
@@ -137,6 +138,10 @@ function setup(max_workers = 1) {
 		};
 		return {
 			world,
+			publication: () =>
+				(lane.view(s) as ReturnType<typeof buildView>).publicationOf(
+					agent("worker").key,
+				),
 			start,
 			plan,
 			prepare,
@@ -1130,6 +1135,9 @@ test("full-set or trunk returns request a new correction on the merged head, not
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
 		assert.match(b.request("worker").text, /precision/);
+		assert.partialDeepStrictEqual(b.publication(), {
+			inheritedTrunk: kind === "integration" ? sha : null,
+		});
 		assert.deepEqual(
 			b.pub(undefined, ["precision"]).send![0]!.event.addresses,
 			["precision"],
