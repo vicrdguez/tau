@@ -6,6 +6,8 @@ import { CodingTools } from "tau/durable";
 import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
+import { workRulings } from "../lanes/build/public.ts";
+import { reviewedMandate } from "../lanes/design/public.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
 import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
@@ -52,11 +54,11 @@ export const explorerDispatch: NonNullable<
 	Parameters<typeof createKernel>[0]["dispatch"]
 > = {
 	roles: ["designer", "worker", "investigator"],
-	resolve({ role, options, cwd, view }, { seat: requested }) {
+	history: ["design", "build"],
+	resolve({ role, options, cwd, view, priorWorks }, { seat: requested }) {
 		const explorerRole = explorerSeat(role);
 		if (!explorerRole || requested !== explorerRole) return;
 		const design = view("design");
-		const build = view("build") as { rulings: unknown } | null;
 		const queue = view("queue") as {
 			patternRulings: unknown;
 			investigation: unknown;
@@ -64,7 +66,13 @@ export const explorerDispatch: NonNullable<
 		const record = JSON.stringify(
 			{
 				design,
-				rulings: build?.rulings ?? [],
+				rulings: workRulings(view("build")),
+				priorWorks: priorWorks.flatMap(({ work, view }) => {
+					const mandate = reviewedMandate(view("design"));
+					return mandate
+						? [{ work, mandate, rulings: workRulings(view("build")) }]
+						: [];
+				}),
 				patternRulings: queue?.patternRulings ?? [],
 				investigation:
 					role === "investigator" ? (queue?.investigation ?? null) : null,

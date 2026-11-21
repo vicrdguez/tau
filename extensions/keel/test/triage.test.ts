@@ -534,6 +534,7 @@ test("explorers distinguish a revoked pattern from approved authority, and only 
 				role,
 				cwd: "/checkout",
 				options: activeWorld.options,
+				priorWorks: [],
 				view: (name) => (name === "queue" ? q.view() : null),
 			},
 			{

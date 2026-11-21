@@ -632,6 +632,9 @@ export const design: Lane<State> = {
 	state: doc,
 	view: (s) => ({
 		mandate: s.mandate,
+		ownerReviewed:
+			s.rounds.some((r) => r.answer?.choice === "approve") ||
+			s.revisions.some((r) => r.phase === "applied"),
 		reference: s.reference,
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {

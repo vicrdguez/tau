@@ -58,3 +58,9 @@ export type Ruling = {
 	follows: string;
 	principles: string[];
 };
+
+export function workRulings(view: unknown) {
+	return (
+		(view as { rulings: (Ruling & { item: string })[] } | null)?.rulings ?? []
+	);
+}

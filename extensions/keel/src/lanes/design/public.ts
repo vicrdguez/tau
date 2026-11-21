@@ -51,6 +51,14 @@ export type Mandate = {
 	/** Design context, not authority for briefs. Null in a small Mandate. */
 	considerations: { tradeoffs: string; alternatives: string } | null;
 };
+/** Explorer authority excludes Mandates that were bound under the prompt alone. */
+export function reviewedMandate(view: unknown): Mandate | null {
+	const design = view as {
+		mandate: Mandate | null;
+		ownerReviewed: boolean;
+	} | null;
+	return design?.ownerReviewed ? design.mandate : null;
+}
 export function mandateLabels(mandate: Mandate) {
 	return [
 		"intent",

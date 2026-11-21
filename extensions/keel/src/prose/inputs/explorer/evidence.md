@@ -1,5 +1,5 @@
 ## Keel record for this question
 
-This is the work and project record visible to your caller. Read null or empty fields as unknown. A proposed ruling or a historical decision is not itself the currently bound Mandate.
+Use `priorWorks` for the currently bound Mandates the owner reviewed in other work and their recorded rulings. Read `patternRulings` to distinguish a blessing from a revocation. Read null or empty fields as no record available here. A historical decision or a worker's ruling does not by itself approve a precedent.
 
 {{record}}

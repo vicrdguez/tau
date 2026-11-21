@@ -50,12 +50,18 @@ export function createKernel(config: {
 	}[];
 	dispatch?: {
 		roles: readonly RoleName[];
+		/** Conversation lane views that an explorer may read for other project works. */
+		history?: readonly string[];
 		resolve(
 			facts: {
 				role: RoleName;
 				cwd: string | null;
 				options: StaticFacts["options"];
 				view: Awaited<ReturnType<typeof readViews>>;
+				priorWorks: readonly {
+					work: WorkId;
+					view: Awaited<ReturnType<typeof readViews>>;
+				}[];
 			},
 			job: DispatchJob,
 		): ReturnType<DispatchRoster["resolve"]>;
@@ -100,6 +106,12 @@ export function createKernel(config: {
 	];
 	const dispatch = config.dispatch;
 	if (dispatch) {
+		const history = new Map(
+			[...lanes].filter(
+				([name, lane]) =>
+					lane.scope === "conversation" && dispatch.history?.includes(name),
+			),
+		);
 		tools.push({
 			roles: dispatch.roles,
 			tool: dispatchTool(async (tx, caller) => {
@@ -109,18 +121,32 @@ export function createKernel(config: {
 					dispatch.roles,
 				);
 				const opts = await options.read(tx);
+				async function readRecord() {
+					const work = bound ? self.work : null;
+					const view = await readViews(tx, lanes, work);
+					const priorWorks = history.size
+						? await Promise.all(
+								(await project(tx)).works
+									.filter((id) => id !== work)
+									.map(async (id) => ({
+										work: id,
+										view: await readViews(tx, history, id),
+									})),
+							)
+						: [];
+					return {
+						role: self.role,
+						cwd: self.cwd,
+						options: opts,
+						view,
+						priorWorks,
+					};
+				}
+				let record: ReturnType<typeof readRecord> | undefined;
 				return {
 					...dispatchBounds(opts),
 					resolve: async (_tx, _caller, job) =>
-						dispatch.resolve(
-							{
-								role: self.role,
-								cwd: self.cwd,
-								options: opts,
-								view: await readViews(tx, lanes, bound ? self.work : null),
-							},
-							job,
-						),
+						dispatch.resolve(await (record ??= readRecord()), job),
 				};
 			}),
 		});
