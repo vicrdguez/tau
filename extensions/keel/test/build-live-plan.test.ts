@@ -419,7 +419,7 @@ test("revision activation and the edited plan take effect together, retaining a 
 	assert.deepEqual(b.coord()?.tools, ["handoff_build"]);
 });
 
-test("the revision holds affected briefs that the investigator did not name and cannot leave one citing a removed node", () => {
+test("the revision holds affected briefs that the investigator did not name", () => {
 	const first = goal("first");
 	const report = goal("report");
 	const b = setup([first, report]);
@@ -428,21 +428,19 @@ test("the revision holds affected briefs that the investigator did not name and 
 	b.brief(report.id, "report");
 	b.ready();
 	b.send(hold("queue/1", null, ["ledger"]));
+	assert.equal(b.worker(report.id)?.paused, false);
 	b.send({
 		...proposal,
 		nodes: ["ledger", "report"],
-		mandate: { ...revised, nodes: [revised.nodes[0]!] },
+		mandate: {
+			...revised,
+			nodes: [
+				revised.nodes[0]!,
+				{ label: "report", rule: "Report in UTC", probe: "Check time zone" },
+			],
+		},
 	});
 	assert.equal(b.worker(report.id)?.paused, true);
-	const result = b.tryEvent({
-		kind: "plan",
-		items: [first, report],
-		replies: reply,
-	});
-	assert.match("reject" in result ? result.reject : "", /report.*removed/i);
-	assert.equal(b.worker(report.id)?.paused, true);
-	const { plan } = b.view() as { plan: { id: string; nodes: string[] }[] };
-	assert.deepEqual(plan.find((i) => i.id === report.id)?.nodes, ["report"]);
 });
 
 test("a verified item awaiting merge is a record: require a separate correction depending on it", () => {

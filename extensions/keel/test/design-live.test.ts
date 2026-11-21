@@ -696,8 +696,71 @@ test("revision proposals refuse missing, duplicate or foreign answers, unknown l
 	assert.deepEqual(x.asks(), []);
 });
 
-test("a revision shows and applies all differences, including an unreported addition and removal", () => {
-	const x = pending();
+for (const stage of ["preparing", "building", "merged"]) {
+	test(`a revision refuses to remove R2 cited by stats (${stage}) and can propose changing it instead`, () => {
+		const x = run({
+			...world,
+			view: (lane) =>
+				lane === "build"
+					? {
+							plan: [
+								{ id: "stats", goal: "Write statistics", stage, nodes: ["R2"] },
+							],
+						}
+					: null,
+		});
+		x.act(follow);
+		x.act({
+			...request,
+			causes: ["queue/1"],
+			nodes: ["R2"],
+			text: "The owner chose build on the wrong-Mandate finding about R2.",
+		});
+		const answers = answerCauses(["queue/1"], ["R2"]);
+		const result = x.send({ ...publish, changes: { remove: ["R2"] }, answers });
+		assert.ok("reject" in result, "the removal must not reach owner review");
+		assert.match(
+			result.reject,
+			/Item stats .*cites R2.*Change R2 instead of removing it/,
+		);
+		assert.deepEqual(x.asks(), []);
+		assert.deepEqual(x.turn()?.tools, ["publish_revision"]);
+		x.act({
+			...publish,
+			changes: {
+				nodes: [{ ...untouched, rule: "Use a UTC report timestamp." }],
+			},
+			answers,
+		});
+		assert.match(x.asks()[0]!.basis, /R2: Rule \(changed\)/);
+	});
+}
+
+test("a revision shows and applies all differences, including removal of an uncited node", () => {
+	const x = run({
+		...world,
+		view: (lane) =>
+			lane === "build"
+				? {
+						plan: [
+							{
+								id: "writer",
+								goal: "Write the report",
+								stage: "building",
+								nodes: ["R1"],
+							},
+							{
+								id: "stats",
+								goal: "Write statistics",
+								stage: "planned",
+								nodes: [],
+							},
+						],
+					}
+				: null,
+	});
+	x.act(follow);
+	x.act(request);
 	x.act({
 		...publish,
 		changes: {
