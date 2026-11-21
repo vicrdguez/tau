@@ -3,9 +3,9 @@ import { createKernel } from "./kernel/kernel.ts";
 import { readViews } from "./kernel/routing.ts";
 import { project } from "./kernel/storage.ts";
 import type { EffectRunner } from "./kernel/tasks.ts";
-import { lanes, tools } from "./lanes/index.ts";
 import { workPrinciples } from "./lanes/build/public.ts";
 import { authorityIndex, reviewedHistory } from "./lanes/design/public.ts";
+import { lanes, tools } from "./lanes/index.ts";
 import { queueLane } from "./lanes/queue/index.ts";
 import { type SweepHistory, sweepConfigured } from "./lanes/queue/public.ts";
 import {

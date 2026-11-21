@@ -639,6 +639,8 @@ export const design: Lane<State> = {
 		return [];
 	},
 	reduce(s, e, w) {
+		const started =
+			s.phase === "entry" && w.options.sweep_minutes ? [sweepConfigured] : [];
 		switch (e.kind) {
 			case "request_cancel":
 				if (s.phase === "landed") return { reject: landed({}).trim() };
@@ -688,7 +690,7 @@ export const design: Lane<State> = {
 						},
 						seq: s.seq + 1,
 					},
-					send: [sweepConfigured],
+					send: started,
 				};
 			}
 			case "revise_mandate": {
@@ -993,7 +995,6 @@ export const design: Lane<State> = {
 						(s.seed.reference && reference !== s.seed.reference))
 				)
 					return { reject: "Keep the queue seed's route and reference." };
-				const started = s.phase === "entry" ? [sweepConfigured] : [];
 				switch (e.route) {
 					case "follow": {
 						const proposed = e.mandate as Draft | undefined;
