@@ -320,6 +320,10 @@ test("a hand-over explains rejection and lists owed checks up front; its rejecti
 	);
 	assert.match(
 		open!.basis,
+		/Build starts work to encode a check\. Defer keeps it owed and listed\. Drop clears it\./,
+	);
+	assert.match(
+		open!.basis,
 		/Checks still owed[\s\S]*Cover a zero-sized lot[\s\S]*Balance every ledger/,
 	);
 	for (const { event } of filings) {

@@ -3,7 +3,7 @@
 - A rejection opens triage with the check name, the owner's annotation, and the rejected evidence, with no unrelated decision instructions.
 - A hand-over does not say rejecting with annotations creates obligations, or buries their states after its evidence.
 - Build does not show the check as being built, or a verified landing does not clear it.
-- Repeating an outstanding rejection creates duplicates; defer removes it from the hand-over or fails to show its state.
+- Repeating an outstanding rejection creates duplicates; defer removes it from the hand-over, fails to show its state, or strands it with no decision that can drop it.
 - A later designer filing creates an obligation instead of an ordinary owner finding.
 - Drop leaves a check owed; a fresh rejection inherits dropped evidence or identity.
 - Cancelled work leaves a check owed with no open decision.

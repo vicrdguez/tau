@@ -180,7 +180,7 @@ test("a rejection names the check and annotation, and build lists it until encod
 	assert.deepEqual(q.ask(), []);
 });
 
-test("repeating an outstanding rejection does not create a duplicate; defer keeps the check listed", () => {
+test("repeating an outstanding rejection does not create a duplicate; a deferred check stays listed and can still be dropped", () => {
 	const q = queue();
 	q.file(missing);
 	q.file({
@@ -199,6 +199,11 @@ test("repeating an outstanding rejection does not create a duplicate; defer keep
 			.match(/Reject a zero-sized lot/g)?.length,
 		1,
 	);
+	assert.deepEqual(q.ask()[0]?.choices, ["build", "defer", "drop"]);
+	assert.equal(q.ask().length, 1);
+	q.answer("drop");
+	assert.equal(q.view().owedChecks(), "");
+	assert.deepEqual(q.ask(), []);
 });
 
 test("a later objection filed by the owner's desk is investigated, not owed", () => {
@@ -416,17 +421,26 @@ test("one sweep decision lists all long-deferred findings, and a later tick does
 			result: { findings: [] },
 		});
 	sweep();
-	assert.equal(q.ask().length, 1);
-	assert.match(q.ask()[0]!.basis, /First old finding[\s\S]*Second old finding/);
-	assert.doesNotMatch(q.ask()[0]!.basis, /Reject a zero-sized lot/);
+	const oldDeferrals = q
+		.ask()
+		.find((a) => a.title.includes("long-deferred findings"));
+	assert.ok(oldDeferrals);
 	assert.match(
-		q.ask()[0]!.basis,
+		oldDeferrals.basis,
+		/First old finding[\s\S]*Second old finding/,
+	);
+	assert.doesNotMatch(oldDeferrals.basis, /Reject a zero-sized lot/);
+	assert.match(
+		oldDeferrals.basis,
 		/Defer and drop both close this list without scheduling work or listing these findings again/,
 	);
-	q.answer("defer");
+	q.answer("defer", oldDeferrals.subject);
 	facts.now += 31 * 86_400_000;
 	sweep();
-	assert.deepEqual(q.ask(), []);
+	assert.deepEqual(
+		q.ask().map((a) => a.subject),
+		["triage/3"],
+	);
 });
 
 test("a sweep proposal names its measured principle evidence and schedules no work until triage build", () => {

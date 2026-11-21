@@ -119,8 +119,16 @@ test("cancelled encoding work reopens its original owed-check decision without c
 			"/tmp/keel-sweep-fix-triage.md",
 			`Title: ${triage.d.title}\nChoices: ${triage.d.choices.join(", ")}\n\n${triage.text}`,
 		);
+	await answer(triage.d, "defer");
+	await s.settle();
+	const deferred = await openAsk(s, "queue");
+	assert.notEqual(
+		deferred.d.id,
+		triage.d.id,
+		"the answered decision closes; the deferred check is still actionable",
+	);
 	s.provider.setResponses([]);
-	await answer(triage.d, "build");
+	await answer(deferred.d, "build");
 	await s.settle();
 	const stalled = await openAsk(s, "queue");
 	assert.deepEqual(stalled.d.choices, ["resume", "cancel"]);
