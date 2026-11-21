@@ -58,14 +58,14 @@ export const explorerDispatch: NonNullable<
 		const design = view("design");
 		const build = view("build") as { rulings: unknown } | null;
 		const queue = view("queue") as {
-			approvedPatterns: unknown;
+			patternRulings: unknown;
 			investigation: unknown;
 		} | null;
 		const record = JSON.stringify(
 			{
 				design,
 				rulings: build?.rulings ?? [],
-				approvedPatterns: queue?.approvedPatterns ?? [],
+				patternRulings: queue?.patternRulings ?? [],
 				investigation:
 					role === "investigator" ? (queue?.investigation ?? null) : null,
 			},

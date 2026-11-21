@@ -237,7 +237,7 @@ export const queueLane = defineLane(
 			...triage.asks(state.triage),
 		],
 		view: (state) => ({
-			approvedPatterns: state.triage.patterns.filter((p) => p.status === "blessed"),
+			patternRulings: state.triage.patterns,
 			investigation: pending(state.triage) ? state.triage.context : null,
 			findingsFor: (work: WorkId) =>
 				[
