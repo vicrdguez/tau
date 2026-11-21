@@ -1099,6 +1099,64 @@ test("the item reviewer sees Git's changed policy files and the item-task except
 	assert.match(input, /unchanged unless[^.]*task/i);
 });
 
+test("full-set and landing reviews report the union of merged publications, not reverted policy changes", () => {
+	const x = flow();
+	const reverted = ".keel/principles/reverted.md";
+	const shared = ".keel/playbooks/shared.md";
+	const first = ".keel/principles/first.md";
+	const second = ".keel/playbooks/second.md";
+	x.publish("first", [], "bug", "base", {
+		changedPolicyFiles: [first, reverted],
+	});
+	x.checkout();
+	x.fail();
+	x.publish("corrected", ["totals"], "bug", "base", {
+		changedPolicyFiles: [first, shared],
+	});
+	x.clean();
+	const pass = () =>
+		x.call({
+			kind: "verdict",
+			outcome: "pass",
+			text: "proof passes",
+			blocks: [],
+			notes: [],
+		});
+	function merge(sha: string) {
+		x.checkout();
+		pass();
+		x.clean();
+		x.done("merge_item", { kind: "merged", sha, checks: [] });
+		x.clean();
+	}
+	merge("first-merged");
+	x.publish("second", [], "another", "first-merged", {
+		changedPolicyFiles: [second, shared],
+	});
+	merge("merged");
+	function expectPolicyList(scope: string) {
+		const input = x.agent().expects[0]!.input!();
+		const list = input.match(
+			/Changed principles and playbooks reported by Git:\n([^\n]+(?:\n[^\n]+)*)/,
+		);
+		assert.ok(list, scope);
+		assert.deepEqual(
+			list[1]!.split("\n").sort(),
+			[first, second, shared].sort(),
+			scope,
+		);
+	}
+	x.handoff();
+	x.checkout();
+	expectPolicyList("full-set");
+	pass();
+	x.clean();
+	x.prepare("advanced-trunk");
+	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
+	x.checkout();
+	expectPolicyList("landing");
+});
+
 test("the verifier reads the Mandate as a document including the proof", () => {
 	const x = flow();
 	x.publish();
