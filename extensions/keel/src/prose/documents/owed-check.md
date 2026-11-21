@@ -1,6 +1,6 @@
 Decide what to do about this owed check: {{name}}
 
-Build starts work to encode this check. Defer keeps it owed and listed. Drop clears it.{{outcome}}
+Build starts work to encode this check. Defer keeps it owed and listed. Drop clears it. A deferred check keeps a decision open so you can build or drop it later.{{outcome}}
 
 Your annotation: {{name}}
 

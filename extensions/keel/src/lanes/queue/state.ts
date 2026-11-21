@@ -132,7 +132,7 @@ export function disposition(f: Finding): string {
 		case "filed":
 			return "open: awaiting investigation";
 		case "triage":
-			return "open: awaiting triage";
+			return f.disposition ?? "open: awaiting triage";
 		case "revision":
 			return "build: awaiting Mandate revision";
 		case "defect":

@@ -644,6 +644,8 @@ export function onFact(
 	const first = decisions(q).find((f) => decisionSubject(f) === fact.subject);
 	if (!first || !findingChoices(first).some((c) => c === fact.choice))
 		return { state: q };
+	if (first.intake.missingCheck && fact.choice === "defer")
+		return { state: update(q, first, { disposition: "deferred" }) };
 	const { investigation: i } = first;
 	const classification = i?.classification;
 	const related = decisionMembers(q, first.id);
@@ -693,11 +695,7 @@ export function onFact(
 							? [entry.triageDirection, annotations].filter(Boolean).join("\n")
 							: (entry.triageDirection ?? ""),
 					deferredAt:
-						fact.choice === "defer" &&
-						!entry.revisit &&
-						!entry.intake.missingCheck
-							? world.now
-							: null,
+						fact.choice === "defer" && !entry.revisit ? world.now : null,
 				};
 			}
 			return entry;
@@ -907,10 +905,10 @@ export function checks(
 		.filter((f) => isOwed(f) && select(f.id))
 		.map((f) => {
 			const state =
-				f.status === "triage" || returning.includes(f.id)
-					? "in triage"
-					: f.disposition === "deferred"
-						? "deferred"
+				f.disposition === "deferred"
+					? "deferred"
+					: f.status === "triage" || returning.includes(f.id)
+						? "in triage"
 						: "being built";
 			return `- #${f.id}: ${f.intake.text} (${state}; rejected ${f.intake.sha})`;
 		})
