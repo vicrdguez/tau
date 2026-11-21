@@ -51,6 +51,7 @@ const release = (cause: string, direction = "Carry on") => ({
 });
 const proposal = {
 	kind: "propose_revision",
+	number: 1,
 	mandate: revised,
 	causes: ["queue/1"],
 	nodes: ["ledger"],
@@ -523,7 +524,7 @@ test("a held unverified publication is superseded before release; its original w
 	]);
 });
 
-test("handoff keeps original and revision approval notes with unique numbers and their own replies", () => {
+test("handoff pairs each note with its local reply and the specific approval after two revisions", () => {
 	const item = goal("ledger");
 	const firstReply = {
 		n: 1,
@@ -539,43 +540,18 @@ test("handoff keeps original and revision approval notes with unique numbers and
 	b.send(hold("queue/1", null, ["ledger"]));
 	b.send(proposal);
 	b.plan([item], reply);
-	b.brief(item.id);
-	b.ready();
-	b.publish(item.id);
-	b.merge(item.id);
-	const handoff = b.send({
-		kind: "handoff",
-		summary: "Ledger done",
-		risk: "None",
-	})[0]!.event;
-	assert.deepEqual((handoff.mandate as Mandate).approvalNotes, [
-		"Check negatives",
-		"Test tie values",
-	]);
-	assert.deepEqual(handoff.approvalReplies, [
-		firstReply,
-		{ ...reply[0], n: 2 },
-	]);
-});
-
-test("the coordinator answers notes from a withdrawn approval without adding work or changing the Mandate", () => {
-	const item = goal("ledger");
-	const b = setup([item]);
-	b.send({
-		kind: "approval_followup",
-		notes: ["Check the equivalent bound rule."],
-	});
-	assert.match(
-		b.coord()?.input?.() ?? "",
-		/1\. Check the equivalent bound rule/,
-	);
-	assert.ok("reject" in b.tryEvent({ kind: "plan", items: [], replies: [] }));
-	const reply = {
+	const laterReply = {
 		n: 1,
-		status: "considered",
-		reason: "Already covered by the bound rule.",
+		status: "acted_on",
+		reason: "Add a rounding proof",
 	};
-	b.plan([], [reply]);
+	b.send({
+		...proposal,
+		number: 3,
+		causes: ["queue/3"],
+		mandate: { ...revised, approvalNotes: ["Check precision"] },
+	});
+	b.plan([item], [laterReply]);
 	b.brief(item.id);
 	b.ready();
 	b.publish(item.id);
@@ -585,11 +561,11 @@ test("the coordinator answers notes from a withdrawn approval without adding wor
 		summary: "Ledger done",
 		risk: "None",
 	})[0]!.event;
-	assert.deepEqual((handoff.mandate as Mandate).approvalNotes, [
-		"Check the equivalent bound rule.",
+	assert.deepEqual(handoff.approvals, [
+		{ revision: null, notes: [{ ...firstReply, text: "Check negatives" }] },
+		{ revision: 1, notes: [{ ...reply[0], text: "Test tie values" }] },
+		{ revision: 3, notes: [{ ...laterReply, text: "Check precision" }] },
 	]);
-	assert.deepEqual(handoff.approvalReplies, [reply]);
-	assert.deepEqual((handoff.mandate as Mandate).nodes, mandate.nodes);
 });
 
 test("a stalled worker resumes with both the revision instructions and the owner's new direction", () => {

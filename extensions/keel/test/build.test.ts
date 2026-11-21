@@ -258,8 +258,16 @@ test("approval notes require a numbered reply each; the first plan and its cited
 		const r = b.tryEvent({ kind: "plan", items: [encode], replies: bad });
 		assert.match("reject" in r ? r.reject : "", /repl|annotat/i);
 	}
-	const first = b.send({ kind: "plan", items: [encode], replies });
-	assert.deepEqual(first.state.approvalReplies, replies);
+	b.send({ kind: "plan", items: [encode], replies });
+	const approvals = [
+		{
+			revision: null,
+			notes: replies.map((r) => ({
+				...r,
+				text: reviewed.approvalNotes[r.n - 1],
+			})),
+		},
+	];
 	assert.ok(
 		"reject" in b.tryEvent({ kind: "brief", ...brief, nodes: ["tick-order"] }),
 	);
@@ -283,7 +291,7 @@ test("approval notes require a numbered reply each; the first plan and its cited
 		summary: "port ready",
 		risk: "none",
 	});
-	assert.deepEqual(handoff.send?.[0]?.event.approvalReplies, replies);
+	assert.deepEqual(handoff.send?.[0]?.event.approvals, approvals);
 	b.send({
 		kind: "rework",
 		item: "full",
@@ -295,7 +303,8 @@ test("approval notes require a numbered reply each; the first plan and its cited
 		kind: "plan",
 		items: [{ ...item, id: "proof", deps: ["fix"] }],
 	});
-	assert.deepEqual(correction.state.approvalReplies, replies);
+	assert.ok("approvals" in correction.state);
+	assert.deepEqual(correction.state.approvals, approvals);
 });
 
 test("the brief request and worker brief each render one Bound Mandate heading", () => {
@@ -1105,7 +1114,7 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 			rulings: [ruling],
 			summary: "price repaired",
 			risk: "tick table",
-			approvalReplies: [],
+			approvals: [],
 		},
 	});
 	b.send({ kind: "closed" });

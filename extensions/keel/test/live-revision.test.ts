@@ -148,11 +148,11 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 	save("handover", text);
 	assert.match(
 		text,
-		/1\. Keep statistics independent\.\n\s+acted_on: First plan keeps an independent statistics check\./,
+		/Mandate approval\n\n1\. Keep statistics independent\.\n\s+acted_on: First plan keeps an independent statistics check\./,
 	);
 	assert.match(
 		text,
-		/2\. Prove framing before resuming the writer\.\n\s+acted_on: Revision plan adds a framing item before the writer\./,
+		/Revision 1 approval\n\n1\. Prove framing before resuming the writer\.\n\s+acted_on: Revision plan adds a framing item before the writer\./,
 	);
 	assert.match(text, /Mandate revisions[\s\S]+wire/);
 	assert.match(text, /Finding #1[^\n]*writer seam[\s\S]+applied/i);

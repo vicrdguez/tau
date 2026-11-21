@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
@@ -62,9 +63,13 @@ const block = (thread: string) => ({
 	ground: "failing_run",
 	evidence: "negative balance",
 });
-function flow() {
+function flow(view = world.view) {
 	const running = new Set<string>();
-	const facts = { ...world, runningEffect: (key: string) => running.has(key) };
+	const facts = {
+		...world,
+		view,
+		runningEffect: (key: string) => running.has(key),
+	};
 	let state = verify.state.initial();
 	const apply = (event: LaneEvent) => {
 		const result = drive(verify, state, event, facts);
@@ -156,7 +161,7 @@ function flow() {
 			rulings,
 			summary: "fixed totals",
 			risk: "low volume only",
-			approvalReplies: [],
+			approvals: [],
 			...extra,
 		});
 	const full = () => {
@@ -1230,23 +1235,47 @@ test("a second stopped turn receives the new direction, not a replay of instruct
 	assert.match(next, /inspect carries/);
 	assert.doesNotMatch(next, /inspect rounding/);
 });
-test("the hand-over pairs numbered approval replies with the owner's notes", () => {
-	const x = flow();
+test("the hand-over names each note's approval and pairs it with its local reply, alongside revision evidence", () => {
+	const revisionSummary =
+		"### Revision 1\n\nsums: Rule, Falsifying probe\n\n### Revision 2\n\ntotals: Timeout";
+	const x = flow((lane) => (lane === "design" ? { revisionSummary } : null));
 	x.merged();
-	const replies = [
-		{
-			n: 2,
-			status: "considered",
-			reason: "The boundary already has an oracle.",
-		},
-		{ n: 1, status: "acted_on", reason: "Added the zero balance check." },
-	];
 	x.handoff({
-		mandate: {
-			...mandate,
-			approvalNotes: ["Cover the zero balance.", "Consider another oracle."],
-		},
-		approvalReplies: replies,
+		approvals: [
+			{
+				revision: null,
+				notes: [
+					{
+						n: 1,
+						text: "Cover the zero balance.",
+						status: "acted_on",
+						reason: "Added the zero balance check.",
+					},
+				],
+			},
+			{
+				revision: 1,
+				notes: [
+					{
+						n: 1,
+						text: "Consider another oracle.",
+						status: "considered",
+						reason: "The boundary already has an oracle.",
+					},
+				],
+			},
+			{
+				revision: 2,
+				notes: [
+					{
+						n: 1,
+						text: "Keep the timeout small.",
+						status: "acted_on",
+						reason: "Set an explicit timeout.",
+					},
+				],
+			},
+		],
 	});
 	x.checkout();
 	x.pass();
@@ -1257,12 +1286,19 @@ test("the hand-over pairs numbered approval replies with the owner's notes", () 
 	const ask = x.asks()[0]!;
 	assert.match(
 		ask.basis,
-		/1\. Cover the zero balance\.[\s\S]*acted_on: Added the zero balance check\./,
+		/Mandate approval\n\n1\. Cover the zero balance\.\n\s+acted_on: Added the zero balance check\./,
 	);
 	assert.match(
 		ask.basis,
-		/2\. Consider another oracle\.[\s\S]*considered: The boundary already has an oracle\./,
+		/Revision 1 approval\n\n1\. Consider another oracle\.\n\s+considered: The boundary already has an oracle\./,
 	);
+	assert.match(
+		ask.basis,
+		/Revision 2 approval\n\n1\. Keep the timeout small\.\n\s+acted_on: Set an explicit timeout\./,
+	);
+	assert.ok(ask.basis.includes(revisionSummary));
+	if (process.env.KEEL_HANDOVER_SAMPLE)
+		writeFileSync(process.env.KEEL_HANDOVER_SAMPLE, ask.basis);
 });
 test("the hand-over title names the goal without the done predicate", () => {
 	const x = flow();
