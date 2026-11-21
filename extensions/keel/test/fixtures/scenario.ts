@@ -179,6 +179,8 @@ export async function openScriptedWorkflow(
 	return {
 		store,
 		root,
+		transact: k.transact,
+		options: k.options,
 		provider,
 		queueProvider,
 		sweeper,
