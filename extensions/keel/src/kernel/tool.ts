@@ -309,6 +309,30 @@ async function admit(
 	});
 }
 
+/** Ground may ask for evidence before it has classified and adopted the work. */
+export async function dispatchCaller(
+	tx: Tx,
+	conversation: ConversationId,
+	roles: readonly RoleName[],
+) {
+	const { binding } = await tx.doc(stateDoc(BindingState), conversation);
+	const self = await admit(
+		tx,
+		conversation,
+		{
+			lane: "design",
+			roles,
+			...(binding
+				? { gate: "standing", name: "dispatch" }
+				: { gate: "adopt", name: "ground" }),
+		},
+		null,
+		undefined,
+	);
+	if ("reject" in self) throw new Error(self.reject);
+	return { self, bound: binding !== null };
+}
+
 function output(receipt: Readonly<ReceiptState>): ToolExecutionResult {
 	return {
 		output:

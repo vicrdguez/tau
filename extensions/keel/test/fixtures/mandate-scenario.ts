@@ -8,7 +8,17 @@ import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { ProjectState } from "../../src/kernel/records.ts";
 import { stateDoc } from "../../src/kernel/state.ts";
 import { git } from "../repo/fixture.ts";
-import { arenaFrame, candidate, candidateResponse, challengerReport, dispositions, grafts, judgeReport, objection, seats } from "./arena-script.ts";
+import {
+	arenaFrame,
+	candidate,
+	candidateResponse,
+	challengerReport,
+	dispositions,
+	grafts,
+	judgeReport,
+	objection,
+	seats,
+} from "./arena-script.ts";
 import { openScriptedWorkflow } from "./scenario.ts";
 
 const prompt = "Give shell callers one way to read and write the book.";
@@ -186,11 +196,17 @@ export async function openReview(
 	reworkRider(): Promise<void>;
 	approveAndBuild(): Promise<void>;
 }> {
-	const { store, root, provider, secondCandidate, judge, challenger, explorer, turn, settle } = await openScriptedWorkflow(
-		cwd,
-		storage,
-		first,
-	);
+	const {
+		store,
+		root,
+		provider,
+		secondCandidate,
+		judge,
+		challenger,
+		explorer,
+		turn,
+		settle,
+	} = await openScriptedWorkflow(cwd, storage, first);
 	const { harness } = store;
 	async function asks() {
 		return Object.values(
@@ -239,46 +255,87 @@ export async function openReview(
 			assert.ok(text.includes(part), `Missing ${part} from ${text}`);
 	}
 	const synthesis = { base: seats[0], grafts };
-	const respond = () => turn("designer", "answer_challenger", { dispositions }, objection);
-	const challenge = () => challenger.setResponses([
-		({ messages }) => {
-			const input = JSON.stringify(messages);
-			assert.match(input, /winning candidate decide that the question did not ask/i);
-			assert.match(input, /implementer copy from the nearest example/i);
-			assert.ok(input.includes(body), "the challenger sees the project principle body");
-			return fauxAssistantMessage(challengerReport);
-		},
-	]);
+	const respond = () =>
+		turn("designer", "answer_challenger", { dispositions }, objection);
+	const challenge = () =>
+		challenger.setResponses([
+			({ messages }) => {
+				const input = JSON.stringify(messages);
+				assert.match(
+					input,
+					/winning candidate decide that the question did not ask/i,
+				);
+				assert.match(input, /implementer copy from the nearest example/i);
+				assert.ok(
+					input.includes(body),
+					"the challenger sees the project principle body",
+				);
+				return fauxAssistantMessage(challengerReport);
+			},
+		]);
 	async function start() {
 		const jobs = [
-			{ seat: "design_explorer", question: "How does GUIDE describe stored lines?" },
-			{ seat: "design_explorer", question: "Why does NOTES differ from the approved format?" },
+			{
+				seat: "design_explorer",
+				question: "How does GUIDE describe stored lines?",
+			},
+			{
+				seat: "design_explorer",
+				question: "Why does NOTES differ from the approved format?",
+			},
 		];
 		const explored = new Set<string>();
-		explorer.setResponses(Array.from({ length: 4 }, () => ({ messages }) => {
-			const question = JSON.stringify(messages.find((m) => m.role === "user"));
-			const path = question.includes("GUIDE") ? "GUIDE" : "NOTES";
-			const last = messages.at(-1);
-			if (last?.role !== "toolResult") return fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" });
-			assert.equal(last.isError, false);
-			assert.match(JSON.stringify(last.content), path === "GUIDE" ? /Every stored line ends in LF/ : /unterminated stored line is allowed/);
-			explored.add(path);
-			return fauxAssistantMessage(`Read ${path} in the repository.`);
-		}));
+		explorer.setResponses(
+			Array.from({ length: 4 }, () => ({ messages }) => {
+				const question = JSON.stringify(
+					messages.find((m) => m.role === "user"),
+				);
+				const path = question.includes("GUIDE") ? "GUIDE" : "NOTES";
+				const last = messages.at(-1);
+				if (last?.role !== "toolResult")
+					return fauxAssistantMessage([fauxToolCall("read", { path })], {
+						stopReason: "toolUse",
+					});
+				assert.equal(last.isError, false);
+				assert.match(
+					JSON.stringify(last.content),
+					path === "GUIDE"
+						? /Every stored line ends in LF/
+						: /unterminated stored line is allowed/,
+				);
+				explored.add(path);
+				return fauxAssistantMessage(`Read ${path} in the repository.`);
+			}),
+		);
 		const prompts: string[] = [];
 		secondCandidate.setResponses([candidateResponse(seats[1], prompts)]);
-		judge.setResponses([({ messages }) => {
-			const input = JSON.stringify(messages);
-			for (const seat of seats) assert.ok(input.includes(`Sketch of ${seat}`));
-			return fauxAssistantMessage(judgeReport);
-		}]);
+		judge.setResponses([
+			({ messages }) => {
+				const input = JSON.stringify(messages);
+				for (const seat of seats)
+					assert.ok(input.includes(`Sketch of ${seat}`));
+				return fauxAssistantMessage(judgeReport);
+			},
+		]);
 		challenge();
 		provider.setResponses([
 			turn("designer", "dispatch", { jobs }, prompt),
-			turn("designer", "ground", grounded, { tool: "dispatch", text: "Read GUIDE" }, { tool: "dispatch", text: "Read NOTES" }),
+			turn(
+				"designer",
+				"ground",
+				grounded,
+				{ tool: "dispatch", text: "Read GUIDE" },
+				{ tool: "dispatch", text: "Read NOTES" },
+			),
 			turn("designer", "frame_arena", arenaFrame, gap, conflict),
 			candidateResponse(seats[0], prompts),
-			turn("designer", "publish_mandate", { draft, ...synthesis, replies: [] }, gap, conflict),
+			turn(
+				"designer",
+				"publish_mandate",
+				{ draft, ...synthesis, replies: [] },
+				gap,
+				conflict,
+			),
 			respond(),
 		]);
 		await root.submit({ type: "input", content: prompt }, ctx);
@@ -288,7 +345,8 @@ export async function openReview(
 		assert.equal(prompts[0], prompts[1]);
 		assert.deepEqual(await subjects(), ["mandate/1"]);
 		const { text, decision: reviewDecision } = await review("mandate/1");
-		for (const choice of ["approve", "rework", "decline"]) assert.ok(reviewDecision.choices.includes(choice));
+		for (const choice of ["approve", "rework", "decline"])
+			assert.ok(reviewDecision.choices.includes(choice));
 		expectAll(text, [
 			gap,
 			conflict,
@@ -330,7 +388,11 @@ export async function openReview(
 			[conflict, revisionNotes[1]!],
 		]);
 	async function reworkRider() {
-		expectAll((await review("mandate/2")).text, [laterReader, settlement, ...revisionNotes]);
+		expectAll((await review("mandate/2")).text, [
+			laterReader,
+			settlement,
+			...revisionNotes,
+		]);
 		challenge();
 		provider.setResponses([
 			turn(
@@ -382,7 +444,12 @@ export async function openReview(
 					items: [
 						{ id: "encode", kind: "encode", goal: encode, deps: [] },
 						{ id: "migrate", kind: "build", goal: migrate, deps: ["encode"] },
-						{ id: "report", kind: "build", goal: report, deps: ["encode", "migrate"] },
+						{
+							id: "report",
+							kind: "build",
+							goal: report,
+							deps: ["encode", "migrate"],
+						},
 					],
 					replies: [
 						{
@@ -437,10 +504,22 @@ export async function openReview(
 			}),
 			turn("worker", "publish_build", { summary: migrate, addresses: [] }),
 			...verify(bytes, "Migrated bytes match."),
-			turn("coordinator", "brief_item", { item: "report", goal: report, evidence: "Report emits the migrated line.", fences: "book-report.sh", nodes: ["read-book", "stdout"] }),
-			turn("worker", "bash", { command: "test \"$(cat book)\" = repaired && printf '%s\\n' '. ./book.sh' 'read_book book' > book-report.sh && git add book-report.sh && git commit -m 'use shared reader in report'" }),
+			turn("coordinator", "brief_item", {
+				item: "report",
+				goal: report,
+				evidence: "Report emits the migrated line.",
+				fences: "book-report.sh",
+				nodes: ["read-book", "stdout"],
+			}),
+			turn("worker", "bash", {
+				command:
+					"test \"$(cat book)\" = repaired && printf '%s\\n' '. ./book.sh' 'read_book book' > book-report.sh && git add book-report.sh && git commit -m 'use shared reader in report'",
+			}),
 			turn("worker", "publish_build", { summary: report, addresses: [] }),
-			...verify(`${bytes} && test "$(sh book-report.sh)" = repaired`, "Report uses the shared reader."),
+			...verify(
+				`${bytes} && test "$(sh book-report.sh)" = repaired`,
+				"Report uses the shared reader.",
+			),
 			turn("coordinator", "handoff_build", {
 				summary: migrate,
 				risk: "Only shell callers exercised.",

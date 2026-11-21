@@ -207,6 +207,9 @@ export function buildView(s: Build) {
 			brief,
 		})),
 		mandate: s.mandate,
+		rulings: s.items.flatMap(({ id, rulings }) =>
+			rulings.map((ruling) => ({ item: id, ...ruling })),
+		),
 		head: s.head,
 		itemOf(agent: string) {
 			return (

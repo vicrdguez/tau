@@ -58,7 +58,15 @@ export async function openScriptedWorkflow(
 	const challenger = fauxProvider({ provider: "challenger-fixture" });
 	const explorer = fauxProvider({ provider: "explorer-fixture" });
 	const models = createModels();
-	for (const p of [provider, queueProvider, secondCandidate, judge, challenger, explorer]) models.setProvider(p.provider);
+	for (const p of [
+		provider,
+		queueProvider,
+		secondCandidate,
+		judge,
+		challenger,
+		explorer,
+	])
+		models.setProvider(p.provider);
 	const store = await openStore(
 		storage,
 		{
@@ -157,7 +165,18 @@ export async function openScriptedWorkflow(
 		}
 		assert.deepEqual(errors, []);
 	}
-	return { store, root, provider, queueProvider, secondCandidate, judge, challenger, explorer, turn, settle };
+	return {
+		store,
+		root,
+		provider,
+		queueProvider,
+		secondCandidate,
+		judge,
+		challenger,
+		explorer,
+		turn,
+		settle,
+	};
 }
 
 export async function openScenario(

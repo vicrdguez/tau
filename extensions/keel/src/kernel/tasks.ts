@@ -14,6 +14,12 @@ import {
 	type TaskRuntime,
 	type Tx,
 } from "tau/durable";
+import {
+	type DispatchJob,
+	type DispatchRoster,
+	type DispatchResult,
+	fanOut,
+} from "../dispatch/index.ts";
 import { type RoleName, storedRole } from "../roles/index.ts";
 import {
 	type AgentKey,
@@ -51,6 +57,11 @@ type EffectOwner = {
 		cursor?: Cursor,
 	): ReturnType<Tx["scanConversations"]>;
 	createChild(): Promise<ConversationId>;
+	dispatch<J extends DispatchJob>(
+		roster: DispatchRoster<J>,
+		jobs: readonly J[],
+		context: Context,
+	): Promise<DispatchResult[]>;
 };
 export type EffectRunner = (
 	input: EffectInput,
@@ -235,13 +246,14 @@ export function makeTasks(hooks: Hooks) {
 			run: async ({ input, id, state }, runtime, ctx) => {
 				const { attempt } = state.checkpoint;
 				async function readOrCreate<T>(
-					operation: (tx: Tx) => Promise<T>,
+					operation: (tx: Tx) => T | Promise<T>,
+					context = ctx,
 				): Promise<T> {
 					let value!: T;
 					await runtime.commit(async (tx) => {
 						value = await operation(tx);
 						return undefined;
-					}, ctx);
+					}, context);
 					return value;
 				}
 				let event: KernelEvent;
@@ -250,6 +262,20 @@ export function makeTasks(hooks: Hooks) {
 						kind: "effect_done",
 						key: input.key,
 						result: await hooks.runEffect(input, ctx, {
+							dispatch: (roster, jobs, context) =>
+								fanOut(
+									{
+										taskId: id,
+										conversationId: runtime.conversationId,
+										now: () => runtime.now(),
+										commit: readOrCreate,
+										conversation: (child, context) =>
+											runtime.conversation(child, context),
+									},
+									roster,
+									jobs,
+									context,
+								),
 							scanChildren: (limit, cursor) =>
 								readOrCreate((tx) =>
 									tx.scanConversations({ ownerTaskId: id }, limit, cursor),

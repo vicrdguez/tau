@@ -151,6 +151,15 @@ export function indexFor(
 		"\n",
 	);
 }
+export function projectPrinciplesText(cwd: string) {
+	const { principles, errors } = project(cwd);
+	return (
+		[
+			...principles.map(({ name, body }) => `### ${name}\n\n${body}`),
+			...errors,
+		].join("\n\n") || "No project principles recorded."
+	);
+}
 export function bodyOf(
 	cwd: string | null | undefined,
 	name: string,

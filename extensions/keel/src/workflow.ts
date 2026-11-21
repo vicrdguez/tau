@@ -14,6 +14,7 @@ import {
 	type RepoOp,
 	readRepo,
 } from "./repo/index.ts";
+import { explorerDispatch, runDesignDispatch } from "./roles/dispatch.ts";
 
 // Specs are authored by lane declarations and committed by the kernel, not supplied by agents.
 // Discovery pins the repository before the *next* operation is planned. Never rediscover it on retry.
@@ -38,7 +39,11 @@ export function createWorkflow(runEffect: EffectRunner = runRepoEffect) {
 	return createKernel({
 		lanes,
 		tools,
-		runEffect,
+		runEffect: (input, ctx, owner) =>
+			input.spec.kind === "arena_dispatch"
+				? runDesignDispatch(input, ctx, owner)
+				: runEffect(input, ctx, owner),
+		dispatch: explorerDispatch,
 		plainTools: principleTools,
 		sections: principleSections,
 		input: principleInputs,

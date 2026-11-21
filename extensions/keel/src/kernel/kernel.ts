@@ -7,6 +7,11 @@ import {
 	type Tx,
 } from "tau/durable";
 import {
+	type DispatchJob,
+	type DispatchRoster,
+	dispatchTool,
+} from "../dispatch/index.ts";
+import {
 	options,
 	type RoleName,
 	settings,
@@ -22,6 +27,7 @@ import { project } from "./storage.ts";
 import { type EffectRunner, makeTasks } from "./tasks.ts";
 import {
 	type CheckCitations,
+	dispatchCaller,
 	type LaneTool,
 	wrapPlainTool,
 	wrapTool,
@@ -35,6 +41,18 @@ export function createKernel(config: {
 		roles: readonly RoleName[];
 		tool: ToolRegistration;
 	}[];
+	dispatch?: {
+		roles: readonly RoleName[];
+		resolve(
+			facts: {
+				role: RoleName;
+				cwd: string | null;
+				options: Awaited<ReturnType<typeof options.read>>;
+				view: Awaited<ReturnType<typeof readViews>>;
+			},
+			job: DispatchJob,
+		): ReturnType<DispatchRoster["resolve"]>;
+	};
 	sections?: readonly {
 		roles: readonly RoleName[];
 		section: NonNullable<Extension["sections"]>[number];
@@ -73,6 +91,33 @@ export function createKernel(config: {
 		),
 		...(config.plainTools ?? []).map(wrapPlainTool),
 	];
+	const dispatch = config.dispatch;
+	if (dispatch) {
+		tools.push({
+			roles: dispatch.roles,
+			tool: dispatchTool({
+				admit: async (tx, caller) => {
+					await dispatchCaller(tx, caller, dispatch.roles);
+				},
+				async resolve(tx, caller, job) {
+					const { self, bound } = await dispatchCaller(
+						tx,
+						caller,
+						dispatch.roles,
+					);
+					return dispatch.resolve(
+						{
+							role: self.role,
+							cwd: self.cwd,
+							options: await options.read(tx),
+							view: await readViews(tx, lanes, bound ? self.work : null),
+						},
+						job,
+					);
+				},
+			}),
+		});
+	}
 	const adopting = new Set(
 		config.tools.filter((t) => t.gate === "adopt").map((t) => t.name),
 	);

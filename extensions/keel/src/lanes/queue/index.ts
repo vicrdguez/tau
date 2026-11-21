@@ -9,7 +9,7 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
 import type { Holding, HoldingAddress, Intake, Resume } from "./public.ts";
-import { type Investigated, initial, type Queue } from "./state.ts";
+import { type Investigated, initial, pending, type Queue } from "./state.ts";
 import * as triage from "./triage.ts";
 
 export { queueTools } from "./tools.ts";
@@ -182,6 +182,7 @@ export const queueLane = defineLane(
 		],
 		view: (state) => ({
 			approvedPatterns: state.triage.patterns,
+			investigation: pending(state.triage)?.context ?? null,
 			openFor: (work: WorkId) =>
 				state.findings.filter((f) => f.work === work && f.status === "open"),
 		}),
