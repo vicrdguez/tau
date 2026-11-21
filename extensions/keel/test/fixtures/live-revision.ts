@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import type { JsonObject, Storage } from "tau/durable";
+import type { Harness, JsonObject, Storage } from "tau/durable";
 import { type FauxResponseStep, fauxAnswer } from "tau/testing";
 import { ProjectState, WorkState } from "../../src/kernel/records.ts";
 import { stateDoc } from "../../src/kernel/state.ts";
@@ -57,7 +57,29 @@ export async function openLiveRevision(
 	cwd: string,
 	storage: Storage,
 	first: boolean,
-) {
+): Promise<{
+	harness: Harness;
+	build: string;
+	desk(): Promise<
+		Readonly<ReturnType<typeof design.state.initial>> | undefined
+	>;
+	asks(): Promise<unknown[]>;
+	review(
+		prefix: string,
+	): Promise<{
+		decision: NonNullable<Awaited<ReturnType<typeof decision>>>;
+		text: string;
+	}>;
+	answer(
+		prefix: string,
+		choice: string,
+		annotations?: { text: string }[],
+	): Promise<void>;
+	permitStats(): void;
+	openTriage(): Promise<void>;
+	propose(): Promise<void>;
+	finish(): Promise<void>;
+}> {
 	const statsGate = latch<void>();
 	const investigationPrompt = latch<void>();
 	const s = await openScriptedWorkflow(
@@ -75,7 +97,7 @@ export async function openLiveRevision(
 			return runRepoEffect(input, context, owner);
 		},
 	);
-	const { harness } = s.store;
+	const harness: Harness = s.store.harness;
 	const work = s.root.id;
 	const build = `keel/${work}/build`;
 	if (first)
@@ -382,7 +404,6 @@ export async function openLiveRevision(
 		assert.equal(s.provider.getPendingResponseCount(), 0);
 	}
 	return {
-		...s,
 		harness,
 		build,
 		desk,

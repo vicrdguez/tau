@@ -95,9 +95,9 @@ const publish = {
 const reply = { n: 1, status: "acted_on", reason: "Test a tab too." };
 const note = { n: 1, text: "Keep escapes readable." };
 
-function run() {
+function run(facts = world) {
 	let state = design.state.initial();
-	const send = (event: LaneEvent) => drive(design, state, event, world);
+	const send = (event: LaneEvent) => drive(design, state, event, facts);
 	const act = (event: LaneEvent) => {
 		const result = send(event);
 		assert.ok("state" in result, JSON.stringify(result));
@@ -378,6 +378,58 @@ test("declining releases only that proposal's causes and the next request waits 
 		"reject" in x.send(publish),
 		"the third proposal drafts against the newly bound Mandate",
 	);
+});
+
+test("cancel names the current rework annotation as not pursued, and omits a reply already given", () => {
+	const x = run();
+	x.act({ kind: "ground", route: "precedent", reference, audit });
+	const first = { kind: "publish_mandate", draft, replies: [] };
+	x.act(first);
+	x.answer(x.asks()[0]!.subject, "rework", [
+		{ ...note, text: "Already answered in round 2." },
+	]);
+	x.act({ ...first, replies: [reply] });
+	x.answer(x.asks()[0]!.subject, "rework", [note]);
+	const cancellation = x.act({ kind: "cancel" });
+	assert.match(
+		cancellation.notes?.[0]?.text ?? "",
+		/Keep escapes readable\.[^\n]*not pursued/i,
+	);
+	assert.doesNotMatch(cancellation.notes![0]!.text, /Already answered/);
+	assert.deepEqual(x.act({ kind: "cancel" }).notes ?? [], []);
+});
+
+test("cancel names approval notes as not pursued only before their plan is written", () => {
+	for (const hasPlan of [false, true]) {
+		const x = run({
+			...world,
+			view: () => ({ plan: hasPlan ? [{ id: "report" }] : [] }),
+		});
+		x.act({ kind: "ground", route: "precedent", reference, audit });
+		x.act({ kind: "publish_mandate", draft, replies: [] });
+		x.answer(x.asks()[0]!.subject, "approve", [note]);
+		const text =
+			x
+				.act({ kind: "cancel" })
+				.notes?.map((n) => n.text)
+				.join("\n") ?? "";
+		if (hasPlan) assert.doesNotMatch(text, /Keep escapes readable/);
+		else assert.match(text, /Keep escapes readable\.[^\n]*not pursued/i);
+	}
+});
+
+test("cancel names outstanding direction from a live revision before the plan applies", () => {
+	for (const choice of ["approve", "rework"]) {
+		const x = pending();
+		x.act(publish);
+		x.answer(x.asks()[0]!.subject, choice, [note]);
+		const notes =
+			x
+				.act({ kind: "cancel" })
+				.notes?.map((n) => n.text)
+				.join("\n") ?? "";
+		assert.match(notes, /Keep escapes readable\.[^\n]*not pursued/i);
+	}
 });
 
 for (const kind of ["cancel", "closed", "landed"]) {
