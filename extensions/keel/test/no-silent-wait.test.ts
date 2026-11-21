@@ -3,6 +3,7 @@ import { type TestContext, test } from "node:test";
 import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
+import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import {
 	agentKey,
 	effectKey,
@@ -15,6 +16,7 @@ import { ProjectState, WorkState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { buildDoc } from "../src/lanes/build/state.ts";
 import { openScriptedWorkflow } from "./fixtures/scenario.ts";
+import { fixture } from "./repo/fixture.ts";
 
 const sha = "a".repeat(40);
 const rule = (label: string) => ({
@@ -525,6 +527,67 @@ test("cancelling a stalled investigation of a non-blocking note exposes the work
 	assert.deepEqual(d.choices, ["resume", "cancel"]);
 	assert.match(text, /left.*depends on right/);
 	assert.match(text, /right.*depends on left/);
+});
+
+test("a coordinator stall after resume shows the refused plan's error, not a prior turn's error", async (t) => {
+	const { root } = await fixture(t);
+	const s = await openScriptedWorkflow(root, new MemoryStorage(), true);
+	const { harness } = s.store;
+	t.after(() => harness.close(ctx));
+	const noPlan = fauxAssistantMessage("I could not publish a plan.");
+	s.provider.setResponses([
+		s.turn("designer", "ground", {
+			route: "follow",
+			reference: "Export ADR",
+			mandate,
+		}),
+		noPlan,
+		noPlan,
+	]);
+	await (
+		await s.root.submit({ type: "input", content: mandate.intent }, ctx)
+	).wait(ctx);
+	await s.settle();
+	async function openHolding() {
+		const slots = (await harness.snapshot(stateDoc(ProjectState), ctx))!.asks;
+		const open = Object.values(slots);
+		assert.equal(open.length, 1);
+		return harness.commit(async (tx) => {
+			const d = await decision(tx, open[0]!.decision);
+			assert.ok(d && d.status === "open");
+			assert.deepEqual(d.choices, ["resume", "cancel"]);
+			return { d, text: (await tx.entry(d.basis))?.data as { text: string } };
+		}, ctx);
+	}
+	async function resume(d: Awaited<ReturnType<typeof openHolding>>["d"]) {
+		const answer = await fauxAnswer(s.store, d.id, {
+			basis: d.basis,
+			choice: "resume",
+			annotations: [],
+		});
+		assert.equal(answer.kind, "answered");
+		await s.settle();
+	}
+	const first = await openHolding();
+	s.provider.setResponses([
+		fauxAssistantMessage(
+			[fauxToolCall("publish_plan", { items: [goal("writer", ["missing"])] })],
+			{ stopReason: "toolUse" },
+		),
+		noPlan,
+		noPlan,
+	]);
+	await resume(first.d);
+	const stalled = await openHolding();
+	assert.match(stalled.text.text, /I could not publish a plan/);
+	assert.match(stalled.text.text, /A dependency is missing from the plan\./);
+
+	s.provider.setResponses([noPlan, noPlan]);
+	await resume(stalled.d);
+	assert.doesNotMatch(
+		(await openHolding()).text.text,
+		/A dependency is missing from the plan\./,
+	);
 });
 
 test("a pending Verify checkout is progress for an unfinished build", async (t) => {
