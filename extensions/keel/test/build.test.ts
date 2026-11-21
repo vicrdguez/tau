@@ -416,7 +416,7 @@ test("worker input passes the item's path fences and triggers a premise check on
 	const expectation = () => b.agent("worker").expects[0]!;
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	assert.notEqual(expectation().situation, "survived_fix");
-	assert.deepEqual(expectation().projectPrinciples, policy);
+	assert.deepEqual(b.agent("worker").projectPrinciples, policy);
 	assert.deepEqual(b.pub().send![0]!.event.paths, [
 		"src/money/tick.ts",
 		"tests/tie.ts",
@@ -432,7 +432,7 @@ test("worker input passes the item's path fences and triggers a premise check on
 	b.pub(undefined, ["tie"]);
 	b.send(back);
 	assert.equal(expectation().situation, "survived_fix");
-	assert.deepEqual(expectation().projectPrinciples, policy);
+	assert.deepEqual(b.agent("worker").projectPrinciples, policy);
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	b.pub(undefined, ["tie"]);
 	b.send({ ...back, kind: "integration" });
