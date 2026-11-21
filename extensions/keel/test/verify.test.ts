@@ -251,6 +251,10 @@ test("verifier notes file their own evidence against the tested commit and nodes
 	);
 	assert.equal(filing.text, "monitor latency");
 	assert.match(String(filing.report), /totals now balance/);
+	assert.deepEqual(check.send?.find((m) => m.lane === "build")?.event, {
+		kind: "item_verified",
+		item: "bug",
+	});
 	x.clean();
 	assert.equal(x.effect("merge_item").op.item, "note-head");
 });
@@ -319,6 +323,36 @@ test("a classified item hold gates verifier tools and keeps siblings running unt
 	const resumed = x.agents().find((a) => a.key === first.key)!;
 	assert.notEqual(resumed.expects[0]?.token, first.expects[0]?.token);
 	assert.match(resumed.expects[0]!.input!(), /inspect the test/);
+});
+
+test("diagnosed rework waits for the last queue hold regardless of answer order", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	x.fail();
+	for (const sha of ["fix-a", "fix-b"]) {
+		x.publish(sha, ["totals"]);
+		x.clean();
+		x.checkout();
+		x.fail();
+	}
+	const diagnosis = x.call(
+		{
+			kind: "diagnosis",
+			premise: "No rounding before posting",
+			test: "Compare both totals",
+			result: "Pre-posting rounding differs",
+		},
+		"diagnoser",
+	);
+	const local = diagnosis.send?.find((m) => m.lane === "queue")!.event;
+	x.apply(findingHold("boundary"));
+	assert.deepEqual(x.apply(resume(local!)).send, []);
+	const result = x.apply({ kind: "queue_release", cause: "boundary" });
+	const update = result.send?.find((m) => m.lane === "build")?.event;
+	assert.equal(update?.kind, "rework");
+	assert.match(String(update?.evidence), /Pre-posting rounding differs/);
+	assert.match(String(update?.direction), /test the premise/);
 });
 
 test("a held unclaimed checkout does not start; drop restores its immutable plan", () => {
