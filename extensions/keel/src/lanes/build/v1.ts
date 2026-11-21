@@ -99,6 +99,7 @@ type V1 = {
 		seq: number;
 		finding: boolean;
 		revising: boolean;
+		replanning: boolean;
 		pendingDirection: string;
 		reason: {
 			inheritedTrunk: Sha | null;
@@ -190,6 +191,7 @@ export const buildV1 = {
 			seq: 0,
 			finding: false,
 			revising: false,
+			replanning: false,
 			reason: null,
 			pendingDirection: "",
 			direction: "",

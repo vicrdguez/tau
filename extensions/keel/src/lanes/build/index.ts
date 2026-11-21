@@ -34,7 +34,9 @@ import {
 	addQueueHold,
 	applyRevision,
 	releaseQueueHold,
+	replan,
 	revisionPlanHold,
+	waitingPicture,
 } from "./live-plan.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
@@ -261,7 +263,9 @@ function holdingMessage(s: Build, w: World, h: Build["holds"][number]) {
 								.trim()
 						: item
 							? resumption.worker
-							: resumption.coordinator;
+							: obstruction === "waiting"
+								? resumption.replan
+								: resumption.coordinator;
 	return fileHolding({
 		work: w.work!,
 		lane: "build",
@@ -411,7 +415,8 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				agent.role === "coordinator"
 					? null
 					: s.items.find((i) => workerKey(i) === agent.key)!.id;
-			return hold(s, w, id, "stall", `${agent.key} ${e.cause}: ${e.lastWords}`);
+			const stalled = `${agent.key} ${e.cause}: ${e.lastWords}`;
+			return hold(s, w, id, "stall", id ? stalled : waitingPicture(s, stalled));
 		}
 
 		case "answered":
@@ -536,6 +541,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				coordinator(s, null);
 				schedule(s, w);
 				return activation;
+			}
+			if (c.replanning) {
+				const reject = replan(s, e.items, replies);
+				if (reject) return { reject };
+				c.replanning = false;
+				coordinator(s, null);
+				break;
 			}
 			const reject = validatePlan(s, e.items, replies);
 			if (reject) return { reject };
@@ -785,6 +797,10 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				c.pendingDirection = [c.pendingDirection, direction]
 					.filter(Boolean)
 					.join("\n");
+				if (h.obstruction === "waiting") {
+					c.replanning = true;
+					coordinator(s, "publish_plan");
+				}
 			}
 			if (!i) {
 				s.coordinator.seq = ++s.seq;
@@ -813,6 +829,19 @@ const build: Lane<Build> = {
 	state: buildDoc,
 	reduce: (s, e, w) => reduce(structuredClone(s), e as Event, w),
 	onFact: (s, e, w) => onFact(structuredClone(s), e, w),
+	onIdle: (s, w) =>
+		s.phase === "active"
+			? hold(
+					structuredClone(s),
+					w,
+					null,
+					"waiting",
+					waitingPicture(
+						s,
+						"No agent, operation or decision can move this build.",
+					),
+				)
+			: undefined,
 	agents,
 	view: buildView,
 	asks: () => [],

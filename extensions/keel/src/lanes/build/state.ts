@@ -103,6 +103,7 @@ export type Build = {
 		seq: number;
 		finding: boolean;
 		revising: boolean;
+		replanning: boolean;
 		pendingDirection: string;
 		reason: {
 			inheritedTrunk: Sha | null;
@@ -151,6 +152,7 @@ export const buildDoc = defineState({
 			seq: 0,
 			finding: false,
 			revising: false,
+			replanning: false,
 			reason: null,
 			pendingDirection: "",
 			direction: "",

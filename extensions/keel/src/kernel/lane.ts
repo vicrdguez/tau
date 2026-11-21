@@ -44,11 +44,15 @@ export type Ask = {
 	title: string;
 	basis: string;
 	choices: readonly [string, ...string[]];
+	/** For project decisions: works that depend on this answer. */
+	works?: readonly (WorkId | null)[];
 };
 /** A token identifies one situation in this conversation. Use a new sequence on re-entry. */
 export type Expectation = {
 	token: Token;
 	tools: readonly string[];
+	/** For project agents: works that depend on this turn. */
+	works?: readonly (WorkId | null)[];
 	/** Facts for the composition root's input policy, never inferred from input text. */
 	situation?: string;
 	paths?: readonly string[];
@@ -106,6 +110,8 @@ export interface Lane<S extends JsonObject> {
 	workInHand?(state: S, event: LaneEvent | KernelEvent): WorkId | null;
 	reduce(state: S, event: LaneEvent, world: World): Reduction<S>;
 	onFact(state: S, fact: KernelEvent, world: World): Accepted<S>;
+	/** Called after routing when this work has no declared action or decision left. */
+	onIdle?(state: S, world: World): Accepted<S> | undefined;
 	view(state: S): unknown;
 	asks: (state: S, facts: StaticFacts) => readonly Ask[];
 	agents: (state: S, facts: StaticFacts) => readonly AgentDecl[];

@@ -115,22 +115,27 @@ export function releaseQueueHold(
 export const record = (i: Item) =>
 	i.verified || i.stage === "cleaning" || i.stage === "merged";
 
-function revisionPlan(
+function replacementPlan(
 	s: Build,
-	p: RevisionProposal,
+	p: RevisionProposal | null,
 	goals: Goal[],
 	replies: Reply[],
 ) {
-	if (!repliesCover(p.mandate.approvalNotes.length, replies))
+	if (!repliesCover(p?.mandate.approvalNotes.length ?? 0, replies))
 		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
 	const graph =
 		validateGraph([], goals) ??
-		validateDependencies(s, goals, goals, [...p.causes, revisionPlanHold]);
+		validateDependencies(
+			s,
+			goals,
+			goals,
+			p ? [...p.causes, revisionPlanHold] : [],
+		);
 	if (graph) return graph;
 	const byId = new Map(goals.map((g) => [g.id, g]));
 	const oldIds = new Set(s.items.map((i) => i.id));
 	const newGoals = goals.filter((g) => !oldIds.has(g.id));
-	const labels = new Set(mandateLabels(p.mandate));
+	const labels = new Set(mandateLabels(p?.mandate ?? s.mandate!));
 	for (const i of s.items) {
 		const removed = i.brief?.nodes.find((n) => !labels.has(n));
 		if (removed)
@@ -139,13 +144,18 @@ function revisionPlan(
 		const g = byId.get(i.id);
 		if (!g || g.kind !== i.kind || g.goal !== i.goal)
 			return `Keep the started item ${i.id} unchanged. Edit only unstarted goals.`;
-		const affected = affects(i, p.nodes);
+		const affected = !p || affects(i, p.nodes);
 		const depsChanged =
 			g.deps.length !== i.deps.length ||
 			g.deps.some((id, n) => id !== i.deps[n]);
 		if (depsChanged && (record(i) || !affected || !queueHeld(s, i)))
 			return `Keep the dependencies of ${i.id}. Only a held, affected item that has not been verified can change dependencies.`;
-		if (affected && record(i) && !newGoals.some((g) => g.deps.includes(i.id)))
+		if (
+			p &&
+			affected &&
+			record(i) &&
+			!newGoals.some((g) => g.deps.includes(i.id))
+		)
 			return `Add a new correction that depends on verified item ${i.id}; keep its record intact.`;
 	}
 	for (const f of s.findings) {
@@ -164,6 +174,41 @@ function revisionPlan(
 	return null;
 }
 
+export function replan(s: Build, goals: Goal[], replies: Reply[]) {
+	const reject = replacementPlan(s, null, goals, replies);
+	if (reject) return reject;
+	const old = new Map(s.items.map((i) => [i.id, i]));
+	s.items = goals.map((g) => ({ ...(old.get(g.id) ?? newItem(g)), ...g }));
+	return null;
+}
+
+export function waitingPicture(s: Build, waiting: string) {
+	const headline = (evidence: string) =>
+		evidence
+			.split("\n")
+			.find((line) => line.startsWith("### Finding #"))
+			?.slice(4) ?? evidence.split("\n", 1)[0];
+	return [
+		waiting,
+		...s.items
+			.filter((i) => i.stage !== "merged")
+			.map((i) => {
+				const waits = s.queueHolds
+					.filter((h) => queueMatches(h, i))
+					.map((h) => {
+						const planned = s.findings.find((f) => f.cause === h.cause);
+						return `${headline(planned?.text || h.evidence || s.revision?.text || h.cause)}${planned?.items.length ? ` (waiting for ${planned.items.join(", ")} to merge)` : ""}`;
+					});
+				waits.push(
+					...s.holds
+						.filter((h) => h.item === i.id)
+						.map((h) => headline(h.evidence) || h.cause),
+				);
+				return `- ${i.id} (${i.stage}): ${waits.length ? `held by ${waits.join("; ")}` : "no hold"}; depends on ${i.deps.join(", ") || "nothing"}.`;
+			}),
+	].join("\n");
+}
+
 export function applyRevision(
 	s: Build,
 	goals: Goal[],
@@ -171,7 +216,7 @@ export function applyRevision(
 	w: World,
 ): Reduction<Build> {
 	const p = s.revision!;
-	const reject = revisionPlan(s, p, goals, replies);
+	const reject = replacementPlan(s, p, goals, replies);
 	if (reject) return { reject };
 	const old = new Map(s.items.map((i) => [i.id, i]));
 	const evidence = p.text || `Changed Mandate nodes: ${p.nodes.join(", ")}`;

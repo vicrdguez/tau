@@ -804,6 +804,10 @@ function triageBasis(
 	});
 }
 
+// A queued investigation depends on the investigator finishing the head first.
+const queuedWorks = (q: Queue) =>
+	q.entries.filter((f) => f.status === "filed").map((f) => f.intake.work);
+
 export function asks(q: Queue): Ask[] {
 	const out: Ask[] = decisions(q).map((first) => {
 		const basis = first.basis!;
@@ -812,6 +816,7 @@ export function asks(q: Queue): Ask[] {
 			title: basis.split("\n", 1)[0]!,
 			basis,
 			choices: choices(first.investigation!.classification),
+			works: decisionMembers(q, first.id).map((f) => f.intake.work),
 		};
 	});
 	const f = pending(q);
@@ -826,6 +831,7 @@ export function asks(q: Queue): Ask[] {
 			title: basis.split("\n", 1)[0]!,
 			basis,
 			choices: ["resume", "cancel"],
+			works: queuedWorks(q),
 		});
 	}
 	return out;
@@ -887,6 +893,7 @@ export function agents(q: Queue): AgentDecl[] {
 							{
 								token: turn(f, q),
 								tools: ["report_investigation"],
+								works: queuedWorks(q),
 								situation: "investigate",
 								input: () => investigationText(q, f),
 							},

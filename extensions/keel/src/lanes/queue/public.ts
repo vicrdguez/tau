@@ -13,6 +13,7 @@ export const resumption = {
 	occupied: action("occupied"),
 	worker: action("worker"),
 	coordinator: action("coordinator"),
+	replan: action("replan"),
 	trunk: action("trunk"),
 	diagnosis: action("diagnosis"),
 	pinned: prose(dir, "pinned.md", ["operation"]),

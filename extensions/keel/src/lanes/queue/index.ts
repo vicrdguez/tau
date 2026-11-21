@@ -319,6 +319,7 @@ export const queueLane = defineLane(
 						title: basis.split("\n", 1)[0] ?? basis,
 						basis,
 						choices: ["resume", "cancel"] as const,
+						works: [f.work],
 					};
 				}),
 			...triage.asks(state.triage),

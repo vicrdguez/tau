@@ -28,6 +28,10 @@ const correction = prose(dir, "../../prose/inputs/build/correction.md", [
 	"reason",
 	"plan",
 ]);
+const replan = prose(dir, "../../prose/inputs/build/replan.md", [
+	"plan",
+	"direction",
+]);
 const discover = prose(dir, "../../prose/inputs/build/discovered.md", [
 	"mandate",
 	"findings",
@@ -194,6 +198,8 @@ function coordInput(s: Build) {
 			: "";
 	switch (c.tool) {
 		case "publish_plan": {
+			if (c.replanning)
+				return replan({ plan: planRecord(), direction: c.direction });
 			if (c.revising) {
 				const p = s.revision!;
 				const list = (includes: (item: Item) => boolean) =>
