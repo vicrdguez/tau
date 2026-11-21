@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
-import { mandateLabels } from "../src/lanes/design/public.ts";
+import * as mandate from "../src/lanes/design/public.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const world: World = {
@@ -61,11 +61,25 @@ const draft = {
 		{ label: "C1", ruling: "ADR governs the glossary." },
 	],
 	checks: [{ id: "P1", argv: ["check", "same IR"], timeoutMs: 90 }],
-	protectedPaths: ["tests/**"],
 	riders: [
-		{ label: "A", text: "Validate at close.", origin: "evidence" },
-		{ label: "B", text: "Sort imports.", origin: "incidental" },
-		{ label: "C", text: "Seal regions.", origin: "seeded" },
+		{
+			label: "A",
+			text: "Validate at close.",
+			origin: "evidence",
+			disposition: "bind",
+		},
+		{
+			label: "B",
+			text: "Sort imports.",
+			origin: "incidental",
+			disposition: "open",
+		},
+		{
+			label: "C",
+			text: "Seal regions.",
+			origin: "seeded",
+			disposition: "bind",
+		},
 	],
 	references: [{ label: "P1", source: "Proof ADR" }],
 };
@@ -135,7 +149,7 @@ test("Ground requires an audit and unique observations before opening the design
 	])
 		assert.ok(x.input().includes(value));
 });
-test("a draft needs every Ground ruling, unique labels, callers, usage and signature, probes, proof, alternatives and origins", () => {
+test("a draft needs every Ground ruling, unique labels, callers, fenced code, probes, proof, alternatives and rider dispositions", () => {
 	const x = run();
 	x.act(start);
 	for (const patch of [
@@ -148,6 +162,7 @@ test("a draft needs every Ground ruling, unique labels, callers, usage and signa
 		{ checks: [{ ...draft.checks[0], timeoutMs: 0 }] },
 		{ alternatives: " " },
 		{ riders: [{ ...draft.riders[0], origin: "owner" }] },
+		{ riders: [{ ...draft.riders[0], disposition: "undecided" }] },
 		{ riders: [{ ...draft.riders[0], label: "S1" }] },
 		{ references: [{ label: "G1", source: "a pattern" }] },
 	])
@@ -161,15 +176,23 @@ test("a draft needs every Ground ruling, unique labels, callers, usage and signa
 			JSON.stringify(patch),
 		);
 });
-test("one annotatable Mandate shows Ground rulings, usage before signatures, determined context and three separate rider decisions", () => {
+test("one annotatable Mandate names the goal and reviews all nodes and rider dispositions on one decision", () => {
 	const x = review();
-	const [main, ...riders] = x.asks();
+	assert.equal(x.asks().length, 1);
+	const [main] = x.asks();
+	assert.ok(main!.title.includes(draft.intent));
 	assert.deepEqual(main!.choices, ["approve", "rework", "decline"]);
-	assert.deepEqual(
-		riders.map((a) => a.choices),
-		Array(3).fill(["accept", "leave_open", "design"]),
-	);
 	const basis = main!.basis;
+	assert.match(basis, /approv\w*[^\n]*nodes[^\n]*even[^\n]*reference/i);
+	assert.match(basis, /### P1: Proof \(new\)/i);
+	assert.match(
+		basis,
+		/## Riders[\s\S]*A: Rider \(new\)[\s\S]*Origin: evidence[\s\S]*Disposition: bind/,
+	);
+	assert.match(
+		basis,
+		/B: Rider \(new\)[\s\S]*Origin: incidental[\s\S]*Disposition: open/,
+	);
 	for (const value of [
 		audit.exists,
 		audit.gaps[0]!.text,
@@ -184,16 +207,13 @@ test("one annotatable Mandate shows Ground rulings, usage before signatures, det
 		draft.alternatives,
 		"same IR",
 		"90",
-		"tests/**",
-		".keel/**",
 		"Proof ADR",
 		...draft.riders.map((r) => r.text),
 	])
 		assert.ok(basis.includes(value), value);
 	assert.ok(basis.indexOf(seam.usage) < basis.indexOf(seam.signature));
-	assert.ok(!x.state().rounds[0]!.labels.includes("P1"));
 });
-test("approving with outstanding riders cannot bind; acceptance and delegation settle only their own rider", () => {
+test("approving binds riders proposed to bind, delegates open riders and preserves anchored notes exactly once", () => {
 	const x = review();
 	const anchor = x.asks()[0]!.basis.indexOf(rule.probe);
 	const approved = x.answer("mandate/1", "approve", [
@@ -203,18 +223,16 @@ test("approving with outstanding riders cannot bind; acceptance and delegation s
 			range: { start: anchor, end: anchor + rule.probe.length },
 		},
 	]);
-	assert.equal(approved.send?.length ?? 0, 0);
-	assert.equal(x.state().mandate, null);
-	assert.equal(x.asks().length, 3);
-	x.answer("rider/1/A", "accept");
-	x.answer("rider/1/B", "leave_open");
-	const result = x.answer("rider/1/C", "accept");
-	assert.equal(result.send?.length, 1);
+	assert.equal(approved.send?.length, 1);
+	assert.deepEqual(x.asks(), []);
 	const m = x.state().mandate!;
-	assert.equal(m.reviewed, true);
+	assert.deepEqual(approved.send?.[0]?.event.mandate, m);
 	assert.equal(m.encodeRequired, true);
 	assert.deepEqual(m.approvalNotes, [`Use exact counts.\n> ${rule.probe}`]);
-	assert.deepEqual(m.delegated, [{ label: "B", text: "Sort imports." }]);
+	assert.deepEqual(
+		m.delegated.map(({ label, text }) => ({ label, text })),
+		[{ label: "B", text: "Sort imports." }],
+	);
 	assert.deepEqual(
 		m.nodes.find((n) => n.label === "R1"),
 		rule,
@@ -223,13 +241,46 @@ test("approving with outstanding riders cannot bind; acceptance and delegation s
 	assert.ok(
 		s && "section" in s && s.section === "Seam" && s.body.includes(seam.usage),
 	);
-	const labels = mandateLabels(m);
-	for (const l of ["S1", "R1", "A", "C", "G1", "C1"])
+	const labels = mandate.mandateLabels(m);
+	for (const l of ["S1", "R1", "A", "C", "G1", "C1", "P1"])
 		assert.ok(labels.includes(l));
-	assert.ok(!labels.includes("B"));
-	assert.equal(x.answer("rider/1/C", "accept").send?.length ?? 0, 0);
+	for (const l of ["B", "tradeoffs", "alternatives"])
+		assert.ok(!labels.includes(l));
+	const before = x.state();
+	assert.equal(x.answer("mandate/1", "approve").send?.length ?? 0, 0);
+	assert.deepEqual(x.state(), before);
 });
-test("accepting an incidental choice does not manufacture an Encode obligation without a seam or rule", () => {
+test("the bound Mandate is a document with settled rulings, readable code and nonbinding design context", () => {
+	const x = review();
+	x.answer("mandate/1", "approve");
+	const m = x.state().mandate!;
+	assert.ok(
+		"renderMandate" in mandate && typeof mandate.renderMandate === "function",
+		"Design must expose a readable bound Mandate renderer",
+	);
+	const text = mandate.renderMandate(m);
+	assert.match(text, /Ruling: Add a builder\./);
+	assert.doesNotMatch(text, /Proposed|Owner-reviewed/);
+	assert.ok(text.includes(seam.usage));
+	assert.ok(text.includes(seam.signature));
+	assert.ok(text.includes('["check","same IR"]'));
+	assert.match(
+		text,
+		/## Binding nodes[\s\S]*Validate at close\.[\s\S]*## Delegated riders[\s\S]*Sort imports\.[\s\S]*## Design considerations/,
+	);
+	assert.ok(
+		text.indexOf(draft.tradeoffs) > text.indexOf("## Design considerations"),
+	);
+	assert.ok(
+		text.indexOf(draft.alternatives) > text.indexOf("## Design considerations"),
+	);
+	const brief = mandate.renderMandate(m, ["S1", "A"]);
+	assert.ok(brief.includes(seam.usage));
+	assert.ok(brief.includes("Validate at close."));
+	assert.ok(!brief.includes("Sort imports."));
+	assert.ok(!brief.includes(draft.tradeoffs));
+});
+test("binding an incidental rider does not manufacture an Encode obligation without a seam or rule", () => {
 	const x = run();
 	x.act({
 		...start,
@@ -240,20 +291,20 @@ test("accepting an incidental choice does not manufacture an Encode obligation w
 		seams: [],
 		nodes: [],
 		settlements: [],
-		riders: [draft.riders[1]!],
+		riders: [{ ...draft.riders[1]!, disposition: "bind" }],
 	});
-	x.answer("rider/1/B", "accept");
 	x.answer("mandate/1", "approve");
 	const m = x.state().mandate!;
-	assert.ok(mandateLabels(m).includes("B"));
+	assert.ok(mandate.mandateLabels(m).includes("B"));
 	assert.equal(m.encodeRequired, false);
 });
-test("rework preserves ranges and refuses missing, duplicate, extra, invalid or empty replies; a removed rider's answer is stale", () => {
+test("rework preserves ranges and refuses missing, duplicate, extra, invalid or empty replies; an old round's answer is stale", () => {
 	const x = review();
 	const annotations = [note(1, "Prefer native."), note(2, "Explain the cost.")];
 	x.answer("mandate/1", "rework", annotations);
 	assert.deepEqual(x.asks(), []);
 	for (const n of annotations) assert.ok(x.input().includes(n.text));
+	assert.doesNotMatch(x.input(), /Approve the Mandate|Annotate this document/i);
 	const revised = { ...draft, riders: draft.riders.slice(0, 2) };
 	for (const replies of [
 		[reply(1)],
@@ -280,97 +331,98 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 	const basis = x.asks()[0]!.basis;
 	for (const n of annotations) assert.ok(basis.includes(n.text));
 	assert.ok(basis.includes(reply(1).reason));
+	assert.match(basis, /1\. Prefer native\. \[1:4\]\n> /);
 	const before = x.state();
-	x.answer("rider/1/C", "accept");
+	x.answer("mandate/1", "approve");
 	assert.deepEqual(x.state(), before);
 });
-test("a redesigned rider and changed node need approval again; unchanged nodes and rider dispositions carry across rounds", () => {
+test("a revision marks changed and new nodes and riders, and shows removed content separately", () => {
 	const x = review();
-	x.answer("mandate/1", "approve", [note(1, "Old approval note.")]);
-	x.answer("rider/1/A", "accept");
-	x.answer("rider/1/B", "leave_open");
-	const riderBasis = x.asks().find((a) => a.subject === "rider/1/C")!.basis;
-	const from = riderBasis.indexOf("Seal regions.");
-	x.answer("rider/1/C", "design", [
-		{
-			n: 1,
-			text: "Separate close from seal.",
-			range: { start: from, end: from + 4 },
-		},
-	]);
-	assert.ok(x.input().includes("Separate close from seal."));
-	assert.ok(x.input().includes("Seal regions."));
-	assert.match(x.input(), /> Seal\n/);
-	assert.ok(
-		"reject" in
-			x.reduce({
-				kind: "publish_mandate",
-				draft: { ...draft, riders: [] },
-				replies: [reply(1)],
-			}),
-	);
-	const revised = {
-		...draft,
-		riders: draft.riders.slice(0, 2),
-		nodes: [rule, { ...rule, label: "C", rule: "Seal explicitly." }],
-		seams: [{ ...seam, owner: "Native IR" }],
-	};
-	x.publish(revised, [reply(1)]);
-	assert.deepEqual(
-		x.asks().map((a) => a.subject),
-		["mandate/2"],
-	);
-	assert.deepEqual([...x.state().rounds[1]!.labels].sort(), ["C", "S1"]);
-	assert.ok(x.asks()[0]!.basis.includes("Native IR"));
-	assert.match(x.asks()[0]!.basis, /A \(evidence; accept\)/);
-	assert.match(x.asks()[0]!.basis, /B \(incidental; leave_open\)/);
-	assert.match(x.asks()[0]!.basis, /> Seal\n/);
-	x.answer("mandate/2", "approve", [note(1, "New approval note.")]);
-	assert.deepEqual(x.state().mandate!.approvalNotes, [
-		"Old approval note.\n> ppr",
-		"New approval note.\n> ppr",
-	]);
-});
-test("a changed rider needs a fresh disposition; a delegated or pending rider cannot silently become a binding node", () => {
-	const x = review();
-	x.answer("rider/1/A", "accept");
-	x.answer("rider/1/B", "leave_open");
 	x.answer("mandate/1", "rework");
-	const newRule = { ...rule, label: "B" };
-	assert.ok(
-		"reject" in
-			x.reduce({
-				kind: "publish_mandate",
-				draft: { ...draft, riders: [], nodes: [rule, newRule] },
-				replies: [],
-			}),
-	);
 	x.publish({
 		...draft,
+		seams: [{ ...seam, owner: "Native IR" }],
+		nodes: [
+			{
+				label: "R2",
+				rule: "Explicit construction.",
+				probe: "Count constructors.",
+			},
+		],
 		riders: [
-			{ ...draft.riders[0]!, text: "Validate every operation." },
-			...draft.riders.slice(1),
+			draft.riders[0]!,
+			{ ...draft.riders[1]!, disposition: "bind" },
+			{
+				label: "D",
+				text: "Use builders.",
+				disposition: "open",
+				origin: "evidence",
+			},
+		],
+		references: [
+			{ label: "P1", source: "Revised proof ADR" },
+			{ label: "R2", source: "Construction ADR" },
 		],
 	});
-	assert.ok(x.asks().some((a) => a.subject === "rider/2/A"));
-	assert.ok(!x.asks().some((a) => a.subject === "rider/2/B"));
+	const [ask] = x.asks();
+	assert.equal(ask!.subject, "mandate/2");
+	const [current, removed] = ask!.basis.split(
+		"## Removed since the last round",
+	);
+	assert.match(current!, /S1: Seam \(changed\)/i);
+	assert.match(current!, /P1: Proof \(changed\)/i);
+	assert.match(current!, /R2: Rule \(new\)[\s\S]*Reference: Construction ADR/i);
+	assert.match(current!, /B: Rider \(changed\)[\s\S]*Disposition: bind/i);
+	assert.match(current!, /D: Rider \(new\)[\s\S]*Disposition: open/i);
+	assert.doesNotMatch(current!, /A: Rider \(|\bR1\b|\bC: Rider\b/i);
+	assert.match(
+		removed!,
+		/R1: Rule[\s\S]*One representation\.[\s\S]*Count the encodings\./,
+	);
+	assert.match(removed!, /C: Rider[\s\S]*Seal regions\./);
+	assert.equal(x.state().mandate, null);
+	x.answer("mandate/2", "approve");
+	assert.ok(mandate.mandateLabels(x.state().mandate!).includes("R2"));
 });
-test("decline records every numbered annotation as not pursued and withdraws every turn and decision", () => {
+test("decline records every still-owed annotation, not already answered notes, and withdraws all work", () => {
 	const x = review();
+	x.answer("mandate/1", "rework", [note(1, "Already addressed.")]);
+	x.publish(draft, [reply(1)]);
 	const annotations = [note(1, "Too much surface."), note(2, "No caller.")];
-	const r = x.answer("mandate/1", "decline", annotations);
+	const r = x.answer("mandate/2", "decline", annotations);
 	assert.equal(r.send?.length ?? 0, 0);
 	assert.equal(x.state().phase, "closed");
 	assert.deepEqual(x.asks(), []);
 	assert.equal(x.input(), "");
 	assert.deepEqual(design.effects(x.state(), world), []);
 	assert.equal(x.state().mandate, null);
+	assert.doesNotMatch(r.notes?.[0]?.text ?? "", /Already addressed/);
 	for (const n of annotations)
 		assert.ok(
 			r.notes?.some(
 				(m) => m.text.includes(n.text) && /not pursued/i.test(m.text),
 			),
 		);
+});
+test("decline writes still-owed approval notes from earlier rounds, with each round identified", () => {
+	const x = review();
+	x.answer("mandate/1", "rework");
+	x.publish();
+	// An earlier approving answer exists in saved history but was not handed to Build.
+	const prior = x.state().rounds[0]!.answer!;
+	prior.choice = "approve";
+	prior.annotations = [
+		{ n: 1, text: "Older approval note.", range: null, excerpt: null },
+	];
+	const r = x.answer("mandate/2", "decline", [note(1, "New reason.")]);
+	assert.match(
+		r.notes?.[0]?.text ?? "",
+		/Round 1[\s\S]*1\. Older approval note\.[^\n]*not pursued/i,
+	);
+	assert.match(
+		r.notes?.[0]?.text ?? "",
+		/Round 2[\s\S]*1\. New reason\.[^\n]*not pursued/i,
+	);
 });
 test("a stopped draft resumes with its annotation debt under a new draft token, never as Ground", () => {
 	const x = review();

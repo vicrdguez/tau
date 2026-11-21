@@ -31,7 +31,6 @@ const mandate = {
 		},
 	],
 	checks: [{ id: "P1", argv: ["env", "test"], timeoutMs: 5000 }],
-	protectedPaths: ["test/orders/**", ".keel/**"],
 };
 const bound = {
 	kind: "ground",
@@ -62,7 +61,6 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 				mandate: {
 					...mandate,
 					delegated: [],
-					reviewed: false,
 					encodeRequired: false,
 					approvalNotes: [],
 				},
@@ -74,7 +72,6 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 	assert.deepEqual(state.mandate, {
 		...mandate,
 		delegated: [],
-		reviewed: false,
 		encodeRequired: false,
 		approvalNotes: [],
 	});
@@ -84,31 +81,6 @@ test("a precedent-following Mandate binds once under the prompt without an owner
 	);
 	assert.ok("reject" in design.reduce(state, bound, world));
 });
-test("the bound protected paths always include the project's verifier playbooks and principles", () => {
-	const { state, send } = advance({
-		...bound,
-		mandate: { ...mandate, protectedPaths: ["test/orders/**"] },
-	});
-	assert.deepEqual(state.mandate?.protectedPaths, [
-		"test/orders/**",
-		".keel/**",
-	]);
-	assert.deepEqual(send?.[0]?.event.mandate, state.mandate);
-});
-test("Ground under prompt authority never grants a self-declared Mandate review", () => {
-	const { state } = advance({
-		...bound,
-		mandate: { ...mandate, reviewed: true },
-	});
-	assert.deepEqual(state.mandate, {
-		...mandate,
-		delegated: [],
-		reviewed: false,
-		encodeRequired: false,
-		approvalNotes: [],
-	});
-});
-
 test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
 	for (const e of [
 		{ ...bound, reference: " " },
@@ -158,6 +130,7 @@ test("an ambiguity needs distinct readings; the current answer supplies the read
 	assert.deepEqual(send ?? [], []);
 	const [ask] = design.asks(state, world);
 	assert.ok(ask);
+	assert.ok(ask.title.includes(ambiguous.reference));
 	for (const reading of ambiguous.readings)
 		assert.ok(ask.basis.includes(reading));
 	const answer = {
@@ -272,6 +245,7 @@ test("a standing desk request asks once without cancelling; only a current confi
 	assert.deepEqual(requested.send ?? [], []);
 	const [ask] = design.asks(requested.state, world);
 	assert.ok(ask);
+	assert.ok(ask.title.includes(mandate.intent));
 	assert.ok(ask.basis.includes(mandate.intent));
 	assert.match(ask.title, /\?$/);
 	assert.doesNotMatch(ask.title, /[.!?]\?$/);
