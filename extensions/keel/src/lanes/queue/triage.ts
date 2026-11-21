@@ -783,6 +783,28 @@ export function agents(q: Queue): AgentDecl[] {
 	];
 }
 
+export function findingSummary(q: Queue, work: WorkId) {
+	const disposition = (f: Finding) =>
+		f.disposition ??
+		(
+			{
+				filed: "open: awaiting investigation",
+				triage: "open: awaiting triage",
+				revision_pending: "open: awaiting Mandate revision",
+			} as Partial<Record<Finding["status"], string>>
+		)[f.status] ??
+		f.status;
+	return q.entries
+		.filter((f) => f.intake.work === work)
+		.map((f) => {
+			const original = q.entries.find(
+				(entry) => entry.id === f.investigation?.duplicateOf,
+			);
+			const status = disposition(f);
+			return `- Finding #${f.id}: ${f.intake.text} (${original && f.status === "duplicate" ? `duplicate of #${original.id}: ${disposition(original)}` : status})`;
+		});
+}
+
 export function workFor(
 	q: Queue,
 	e: LaneEvent | KernelEvent,

@@ -42,6 +42,8 @@ const handover = prose(dir, "documents/handover.md", [
 	"risk",
 	"diagnoses",
 	"directions",
+	"revisions",
+	"findings",
 	"approvalReplies",
 	"base",
 ]);
@@ -196,6 +198,8 @@ export function asks(s: State): Ask[] {
 						.join("\n") || "None.",
 
 				diagnoses: s.diagnoses.join("\n") || "None.",
+				revisions: h.revisions || "None.",
+				findings: h.findings || "None.",
 			}),
 		},
 	];

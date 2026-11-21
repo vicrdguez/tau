@@ -614,6 +614,12 @@ export const design: Lane<State> = {
 	view: (s) => ({
 		mandate: s.mandate,
 		reference: s.reference,
+		revisionSummary: s.revisions
+			.flatMap((r, i) => {
+				if (r.phase !== "applied") return [];
+				return [`- Revision ${i + 1}: ${r.rounds.at(-1)!.nodes.join(", ")}`];
+			})
+			.join("\n"),
 		experimentEvidence: s.rounds.at(-1)?.evidence ?? [],
 		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
 			(r) => (r.answer ? [r.answer] : []),

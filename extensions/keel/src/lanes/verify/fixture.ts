@@ -153,6 +153,8 @@ type V1 = {
 		unchanged: boolean;
 		status: "asking" | "accepted" | "rejected";
 		missing: string[];
+		revisions: string;
+		findings: string;
 	} | null;
 };
 export const verifyFixture = {

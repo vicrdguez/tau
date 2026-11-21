@@ -112,6 +112,8 @@ export type State = {
 		unchanged: boolean;
 		status: "asking" | "accepted" | "rejected";
 		missing: string[];
+		revisions: string;
+		findings: string;
 	} | null;
 };
 export const queueHeld = (s: State, item: string) =>

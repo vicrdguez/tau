@@ -226,7 +226,18 @@ function transition(prev: State, world: World) {
 	}
 	function landed(sha: Sha, unchanged: boolean) {
 		release();
-		s.handover = { sha, unchanged, status: "asking", missing: [] };
+		const design = world.view("design") as { revisionSummary: string } | null;
+		const queue = world.view("queue") as {
+			findingsFor?: (id: typeof work) => string;
+		} | null;
+		s.handover = {
+			sha,
+			unchanged,
+			status: "asking",
+			missing: [],
+			revisions: design?.revisionSummary ?? "",
+			findings: queue?.findingsFor?.(work) ?? "",
+		};
 		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
 			`${s.cancelled ? "Cancelled work: " : ""}${unchanged ? "trunk unchanged at" : "landed on trunk at"} ${sha}`,

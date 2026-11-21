@@ -102,7 +102,7 @@ export const queueLane = defineLane(
 					state: {
 						...state.triage,
 						entries: state.triage.entries.map((f) =>
-							causes.includes(`queue/${f.id}`)
+							f.intake.work === event.work && causes.includes(`queue/${f.id}`)
 								? {
 										...f,
 										disposition,
@@ -223,6 +223,16 @@ export const queueLane = defineLane(
 		view: (state) => ({
 			approvedPatterns: state.triage.patterns.filter((p) => p.status === "blessed"),
 			investigation: pending(state.triage) ? state.triage.context : null,
+			findingsFor: (work: WorkId) =>
+				[
+					...triage.findingSummary(state.triage, work),
+					...state.findings
+						.filter((f) => f.work === work)
+						.map(
+							(f) =>
+								`- Holding finding (${f.lane}${f.item ? `/${f.item}` : ""}): ${f.evidence} (${f.status})`,
+						),
+				].join("\n"),
 		}),
 		agents: (state) => triage.agents(state.triage),
 		effects: () => [],
