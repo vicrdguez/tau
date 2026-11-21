@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
+import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { toy } from "./toy.ts";
+
+const seat = {
+	model: { provider: "faux", modelId: "faux-1" },
+	extensions: [],
+	tools: [],
+	instructions: "Answer the question.",
+};
+const job = { seat: "explorer", question: "What exists?" };
+
+for (const move of ["pause", "cancel"] as const) {
+	test(`an agent after ${move} cannot dispatch even if Tau runs its old tool list`, { timeout: 3000 }, async (t) => {
+		const x = await toy({ dispatch: { roles: ["worker"], resolve: () => seat } });
+		t.after(() => x.harness.close(ctx));
+		await x.send("manual");
+		const [id] = await x.agents();
+		assert.ok(id);
+		await x.send(move);
+		x.harness.resume();
+		await x.finish("keel.stop");
+		const worker = await x.harness.conversation(id, ctx);
+		assert.ok(worker);
+		x.provider.setResponses([
+			fauxAssistantMessage([fauxToolCall("dispatch", { jobs: [job] })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await worker.submit({ type: "input", content: "delegate" }, ctx);
+		await worker.waitForIdle(ctx);
+		const tool = (await x.tasks("pi.tool")).find((t) => t.conversationId === id);
+		assert.ok(tool);
+		const ret = (await worker.entries({}, 100, undefined, ctx)).items.flatMap(({ model }) => model ?? []).find((m) => m.role === "toolResult");
+		assert.ok(ret?.role === "toolResult" && ret.isError);
+		assert.match(JSON.stringify(ret.content), /not the active bound agent/);
+		assert.deepEqual((await x.harness.commit((tx) => tx.scanConversations({ ownerTaskId: tool.id }, 10), ctx)).items, []);
+	});
+}
+
+test("an effect runner joins the child of its task and can only report, not complete the task", { timeout: 3000 }, async (t) => {
+	const x = await toy({
+		async runEffect(_input, context, owner) {
+			assert.ok(!("commit" in owner));
+			const result = await owner.dispatch({ resolve: () => seat }, [job], context);
+			return { value: result[0]?.answer ?? "unanswered" };
+		},
+	});
+	t.after(() => x.harness.close(ctx));
+	await x.send("effect");
+	x.provider.setResponses([fauxAssistantMessage("a joined answer")]);
+	x.harness.resume();
+	await x.finish("keel.effect");
+	assert.deepEqual((await x.state()).facts, ["a joined answer"]);
+	const [effect] = await x.tasks("keel.effect");
+	assert.ok(effect);
+	assert.equal((await x.harness.commit((tx) => tx.scanConversations({ ownerTaskId: effect.id }, 10), ctx)).items.length, 1);
+});
