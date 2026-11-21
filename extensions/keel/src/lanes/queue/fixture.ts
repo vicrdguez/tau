@@ -56,7 +56,9 @@ type QueueV1 = {
 				| "deferred"
 				| "duplicate"
 				| "blessed"
-				| "cancelled";
+				| "cancelled"
+				| "revision_declined"
+				| "settled";
 			investigation: {
 				classification:
 					| "defect_in_scope"
@@ -74,6 +76,7 @@ type QueueV1 = {
 				duplicateOf: number | null;
 			} | null;
 			batch: number | null;
+			disposition: string | null;
 		}[];
 		patterns: { name: string; finding: number; evidence: string }[];
 		attempt: number;
@@ -138,6 +141,7 @@ export const queueFixture = {
 						duplicateOf: null,
 					},
 					batch: 1,
+					disposition: null,
 				},
 			],
 			patterns: [],

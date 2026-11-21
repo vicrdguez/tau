@@ -81,6 +81,27 @@ export const queueLane = defineLane(
 						)
 					: { reject: result.reject };
 			}
+			if (event.kind === "revision_disposition") {
+				const causes = event.causes as string[];
+				const disposition = String(event.disposition);
+				return withTriage(state, {
+					state: {
+						...state.triage,
+						entries: state.triage.entries.map((f) =>
+							causes.includes(`queue/${f.id}`)
+								? {
+										...f,
+										disposition,
+										status:
+											disposition === "revision declined"
+												? "revision_declined"
+												: "settled",
+									}
+								: f,
+						),
+					},
+				});
+			}
 			if (event.kind === "resolve_holding") {
 				const resolved = address(
 					event as HoldingAddress & { kind: "resolve_holding" },

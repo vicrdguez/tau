@@ -3,6 +3,8 @@ Revise your proposal for these affected labels: {{nodes}}. The bound Mandate sti
 Investigation:
 {{evidence}}
 
+Causes: {{causes}}. You may also name a cause the bound Mandate already settles with `revision_settled`.
+
 Bound Mandate:
 {{mandate}}
 

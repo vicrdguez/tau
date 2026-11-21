@@ -496,6 +496,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			s.revision = { ...e, text: e.text ?? "" };
 			yieldCoordinator(s);
 			break;
+		case "withdraw_revision":
+			s.revision = null;
+			if (s.coordinator.revising) {
+				s.coordinator.revising = false;
+				coordinator(s, null);
+			}
+			break;
 		case "plan": {
 			const c = s.coordinator;
 			if (c.tool !== "publish_plan" || held(s, null))

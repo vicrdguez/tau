@@ -74,7 +74,9 @@ export type Status =
 	| "deferred"
 	| "duplicate"
 	| "blessed"
-	| "cancelled";
+	| "cancelled"
+	| "revision_declined"
+	| "settled";
 export type Finding = {
 	id: number;
 	intake: Intake;
@@ -82,6 +84,7 @@ export type Finding = {
 	status: Status;
 	investigation: Investigation | null;
 	batch: number | null;
+	disposition: string | null;
 };
 export type Queue = {
 	entries: Finding[];

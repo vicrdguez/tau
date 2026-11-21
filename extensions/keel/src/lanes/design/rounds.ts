@@ -1,6 +1,13 @@
 import { subject } from "../../kernel/ids.ts";
 import { type Ask, type KernelEvent, prose } from "../../kernel/lane.ts";
-import { type Audit, type Draft, draftError, nodes } from "./draft.ts";
+import {
+	type Audit,
+	changedFields,
+	type Draft,
+	draftError,
+	nodes,
+	seamFields,
+} from "./draft.ts";
 import { type Mandate, type Reply, repliesCover } from "./public.ts";
 
 type Fact = Extract<KernelEvent, { kind: "answered" }>;
@@ -161,8 +168,37 @@ function entryBody(n: Entry) {
 		...(n.reference ? [`Reference: ${n.reference}`] : []),
 	].join("\n\n");
 }
-function entryText(n: Entry, mark = "") {
-	return `### ${n.label}: ${n.section}${mark}\n\n${entryBody(n)}`;
+function entryFields(n: Entry, d: Draft) {
+	const seam = d.seams.find((entry) => entry.label === n.label);
+	const check = d.checks.find((entry) => entry.id === n.label);
+	const rider = d.riders.find((entry) => entry.label === n.label);
+	return {
+		section: n.section,
+		...(seam
+			? seamFields(seam)
+			: check
+				? { command: check.argv, timeout: check.timeoutMs }
+				: rider
+					? {
+							text: rider.text,
+							origin: rider.origin,
+							disposition: rider.disposition,
+						}
+					: {
+							[n.label === "intent"
+								? "intent"
+								: n.section === "Rule"
+									? "rule"
+									: "text"]: n.body,
+							[n.label === "intent" ? "done when" : "falsifying probe"]:
+								n.probe || undefined,
+						}),
+		reference: n.reference,
+	};
+}
+function entryText(n: Entry, mark = "", fields: string[] = []) {
+	const heading = fields.length ? `Changed: ${fields.join(", ")}\n\n` : "";
+	return `### ${n.label}: ${n.section}${mark}\n\n${heading}${entryBody(n)}`;
 }
 function body(
 	a: Audit,
@@ -196,7 +232,13 @@ function body(
 		const before = changed
 			? `\n\n#### Previously\n\n**${old.label}: ${old.section}**\n\n${entryBody(old)}`
 			: "";
-		sections[n.group].push(entryText(n, change ? ` (${change})` : "") + before);
+		const fields =
+			prev && old && changed
+				? changedFields(entryFields(old, prev.draft), entryFields(n, r.draft))
+				: [];
+		sections[n.group].push(
+			entryText(n, change ? ` (${change})` : "", fields) + before,
+		);
 	}
 	const removed = previous.filter(
 		(p) => !current.some((n) => n.label === p.label),
@@ -330,7 +372,14 @@ export function binding(a: Audit, history: Round[]): Mandate {
 			...ns.map(({ label, section, body, probe }) =>
 				section === "Rule"
 					? { label, rule: body, probe }
-					: { label, section, body },
+					: {
+							label,
+							section,
+							body,
+							...(section === "Seam" && {
+								seam: d.seams.find((s) => s.label === label)!,
+							}),
+						},
 			),
 			...d.riders
 				.filter((r) => r.disposition === "bind")

@@ -5,6 +5,10 @@ Approve these Mandate changes, ask for rework, or decline this proposal. Approva
 
 {{evidence}}
 
+## What the plan must revisit
+
+{{plan}}
+
 ## Currently bound
 
 {{before}}

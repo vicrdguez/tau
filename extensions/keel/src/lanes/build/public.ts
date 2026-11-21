@@ -31,6 +31,7 @@ export type BuildUpdate =
 	| { kind: "queue_release"; cause: string; direction?: string }
 	| PlanFinding
 	| RevisionProposal
+	| { kind: "withdraw_revision" }
 	| {
 			kind: "integration" | "rework";
 			item: string;

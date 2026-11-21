@@ -214,6 +214,7 @@ export function intake(
 		status: "filed",
 		investigation: null,
 		batch: null,
+		disposition: null,
 	};
 	return {
 		state: { ...q, entries: [...q.entries, f] },

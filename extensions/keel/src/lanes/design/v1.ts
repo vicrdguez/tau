@@ -154,13 +154,13 @@ export const designV1 = {
 		})[],
 		revisions: [] as {
 			phase:
-				| "queued"
 				| "drafting"
 				| "review"
 				| "held"
 				| "approved"
 				| "applied"
-				| "declined";
+				| "declined"
+				| "settled";
 			causes: string[];
 			nodes: string[];
 			text: string;
@@ -168,6 +168,7 @@ export const designV1 = {
 				mandate: Mandate;
 				nodes: string[];
 				replies: Reply[];
+				plan: string;
 				answer: Answer | null;
 			}[];
 		}[],

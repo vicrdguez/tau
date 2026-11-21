@@ -1,5 +1,6 @@
 import { arr, int, obj, oneOf, str } from "tau/schema";
 import { prose } from "../../kernel/lane.ts";
+import type { Draft } from "./draft.ts";
 
 export const repliesSchema = arr(
 	obj({
@@ -39,6 +40,12 @@ export type Mandate = {
 	nodes: (
 		| { label: string; rule: string; probe: string }
 		| { label: string; section: string; body: string }
+		| {
+				label: string;
+				section: string;
+				body: string;
+				seam: Draft["seams"][number];
+		  }
 	)[];
 	checks: { id: string; argv: string[]; timeoutMs: number }[];
 	/** Design context, not authority for briefs. Null in a small Mandate. */

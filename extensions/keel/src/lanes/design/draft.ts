@@ -121,6 +121,22 @@ const fenced = (v: string) =>
 export const validSeam = (s: Draft["seams"][number]) =>
 	Object.values(s).every(validText) && fenced(s.usage) && fenced(s.signature);
 export const renderSeam = (s: Draft["seams"][number]) => seamText(s).trim();
+export const seamFields = (s: Draft["seams"][number]) => ({
+	"current callers": s.callersNow,
+	"future callers": s.callersLater,
+	"caller usage": s.usage,
+	"types and signatures": s.signature,
+	owner: s.owner,
+	"allowed dependencies": s.dependencies,
+});
+export function changedFields(
+	before: Record<string, unknown>,
+	after: Record<string, unknown>,
+) {
+	return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+		(field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]),
+	);
+}
 export function validSmall(d: Pick<Draft, "intent" | "nodes" | "checks">) {
 	return (
 		validText(d.intent) &&
