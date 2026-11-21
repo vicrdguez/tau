@@ -157,6 +157,10 @@ test("Scenario 3: recover a mid-build Mandate revision after triage and approval
 		text,
 		/Revision 1 approval\n\n1\. Prove framing before resuming the writer\.\n\s+acted_on: Revision plan adds a framing item before the writer\./,
 	);
+	assert.match(
+		text,
+		/Your directions:[\s\S]*Keep one framing scheme for the book and its reader\.[\s\S]*Coordinator\x27s replies/,
+	);
 	assert.match(text, /Mandate revisions[\s\S]+wire/);
 	assert.match(text, /Finding #1[^\n]*writer seam[\s\S]+applied/i);
 	for (const value of [

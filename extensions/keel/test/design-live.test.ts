@@ -614,6 +614,30 @@ test("a cause joining review withdraws the unanswered text; the new review attri
 	assert.equal(x.turn(), undefined);
 });
 
+test("A-n2: each revision answer names the headline that belongs to its finding number", () => {
+	const x = run();
+	x.act(follow);
+	x.act({
+		...request,
+		text: "### Finding #1: Raw values need framing\nReproduced.\n\n### Finding #2: Stats do not have that framing\nDifferent source.",
+	});
+	x.act(publish);
+	const text = x.asks()[0]!.basis.split("## Currently bound")[0]!;
+	assert.match(text, /Finding #1: Raw values need framing.*R1/);
+	assert.match(text, /Finding #2: Stats do not have that framing.*R1/);
+});
+
+test("A-n3: a revision revert is in the summary, not a removed-nodes section", () => {
+	const x = pending();
+	x.act(publish);
+	x.answer(x.asks()[0]!.subject, "rework", [note]);
+	x.act({ ...publish, changes: {}, replies: [reply] });
+	const text = x.asks()[0]!.basis;
+	assert.match(text, /Since round 1: R1 reverted to bound/);
+	assert.doesNotMatch(text, /Removed since the last round/);
+	assert.ok(text.includes(reply.reason));
+});
+
 test("an already-settled proposal still owes numbered replies and releases causes only through approval and application", () => {
 	const x = pending();
 	const old = x.mandate();
@@ -667,6 +691,13 @@ test("an already-settled proposal still owes numbered replies and releases cause
 	);
 	assert.deepEqual(x.mandate(), { ...old, approvalNotes: [note.text] });
 	assert.equal(x.turn(), undefined);
+	const summary = (x.view() as { revisionSummary: string }).revisionSummary;
+	assert.match(summary, /Revision 1: No Mandate change/);
+	assert.match(
+		summary,
+		/Finding #1: P1\. The existing proof compares the serialized bytes/,
+	);
+	assert.match(summary, /Finding #2: R1\. The rule governs the emitted record/);
 });
 
 test("revision proposals refuse missing, duplicate or foreign answers, unknown labels, blank reasons and unattributed edits", () => {

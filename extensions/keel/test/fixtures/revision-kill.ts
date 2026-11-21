@@ -38,6 +38,6 @@ await s.answer(
 	boundary === "triage" ? "build" : "approve",
 	boundary === "approval"
 		? [{ text: "Prove framing before resuming the writer." }]
-		: [],
+		: [{ text: "Keep one framing scheme for the book and its reader." }],
 );
 throw Error(`No queued delivery committed after ${boundary}`);

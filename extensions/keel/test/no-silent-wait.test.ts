@@ -421,6 +421,41 @@ test("A-3: a revision plan can add a dependency to a held filer that did not cit
 	assert.equal((await x.build())?.items[0]?.worker?.base, head);
 });
 
+test("A-n1: approval without notes releases an already-settled cause without a plan turn", async (t) => {
+	const x = await start(t, ["writer"]);
+	await x.brief("writer");
+	await x.file("writer", "Do records already require escaping?");
+	assert.ok(
+		!(
+			"reject" in
+			(await x.classify(1, {
+				classification: "mandate_wrong",
+				nodes: ["wire"],
+			}))
+		),
+	);
+	await x.answer("triage/", "build");
+	await x.must("design", {
+		kind: "publish_revision",
+		changes: {},
+		answers: [
+			{
+				cause: "queue/1",
+				nodes: ["wire"],
+				reason: "The bound wire rule already requires escaping.",
+			},
+		],
+		replies: [],
+	});
+	assert.equal((await x.build())?.items[0]?.parked, true);
+	await x.answer("revision/", "approve");
+	const build = (await x.build())!;
+	assert.equal(build.coordinator.tool, null);
+	assert.equal(build.items[0]?.parked, false);
+	assert.deepEqual(build.queueHolds, []);
+	assert.deepEqual(await x.asks(), []);
+});
+
 test("a synthetic cycle among held unfinished items opens one decision, not one per item", async (t) => {
 	const x = await start(t, ["left", "right"]);
 	await x.brief("left");

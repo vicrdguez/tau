@@ -816,10 +816,18 @@ test("a linked blocker is shown in reissued triage with both reports and both no
 	});
 	q.send(q.investigation(1, "mandate_wrong"));
 	const previous = q.ask()[0]!.basis;
-	q.send(q.investigation(2, "mandate_wrong", { sameAs: 1, nodes: ["totals"] }));
+	q.send(
+		q.investigation(2, "mandate_wrong", {
+			sameAs: 1,
+			nodes: ["totals"],
+			cause: "reversed totals",
+		}),
+	);
 	assert.equal(q.ask().length, 1);
 	const basis = q.ask()[0]!.basis;
 	assert.notEqual(basis, previous);
+	assert.match(basis.split("\n", 1)[0]!, /rounding point.*reversed totals/);
+	assert.match(basis, /## Mandate nodes\n\n### sums/);
 	for (const text of [
 		"Finding #1",
 		filing.report,
