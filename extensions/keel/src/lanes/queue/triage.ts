@@ -700,16 +700,6 @@ export function onFact(
 							: null,
 				};
 			}
-			// The ruling changes the reference. Other unapproved-pattern decisions no longer apply.
-			if (
-				pattern &&
-				entry.intake.pattern === pattern &&
-				["filed", "triage"].includes(entry.status)
-			)
-				return {
-					...entry,
-					...close(`pattern ruling in finding #${first.id}: ${outcome}`),
-				};
 			return entry;
 		}),
 		patterns: pattern
