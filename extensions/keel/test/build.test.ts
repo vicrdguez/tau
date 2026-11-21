@@ -298,6 +298,21 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.deepEqual(correction.state.approvalReplies, replies);
 });
 
+test("the brief request and worker brief each render one Bound Mandate heading", () => {
+	const b = setup();
+	b.plan();
+	const request = b.request("coordinator").text;
+	b.send({ kind: "brief", ...brief });
+	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	const worker = b.request("worker").text;
+	for (const [input, text] of Object.entries({ request, worker }))
+		assert.equal(
+			(text.match(/^(?:## )?Bound Mandate:?[ \t]*$/gm) ?? []).length,
+			1,
+			input,
+		);
+});
+
 test("reviewed work without seams or rules can start with ordinary work", () => {
 	const b = setup();
 	b.start({ ...reviewed, encodeRequired: false, approvalNotes: [] });

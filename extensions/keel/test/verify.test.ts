@@ -1140,6 +1140,11 @@ test("full-set and landing reviews report the union of merged publications, not 
 			/Changed principles and playbooks reported by Git:\n([^\n]+(?:\n[^\n]+)*)/,
 		);
 		assert.ok(list, scope);
+		assert.match(
+			input,
+			/unchanged unless an item under review was tasked/i,
+			scope,
+		);
 		assert.deepEqual(
 			list[1]!.split("\n").sort(),
 			[first, second, shared].sort(),
@@ -1157,14 +1162,27 @@ test("full-set and landing reviews report the union of merged publications, not 
 	expectPolicyList("landing");
 });
 
-test("the verifier reads the Mandate as a document including the proof", () => {
+test("the verifier reads the Mandate proof and checks choices delegated to workers", () => {
 	const x = flow();
-	x.publish();
+	x.publish("one", [], "bug", "base", {
+		mandate: {
+			...mandate,
+			delegated: [
+				{ label: "order", origin: "incidental", text: "Choose field order." },
+			],
+		},
+	});
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
 	assert.match(input, /## (?:Bound )?Mandate/i);
 	assert.match(input, /Sums match/);
 	assert.match(input, /compare totals/);
+	assert.match(
+		input,
+		/Workers settle these choices within the binding nodes\./,
+	);
+	assert.match(input, /Verifiers check the choices against those nodes\./);
+	assert.match(input, /Choose field order\./);
 	assert.ok(input.includes('["run","proof"]'));
 	assert.doesNotMatch(input, /"intent":|"nodes":/);
 });
