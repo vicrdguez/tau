@@ -143,7 +143,8 @@ function body(a: Audit, reference: string, history: Round[]) {
 		considerations: [],
 	};
 	const summary: string[] = [];
-	const label = (n: Entry) => (n.group === "riders" ? `rider ${n.label}` : n.label);
+	const label = (n: Entry) =>
+		n.group === "riders" ? `rider ${n.label}` : n.label;
 	for (const n of current) {
 		const old = previous.find((p) => p.label === n.label);
 		const changed =
@@ -157,7 +158,9 @@ function body(a: Audit, reference: string, history: Round[]) {
 		if (change) summary.push(`${label(n)} ${change}`);
 		sections[n.group].push(entryText(n, change ? ` (${change})` : ""));
 	}
-	const removed = previous.filter((p) => !current.some((n) => n.label === p.label));
+	const removed = previous.filter(
+		(p) => !current.some((n) => n.label === p.label),
+	);
 	summary.push(...removed.map((n) => `${label(n)} removed`));
 	return {
 		changes: prev
