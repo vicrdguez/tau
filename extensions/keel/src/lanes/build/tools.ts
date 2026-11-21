@@ -95,8 +95,8 @@ export const buildTools = [
 		terminate: true,
 		observe: async (_, self, _ctx, view) => {
 			const build = view("build") as ReturnType<typeof buildView>;
-			const { repo, worker } = build.publicationOf(self.agent);
-			const f = await readPublishable(nodeExec, repo, worker);
+			const { repo, worker, inheritedTrunk } = build.publicationOf(self.agent);
+			const f = await readPublishable(nodeExec, repo, worker, inheritedTrunk);
 			if (f.kind === "dirty") return { ...f, files: [...f.files] };
 			if (f.kind === "ok")
 				return { ...f, changedPolicyFiles: [...f.changedPolicyFiles] };

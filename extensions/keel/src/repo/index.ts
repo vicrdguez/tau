@@ -154,16 +154,28 @@ export function converge(
 	});
 }
 
-/** Keep the verifier's comparison pinned even if the build moves again. In a
- * criss-cross history neither best base alone contains all inherited work. */
-async function comparisonBase(g: Git, build: Sha, item: Sha): Promise<Sha> {
+/** Use the build history and any trusted trunk pin the worker actually took.
+ * In a criss-cross history neither best base alone contains all inherited work. */
+async function comparisonBase(
+	g: Git,
+	build: Sha,
+	item: Sha,
+	inheritedTrunk: Sha | null,
+): Promise<Sha> {
 	const bases = (await g.output("merge-base", "--all", build, item))
 		.trimEnd()
 		.split("\n")
 		.sort()
 		.map((b) => oid(b) as Sha);
+	if (inheritedTrunk && (await g.ancestor(inheritedTrunk, item)))
+		bases.push(inheritedTrunk);
 	let base = bases[0]!;
 	for (const other of bases.slice(1)) {
+		if (other === base || (await g.ancestor(other, base))) continue;
+		if (await g.ancestor(base, other)) {
+			base = other;
+			continue;
+		}
 		const merge = await g.run(
 			"merge-tree",
 			"--write-tree",
@@ -189,6 +201,7 @@ export function readPublishable(
 	exec: Exec,
 	repo: RepoInfo,
 	worker: Worker,
+	inheritedTrunk: Sha | null = null,
 ): Promise<PublishResult> {
 	return report(async (): Promise<PublishResult> => {
 		workerSpec(repo, worker);
@@ -204,7 +217,7 @@ export function readPublishable(
 		if (build === null) moved(null);
 		await ownedBranch(g, worker.from);
 		const sha = owned.head;
-		const base = await comparisonBase(g, build, sha);
+		const base = await comparisonBase(g, build, sha, inheritedTrunk);
 		// Treat renames as deletes and adds so both in-scope names are listed.
 		const changedPolicyFiles = zlist(
 			await g.output(

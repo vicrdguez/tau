@@ -216,7 +216,11 @@ export function buildView(s: Build) {
 		publicationOf(agent: string) {
 			const worker = s.items.find((i) => workerKey(i) === agent)?.worker;
 			if (!worker || !s.repo) throw Error("No current worker checkout");
-			return { repo: s.repo, worker };
+			return {
+				repo: s.repo,
+				worker,
+				inheritedTrunk: s.coordinator.reason?.inheritedTrunk ?? null,
+			};
 		},
 	};
 }
