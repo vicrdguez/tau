@@ -4,6 +4,7 @@ import {
 	type Ask,
 	defineLane,
 	defineLaneTool,
+	type Expectation,
 	type Lane,
 	prose,
 	type World,
@@ -11,6 +12,22 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
 import { fileHolding, resumption } from "../queue/public.ts";
+import {
+	type Arena,
+	arenaEffect,
+	arenaEvidence,
+	blockedAsk,
+	candidateNames,
+	challengeObjections,
+	frameSchema,
+	graftsSchema,
+	retryArena,
+	settleArena,
+	startArena,
+	startCandidates,
+	startChallenger,
+	synthesisSources,
+} from "./arena.ts";
 import {
 	type Audit,
 	auditSchema,
@@ -25,6 +42,7 @@ import {
 	type Mandate,
 	mandateLabels,
 	type Reply,
+	repliesCover,
 	repliesSchema,
 } from "./public.ts";
 import {
@@ -35,25 +53,48 @@ import {
 	propose,
 	type Revision,
 	revisionAsk,
-	revisionToken,
 	revisionTurn,
 	sameCauses,
 } from "./revision.ts";
 import {
-	answered,
 	approvalNotes,
+	auditText,
 	binding,
+	continuesReview,
 	declineText,
 	designerInput,
 	notPursued,
-	openRound,
+	owedText,
 	type Round,
 	reviewAnswer,
 	reviewAsk,
+	type Synthesis,
+	synthesisBody,
+	synthesisError,
 } from "./rounds.ts";
 import { designV1 } from "./v1.ts";
 
 export const designTools = [
+	defineLaneTool({
+		lane: "design",
+		roles: ["designer"],
+		name: "frame_arena",
+		description:
+			"Frame one precedent-setting question and the rubric for comparing the candidates.",
+		parameters: frameSchema,
+		terminate: true,
+		event: (args) => ({ kind: "frame_arena", ...args }),
+	}),
+	defineLaneTool({
+		lane: "design",
+		roles: ["designer"],
+		name: "answer_challenger",
+		description:
+			"Give one numbered disposition per challenge objection to put the synthesis to the owner.",
+		parameters: obj({ dispositions: repliesSchema }),
+		terminate: true,
+		event: (args) => ({ kind: "answer_challenger", ...args }),
+	}),
 	defineLaneTool({
 		lane: "design",
 		roles: ["designer"],
@@ -69,8 +110,13 @@ export const designTools = [
 		roles: ["designer"],
 		name: "publish_mandate",
 		description:
-			"Publish the complete labelled Mandate and reply by number to the annotations on the preceding rework answer.",
-		parameters: obj({ draft: reviewedDraft, replies: repliesSchema }),
+			"Submit the complete synthesis for challenge: a labelled Mandate, its base and graft sources, and numbered replies to the owner's annotations.",
+		parameters: obj({
+			draft: reviewedDraft,
+			base: text,
+			grafts: graftsSchema,
+			replies: repliesSchema,
+		}),
 		terminate: true,
 		event: (args) => ({ kind: "publish_mandate", ...args }),
 	}),
@@ -116,16 +162,22 @@ type Seed = {
 	reference: string | null;
 	text: string;
 };
+type DesignerPhase =
+	| "seeded"
+	| "directed"
+	| "resumed"
+	| "framing"
+	| "drafting"
+	| "answering";
 type State = {
 	phase:
+		| DesignerPhase
 		| "entry"
-		| "seeded"
 		| "ambiguous"
-		| "directed"
-		| "resumed"
 		| "held"
 		| "bound"
-		| "drafting"
+		| "dispatching"
+		| "arena_blocked"
 		| "review"
 		| "landed"
 		| "closed"
@@ -136,11 +188,14 @@ type State = {
 	mandate: Mandate | null;
 	audit: Audit | null;
 	seed: Seed | null;
+	arenas: Arena[];
+	proposal: Synthesis | null;
 	rounds: Round[];
 	revisions: Revision[];
 	readings: string[];
 	direction: string;
 	cause: string | null;
+	heldTurn: DesignerPhase | null;
 	seq: number;
 };
 const doc = defineState<State>({
@@ -155,11 +210,14 @@ const doc = defineState<State>({
 		mandate: null,
 		audit: null,
 		seed: null,
+		arenas: [],
+		proposal: null,
 		rounds: [],
 		revisions: [],
 		readings: [],
 		direction: "",
 		cause: null,
+		heldTurn: null,
 		seq: 0,
 	}),
 });
@@ -210,8 +268,24 @@ const landed = prose(
 	"../../prose/documents/cancel-landed.md",
 	[],
 );
+const dir = import.meta.dirname + "/../../prose";
+const framingInput = prose(dir, "inputs/design/frame-arena.md", [
+	"ground",
+	"notes",
+	"seed",
+	"direction",
+]);
+const answerInput = prose(dir, "inputs/design/answer-challenger.md", [
+	"objections",
+	"direction",
+]);
+const challengeText = prose(dir, "documents/arena-challenge.md", [
+	"model",
+	"dispositions",
+]);
 const goal = (s: State) =>
 	s.mandate?.intent ??
+	s.proposal?.draft.intent ??
 	s.rounds.at(-1)?.draft.intent ??
 	s.seed?.text ??
 	s.reference;
@@ -260,7 +334,7 @@ function cancelledAnnotations(s: State, w: World) {
 				? (w.view("build") as { plan?: unknown[] } | null)
 				: null;
 		if (
-			main.choice === "rework" ||
+			continuesReview(main.choice) ||
 			(main.choice === "approve" && !build?.plan?.length)
 		)
 			sections.push(
@@ -283,21 +357,147 @@ function cancelledAnnotations(s: State, w: World) {
 		: [];
 }
 
-function draftTurn(s: State) {
-	return {
-		token: token("draft", s.seq),
-		tools: ["publish_mandate"],
-		situation: "shape",
-		input: () =>
-			designerInput(s.audit!, groundContext(s), s.rounds, s.direction),
-	};
+const currentArena = (s: State) => s.arenas.at(-1)!;
+const setArena = (s: State, arena: Arena): State => ({
+	...s,
+	arenas: s.arenas.with(-1, arena),
+});
+const auditedGround = (s: State) => auditText(s.audit!, groundContext(s));
+
+function mandateAsk(s: State, number = s.rounds.length): Ask {
+	const rounds = s.rounds.slice(0, number);
+	const round = rounds.at(-1)!;
+	const arena = s.arenas[round.arena - 1]!;
+	const objections = challengeObjections(arena, round.challenge);
+	const dispositions =
+		objections
+			.map((o, i) => {
+				const reply = round.dispositions.find((reply) => reply.n === i + 1)!;
+				return `${i + 1}. ${o}\n\n   ${reply.status}: ${reply.reason}`;
+			})
+			.join("\n\n") || "No objections.";
+	const evidence = [
+		synthesisSources(round.base, round.grafts),
+		arenaEvidence(arena, round.arena),
+		challengeText({
+			model: arena.runs[round.challenge - 1]!.jobs[0]!.model,
+			dispositions,
+		}),
+	].join("\n\n");
+	return reviewAsk(
+		s.audit!,
+		groundContext(s),
+		rounds,
+		evidence,
+		candidateNames(arena),
+	);
+}
+function arenaSeed(s: State, round: number | null) {
+	if (round === null) return "";
+	const r = s.rounds[round - 1]!;
+	return `## Seed from round ${round}\n\n${mandateAsk(s, round).basis}\n\n### Owner annotations\n\n${owedText(r)}`;
+}
+
+function designerTurn(s: State): Expectation | undefined {
+	const revision = s.revisions[revisionIndex(s)];
+	if (revision?.phase === "drafting")
+		return revisionTurn(
+			s.mandate!,
+			revision,
+			s.seq,
+			references(s),
+			s.direction,
+		);
+	switch (s.phase) {
+		case "framing":
+			return {
+				token: token("frame", s.seq),
+				tools: ["frame_arena"],
+				situation: "shape",
+				input: () =>
+					framingInput({
+						ground: auditedGround(s),
+						direction: s.direction,
+						notes: owedText(s.rounds.at(-1)),
+						seed: arenaSeed(
+							s,
+							s.rounds.at(-1)?.answer?.choice === "arena"
+								? s.rounds.length
+								: null,
+						),
+					}),
+			};
+		case "drafting":
+			return {
+				token: token("draft", s.seq),
+				tools: ["publish_mandate"],
+				situation: "shape",
+				input: () => {
+					const arena = currentArena(s);
+					const number = s.arenas.length;
+					return designerInput(
+						s.audit!,
+						groundContext(s),
+						s.rounds,
+						number,
+						arenaEvidence(arena, number),
+						arena.forcedBase
+							? `The owner chose ${arena.forcedBase} as the base. Use it.`
+							: "Choose the base and explain your choice with the tradeoffs.",
+						s.direction,
+					);
+				},
+			};
+		case "answering":
+			return {
+				token: token("objections", s.seq),
+				tools: ["answer_challenger"],
+				situation: "shape",
+				input: () => {
+					const arena = currentArena(s);
+					return answerInput({
+						direction: s.direction,
+						objections:
+							challengeObjections(arena, arena.runs.length)
+								.map((o, i) => `${i + 1}. ${o}`)
+								.join("\n") || "No objections.",
+					});
+				},
+			};
+		case "directed":
+		case "resumed":
+		case "seeded":
+			return {
+				token: token("ground", s.seq),
+				tools: ["ground"],
+				input: () =>
+					s.seed
+						? seedInputs[s.seed.route]({
+								finding: s.seed.text,
+								reference: s.seed.reference ?? "None established.",
+								direction: s.direction,
+							})
+						: (s.phase === "resumed" ? resumed : directed)({
+								direction: s.direction,
+							}),
+			};
+	}
 }
 
 export const design: Lane<State> = {
 	name: "design",
 	state: doc,
-	view: (s) => ({ mandate: s.mandate, reference: s.reference }),
-	effects: () => [],
+	view: (s) => ({
+		mandate: s.mandate,
+		reference: s.reference,
+		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
+			(r) => (r.answer ? [r.answer] : []),
+		),
+	}),
+	effects: (s) =>
+		s.phase === "dispatching"
+			? [arenaEffect(currentArena(s), s.arenas.length)]
+			: [],
 	reduce(s, e, w) {
 		switch (e.kind) {
 			case "request_cancel":
@@ -423,20 +623,113 @@ export const design: Lane<State> = {
 					),
 				};
 			}
-			case "publish_mandate": {
-				if (s.phase !== "drafting" || !s.audit)
-					return { reject: "There is no open Mandate draft turn." };
-				const result = openRound(
-					s.audit,
-					s.rounds,
-					e.draft as Draft,
-					e.replies as Reply[],
+			case "frame_arena": {
+				if (s.phase !== "framing")
+					return { reject: "There is no open arena framing turn." };
+				if (
+					typeof e.question !== "string" ||
+					!e.question.trim() ||
+					typeof e.rubric !== "string" ||
+					!e.rubric.trim()
+				)
+					return {
+						reject:
+							"Give one framed question and the rubric every candidate will be scored against.",
+					};
+				const seed =
+					s.rounds.at(-1)?.answer?.choice === "arena" ? s.rounds.length : null;
+				const started = startCandidates(
+					startArena(
+						{ question: e.question.trim(), rubric: e.rubric.trim() },
+						seed,
+						w,
+					),
+					auditedGround(s),
+					arenaSeed(s, seed),
 				);
-				if ("reject" in result) return result;
 				return {
 					state: {
 						...s,
-						rounds: [...s.rounds, result.round],
+						phase: started.phase,
+						arenas: [...s.arenas, started.arena],
+						direction: "",
+					},
+				};
+			}
+			case "publish_mandate": {
+				if (s.phase !== "drafting" || !s.audit)
+					return {
+						reject:
+							"Complete an arena before submitting the Mandate synthesis.",
+					};
+				const arena = currentArena(s);
+				const seats = candidateNames(arena);
+				const grafts = e.grafts as Synthesis["grafts"];
+				if (
+					typeof e.base !== "string" ||
+					!seats.includes(e.base) ||
+					!Array.isArray(grafts) ||
+					grafts.some(
+						(g) =>
+							!seats.includes(g.seat) || g.seat === e.base || !g.text.trim(),
+					)
+				)
+					return {
+						reject:
+							"Choose an arena candidate as base and attribute each graft to another candidate from this arena.",
+					};
+				if (arena.forcedBase !== null && e.base !== arena.forcedBase)
+					return {
+						reject: `Use ${arena.forcedBase} as the base, as the owner chose.`,
+					};
+				const proposal = {
+					draft: e.draft as Draft,
+					replies: e.replies as Reply[],
+					base: e.base,
+					grafts,
+				};
+				const error = synthesisError(s.audit, s.rounds, proposal);
+				if (error) return { reject: error };
+				const synthesis =
+					synthesisSources(proposal.base, proposal.grafts) +
+					"\n\n" +
+					synthesisBody(s.audit, groundContext(s), proposal);
+				return {
+					state: setArena(
+						{ ...s, proposal, phase: "dispatching", direction: "" },
+						startChallenger(arena, proposal.base, synthesis),
+					),
+				};
+			}
+			case "answer_challenger": {
+				if (s.phase !== "answering")
+					return { reject: "There is no open challenger report to answer." };
+				const arena = currentArena(s);
+				const challenge = arena.runs.length;
+				const dispositions = e.dispositions as Reply[];
+				if (
+					!Array.isArray(dispositions) ||
+					!repliesCover(
+						challengeObjections(arena, challenge).length,
+						dispositions,
+					)
+				)
+					return {
+						reject:
+							"Give one disposition and a reason for each numbered objection.",
+					};
+				const round = {
+					...s.proposal!,
+					arena: s.arenas.length,
+					challenge,
+					dispositions,
+					answer: null,
+				};
+				return {
+					state: {
+						...s,
+						proposal: null,
+						rounds: [...s.rounds, round],
 						phase: "review",
 						direction: "",
 					},
@@ -494,7 +787,7 @@ export const design: Lane<State> = {
 						return {
 							state: {
 								...s,
-								phase: "drafting",
+								phase: "framing",
 								reference,
 								audit,
 								seq: s.seq + 1,
@@ -544,7 +837,8 @@ export const design: Lane<State> = {
 						? amend(state, i, { phase: "drafting" })
 						: {
 								...state,
-								phase: s.audit ? "drafting" : s.seed ? "seeded" : "resumed",
+								phase: s.heldTurn!,
+								heldTurn: null,
 							},
 				};
 			}
@@ -584,6 +878,15 @@ export const design: Lane<State> = {
 		}
 	},
 	onFact(s, e, w) {
+		if (e.kind === "effect_done" || e.kind === "effect_failed") {
+			if (
+				s.phase !== "dispatching" ||
+				e.key !== arenaEffect(currentArena(s), s.arenas.length).key
+			)
+				return { state: s };
+			const { arena, phase } = settleArena(currentArena(s), e);
+			return { state: setArena({ ...s, phase, seq: s.seq + 1 }, arena) };
+		}
 		if (e.kind === "answered") {
 			if (s.cancelRequested && e.subject === subject("cancel")) {
 				return {
@@ -644,25 +947,61 @@ export const design: Lane<State> = {
 						};
 				}
 			}
+			if (s.phase === "arena_blocked") {
+				const current = currentArena(s);
+				const ask = blockedAsk(current, s.seq);
+				if (ask.subject !== e.subject || !ask.choices.includes(e.choice))
+					return { state: s };
+				if (e.choice === "decline")
+					return {
+						state: { ...s, phase: "closed", cancelRequested: false },
+						notes: cancelledAnnotations(s, w),
+					};
+				const { arena, phase } = retryArena(
+					current,
+					auditedGround(s),
+					arenaSeed(s, current.seedRound),
+					w,
+				);
+				return { state: setArena({ ...s, phase, seq: s.seq + 1 }, arena) };
+			}
 			if (s.phase === "review") {
-				const outcome = answered(s.audit!, groundContext(s), s.rounds, e);
-				if (!outcome) return { state: s };
-				const next = { ...s, ...outcome };
-				switch (outcome.phase) {
-					case "bound": {
-						const mandate = binding(s.audit!, outcome.rounds);
+				const ask = mandateAsk(s);
+				if (ask.subject !== e.subject || !ask.choices.includes(e.choice))
+					return { state: s };
+				const rounds = s.rounds.with(-1, {
+					...s.rounds.at(-1)!,
+					answer: reviewAnswer(e, ask.basis),
+				});
+				const next = { ...s, rounds, seq: s.seq + 1 };
+				switch (e.choice) {
+					case "approve": {
+						const mandate = binding(s.audit!, rounds);
 						return {
-							state: { ...next, mandate },
+							state: { ...next, phase: "bound", mandate },
 							send: [toBuild(w.work!, { kind: "bound", mandate })],
 						};
 					}
-					case "closed":
+					case "decline":
 						return {
-							state: { ...next, cancelRequested: false },
-							notes: [{ agent: null, text: declineText(outcome.rounds) }],
+							state: { ...next, phase: "closed", cancelRequested: false },
+							notes: [{ agent: null, text: declineText(rounds) }],
 						};
-					case "drafting":
-						return { state: { ...next, seq: s.seq + 1 } };
+					case "arena":
+					case "arena_fresh":
+						return { state: { ...next, phase: "framing" } };
+					case "rework":
+						return { state: { ...next, phase: "drafting" } };
+					default:
+						return {
+							state: setArena(
+								{ ...next, phase: "drafting" },
+								{
+									...currentArena(s),
+									forcedBase: e.choice.slice("base:".length),
+								},
+							),
+						};
 				}
 			}
 			if (s.phase !== "ambiguous" || e.subject !== subject("ground/" + s.seq))
@@ -687,29 +1026,24 @@ export const design: Lane<State> = {
 		}
 		const index = revisionIndex(s);
 		const revising = s.revisions[index]?.phase === "drafting";
-		const stage = revising
-			? "revision"
-			: s.phase === "drafting"
-				? "draft"
-				: "ground";
+		const turn = designerTurn(s);
 		if (
 			e.kind === "agent_stalled" &&
-			(revising ||
-				s.phase === "directed" ||
-				s.phase === "resumed" ||
-				s.phase === "seeded" ||
-				s.phase === "drafting") &&
+			turn &&
 			e.agent === agentKey("designer") &&
-			e.tokens.includes(
-				stage === "revision" ? revisionToken(s.seq) : token(stage, s.seq),
-			)
+			e.tokens.includes(turn.token)
 		) {
-			const cause = `${stage}/${s.seq}`;
+			const cause = turn.token.replace("@", "/");
 			const state = { ...s, direction: "", cause };
 			return {
 				state: revising
 					? amend(state, index, { phase: "held" })
-					: { ...state, phase: "held" },
+					: {
+							...state,
+							phase: "held",
+							heldTurn:
+								s.phase === "directed" ? "resumed" : (s.phase as DesignerPhase),
+						},
 				send: [
 					fileHolding({
 						work: w.work!,
@@ -731,10 +1065,9 @@ export const design: Lane<State> = {
 		const revision = s.revisions[index];
 		if (revision?.phase === "review")
 			result.push(revisionAsk(s.mandate!, revision, index));
-		if (s.phase === "review") {
-			const ask = reviewAsk(s.audit!, groundContext(s), s.rounds);
-			if (ask) result.push(ask);
-		}
+		if (s.phase === "review") result.push(mandateAsk(s));
+		if (s.phase === "arena_blocked")
+			result.push(blockedAsk(currentArena(s), s.seq));
 		if (s.phase === "ambiguous") {
 			const basis = ground({
 				reference: s.reference,
@@ -761,35 +1094,14 @@ export const design: Lane<State> = {
 	},
 	agents(s) {
 		if (s.phase === "entry") return [];
-		const revision = s.revisions[revisionIndex(s)];
-		const expects = [];
-		if (s.phase === "drafting") expects.push(draftTurn(s));
-		if (revision?.phase === "drafting")
-			expects.push(
-				revisionTurn(s.mandate!, revision, s.seq, references(s), s.direction),
-			);
-		if (s.phase === "directed" || s.phase === "resumed" || s.phase === "seeded")
-			expects.push({
-				token: token("ground", s.seq),
-				tools: ["ground"],
-				input: () =>
-					s.seed
-						? seedInputs[s.seed.route]({
-								finding: s.seed.text,
-								reference: s.seed.reference ?? "None established.",
-								direction: s.direction,
-							})
-						: (s.phase === "resumed" ? resumed : directed)({
-								direction: s.direction,
-							}),
-			});
+		const turn = designerTurn(s);
 		return [
 			{
 				key: agentKey("designer"),
 				role: "designer",
 				cwd: null,
 				paused: false,
-				expects,
+				expects: turn ? [turn] : [],
 			},
 		];
 	},

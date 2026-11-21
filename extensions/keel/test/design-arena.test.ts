@@ -54,22 +54,47 @@ const judge = JSON.stringify({
 	})),
 });
 const objections = JSON.stringify({
-	objections: ["Which account does the limit attach to?", "Will callers inherit that default?"],
+	objections: [
+		"Which account does the limit attach to?",
+		"Will callers inherit that default?",
+	],
 });
 const draft = {
 	intent: "Reject orders above the limit.",
 	done: "An over-limit order never reaches the venue.",
-	nodes: [{ label: "L1", rule: "Check before placing.", probe: "Place an over-limit order." }],
+	nodes: [
+		{
+			label: "L1",
+			rule: "Check before placing.",
+			probe: "Place an over-limit order.",
+		},
+	],
 	checks: [{ id: "P1", argv: ["check-risk"], timeoutMs: 1000 }],
 	seams: [],
 	never: "No bypass.",
 	tradeoffs: "Check at placement rather than serialization.",
-	alternatives: "The ledger could refuse the order, but it would see it too late.",
+	alternatives:
+		"The ledger could refuse the order, but it would see it too late.",
 	settlements: [],
 	riders: [
-		{ label: "R1", text: "Use the account default.", origin: "incidental", disposition: "bind" },
-		{ label: "R2", text: "Expose a rejected-order count.", origin: "seeded", disposition: "open" },
-		{ label: "R3", text: "Limits are measured in lots.", origin: "evidence", disposition: "bind" },
+		{
+			label: "R1",
+			text: "Use the account default.",
+			origin: "incidental",
+			disposition: "bind",
+		},
+		{
+			label: "R2",
+			text: "Expose a rejected-order count.",
+			origin: "seeded",
+			disposition: "open",
+		},
+		{
+			label: "R3",
+			text: "Limits are measured in lots.",
+			origin: "evidence",
+			disposition: "bind",
+		},
 	],
 	references: [],
 };
@@ -77,14 +102,20 @@ const publish = {
 	kind: "publish_mandate",
 	draft,
 	base: "arena_seat_1",
-	grafts: [{ seat: "arena_seat_2", text: "Attach the check to the placement call." }],
+	grafts: [
+		{ seat: "arena_seat_2", text: "Attach the check to the placement call." },
+	],
 	replies: [],
 };
 const answerChallenger = {
 	kind: "answer_challenger",
 	dispositions: [
 		{ n: 1, status: "considered", reason: "The account is named in R1." },
-		{ n: 2, status: "dismissed", reason: "The default is local to each account." },
+		{
+			n: 2,
+			status: "dismissed",
+			reason: "The default is local to each account.",
+		},
 	],
 };
 
@@ -211,12 +242,16 @@ test("an optional third candidate joins in order and the judge receives every fu
 	assert.deepEqual(design.asks(judged, w), []);
 });
 
-const candidates = Object.fromEntries(seats.map((seat) => [seat, candidate(seat)]));
+const candidates = Object.fromEntries(
+	seats.map((seat) => [seat, candidate(seat)]),
+);
 const candidateTurn = () => step(grounded(), frame).state;
 const judgeTurn = () => complete(candidateTurn(), candidates);
 const synthesisTurn = (s = judgeTurn()) => complete(s, { arena_judge: judge });
-const challengeTurn = (s = synthesisTurn(), event: LaneEvent = publish) => step(s, event).state;
-const answeringTurn = (s = challengeTurn()) => complete(s, { arena_challenger: objections });
+const challengeTurn = (s = synthesisTurn(), event: LaneEvent = publish) =>
+	step(s, event).state;
+const answeringTurn = (s = challengeTurn()) =>
+	complete(s, { arena_challenger: objections });
 const firstReview = () => step(answeringTurn(), answerChallenger).state;
 function ask(s: State) {
 	const [current, ...extra] = design.asks(s, world);
@@ -224,45 +259,81 @@ function ask(s: State) {
 	assert.deepEqual(extra, []);
 	return current;
 }
-function owner(s: State, choice: string, annotations: LaneEvent["annotations"] = []) {
+function owner(
+	s: State,
+	choice: string,
+	annotations: LaneEvent["annotations"] = [],
+) {
 	const { subject, choices } = ask(s);
 	assert.ok(choices.includes(choice));
-	return step(s, { kind: "answered", subject, choice, decision: "owner-answer", annotations });
+	return step(s, {
+		kind: "answered",
+		subject,
+		choice,
+		decision: "owner-answer",
+		annotations,
+	});
 }
 function input(s: State) {
 	return design.agents(s, world)[0]?.expects[0]?.input?.() ?? "";
 }
 
 test("a timed-out child or a candidate that omits its unasked decisions cannot start judging; retries get a new plan key and old facts do not advance it", () => {
-	for (const answer of [null, candidate(seats[1]!).split("\n\n## Unasked Decisions")[0]!]) {
+	for (const answer of [
+		null,
+		candidate(seats[1]!).split("\n\n## Unasked Decisions")[0]!,
+	]) {
 		const s = candidateTurn();
 		const { key, jobs } = pending(s);
 		const failed = complete(s, { ...candidates, [seats[1]!]: answer });
 		assert.deepEqual(design.effects(failed, world), []);
-		assert.match(ask(failed).basis, answer === null ? /Child timed out/ : /Unasked Decisions/);
+		assert.match(
+			ask(failed).basis,
+			answer === null ? /Child timed out/ : /Unasked Decisions/,
+		);
 		assert.match(ask(failed).basis, /arena_seat_2/);
 		const retried = owner(failed, "retry").state;
 		assert.notEqual(pending(retried).key, key);
 		assert.deepEqual(pending(retried).jobs, jobs);
-		assert.deepEqual(step(retried, { kind: "effect_failed", key, error: "Late failure" }).state, retried);
-		assert.equal(pending(complete(retried, candidates)).jobs[0]?.seat, "arena_judge");
+		assert.deepEqual(
+			step(retried, { kind: "effect_failed", key, error: "Late failure" })
+				.state,
+			retried,
+		);
+		assert.equal(
+			pending(complete(retried, candidates)).jobs[0]?.seat,
+			"arena_judge",
+		);
 	}
 });
 
 test("a failed effect, out-of-order result, or incomplete judge report stays blocked rather than skipping a stage", () => {
 	const s = judgeTurn();
 	const { key } = pending(s);
-	const failed = step(s, { kind: "effect_failed", key, error: "The runner failed." }).state;
+	const failed = step(s, {
+		kind: "effect_failed",
+		key,
+		error: "The runner failed.",
+	}).state;
 	assert.match(ask(failed).basis, /The runner failed/);
 	assert.deepEqual(design.effects(failed, world), []);
 	const dispatching = candidateTurn();
 	const reversed = step(dispatching, {
 		kind: "effect_done",
 		key: pending(dispatching).key,
-		result: { results: seats.toReversed().map((seat) => ({ seat, conversation: seat, answer: candidate(seat), error: null })) },
+		result: {
+			results: seats.toReversed().map((seat) => ({
+				seat,
+				conversation: seat,
+				answer: candidate(seat),
+				error: null,
+			})),
+		},
 	}).state;
 	assert.match(ask(reversed).basis, /result/i);
-	const incomplete = complete(s, { arena_judge: JSON.stringify({ base: seats[0], scores: [] }) });
+	const incomplete = complete(s, {
+		arena_judge: JSON.stringify({ base: seats[0], scores: [] }),
+	});
 	assert.match(ask(incomplete).basis, /score/i);
 	assert.deepEqual(design.effects(incomplete, world), []);
 	assert.equal(input(incomplete), "");
@@ -271,8 +342,17 @@ test("a failed effect, out-of-order result, or incomplete judge report stays blo
 test("synthesis must name real sources, and the challenged Mandate cannot reach review until each objection has a disposition", () => {
 	const s = synthesisTurn();
 	assert.match(input(s), /Judge's independent observation of arena_seat_1/);
-	assert.ok("reject" in design.reduce(s, { ...publish, base: "missing" }, world));
-	assert.ok("reject" in design.reduce(s, { ...publish, grafts: [{ seat: "missing", text: "A graft." }] }, world));
+	assert.ok(
+		"reject" in design.reduce(s, { ...publish, base: "missing" }, world),
+	);
+	assert.ok(
+		"reject" in
+			design.reduce(
+				s,
+				{ ...publish, grafts: [{ seat: "missing", text: "A graft." }] },
+				world,
+			),
+	);
 	const challenge = challengeTurn(s);
 	const [job] = pending(challenge).jobs;
 	assert.ok(job);
@@ -284,19 +364,53 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 		"Attach the check to the placement call.",
 		"Use the account default.",
 		"Default of arena_seat_1",
-	]) assert.ok(job.question.toLowerCase().includes(part.toLowerCase()), part);
+	])
+		assert.ok(job.question.toLowerCase().includes(part.toLowerCase()), part);
 	assert.deepEqual(design.asks(challenge, world), []);
 	const malformed = complete(challenge, { arena_challenger: "No objections" });
 	assert.match(ask(malformed).basis, /objections/i);
 	const answering = answeringTurn(challenge);
 	assert.deepEqual(design.asks(answering, world), []);
 	assert.match(input(answering), /Which account/);
-	assert.ok("reject" in design.reduce(answering, { ...answerChallenger, dispositions: answerChallenger.dispositions.slice(1) }, world));
-	assert.ok("reject" in design.reduce(answering, { ...answerChallenger, dispositions: [answerChallenger.dispositions[0]!, answerChallenger.dispositions[0]!] }, world));
+	assert.ok(
+		"reject" in
+			design.reduce(
+				answering,
+				{
+					...answerChallenger,
+					dispositions: answerChallenger.dispositions.slice(1),
+				},
+				world,
+			),
+	);
+	assert.ok(
+		"reject" in
+			design.reduce(
+				answering,
+				{
+					...answerChallenger,
+					dispositions: [
+						answerChallenger.dispositions[0]!,
+						answerChallenger.dispositions[0]!,
+					],
+				},
+				world,
+			),
+	);
 	const review = step(answering, answerChallenger).state;
 	const decision = ask(review);
 	for (const seat of seats) assert.ok(decision.basis.includes(candidate(seat)));
-	for (const part of [draft.intent, "Attach the check to the placement call.", "Judge's score for arena_seat_2", "Which account does the limit attach to?", "The account is named in R1.", "Use the account default.", "Expose a rejected-order count.", "Limits are measured in lots."]) assert.ok(decision.basis.includes(part), part);
+	for (const part of [
+		draft.intent,
+		"Attach the check to the placement call.",
+		"Judge's score for arena_seat_2",
+		"Which account does the limit attach to?",
+		"The account is named in R1.",
+		"Use the account default.",
+		"Expose a rejected-order count.",
+		"Limits are measured in lots.",
+	])
+		assert.ok(decision.basis.includes(part), part);
 	assert.deepEqual(design.effects(review, world), []);
 	assert.equal(input(review), "");
 });
@@ -313,7 +427,10 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 	assert.ok("reject" in design.reduce(taken.state, publish, world));
 	const second = { ...publish, base: "arena_seat_2", grafts: [] };
 	assert.ok("reject" in design.reduce(taken.state, second, world));
-	const challenged = challengeTurn(taken.state, { ...second, replies: [{ n: 1, status: "acted_on", reason: "Kept account ownership." }] });
+	const challenged = challengeTurn(taken.state, {
+		...second,
+		replies: [{ n: 1, status: "acted_on", reason: "Kept account ownership." }],
+	});
 	const review = step(answeringTurn(challenged), answerChallenger).state;
 	assert.notEqual(ask(review).subject, ask(first).subject);
 	assert.match(ask(review).basis, /Retain account ownership/);
@@ -328,30 +445,49 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 test("seeded and fresh arenas keep the old candidates, judge, challenger and round; only seeded candidates receive the old review", () => {
 	for (const choice of ["arena", "arena_fresh"]) {
 		const first = firstReview();
-		const rerun = owner(first, choice, [{ n: 1, text: "Measure ownership independently." }]);
+		const rerun = owner(first, choice, [
+			{ n: 1, text: "Measure ownership independently." },
+		]);
 		const fresh = choice === "arena_fresh";
 		assert.deepEqual(rerun.send ?? [], []);
 		assert.match(input(rerun.state), /Measure ownership independently/);
 		assert.equal(input(rerun.state).includes(candidate(seats[0]!)), !fresh);
-		const next = step(rerun.state, { ...frame, question: "What scopes the risk limit?" }).state;
-		assert.deepEqual(next.rounds[0]?.dispositions, answerChallenger.dispositions);
+		const next = step(rerun.state, {
+			...frame,
+			question: "What scopes the risk limit?",
+		}).state;
+		assert.deepEqual(
+			next.rounds[0]?.dispositions,
+			answerChallenger.dispositions,
+		);
 		assert.equal(next.rounds[0]?.answer?.choice, choice);
 		assert.deepEqual(next.arenas[0], first.arenas[0]);
 		assert.notEqual(pending(next).key, pending(candidateTurn()).key);
 		const job = pending(next).jobs[0]!;
 		assert.equal(job.question.includes(candidate(seats[0]!)), !fresh);
-		assert.equal(job.question.includes("Measure ownership independently."), !fresh);
+		assert.equal(
+			job.question.includes("Measure ownership independently."),
+			!fresh,
+		);
 		assert.match(job.question, /What scopes the risk limit/);
 	}
 });
 
 test("rework preserves the first round, rechallenges the amended synthesis, and replies by annotation number", () => {
 	const first = firstReview();
-	const revised = owner(first, "rework", [{ n: 1, text: "Drop the incidental default." }]).state;
+	const revised = owner(first, "rework", [
+		{ n: 1, text: "Drop the incidental default." },
+	]).state;
 	assert.match(input(revised), /Drop the incidental default/);
 	const newer = { ...draft, riders: draft.riders.slice(1) };
-	const challenged = challengeTurn(revised, { ...publish, draft: newer, replies: [{ n: 1, status: "acted_on", reason: "Dropped R1." }] });
-	assert.ok(!pending(challenged).jobs[0]?.question.includes("Use the account default."));
+	const challenged = challengeTurn(revised, {
+		...publish,
+		draft: newer,
+		replies: [{ n: 1, status: "acted_on", reason: "Dropped R1." }],
+	});
+	assert.ok(
+		!pending(challenged).jobs[0]?.question.includes("Use the account default."),
+	);
 	assert.notEqual(pending(challenged).key, pending(challengeTurn()).key);
 	const review = step(answeringTurn(challenged), answerChallenger).state;
 	assert.match(ask(review).basis, /rider R1 removed/);
@@ -360,7 +496,10 @@ test("rework preserves the first round, rechallenges the amended synthesis, and 
 });
 
 test("declining after review or a failed dispatch leaves no effects, owner decision, or designer expectation running", () => {
-	for (const s of [firstReview(), complete(candidateTurn(), { ...candidates, [seats[1]!]: null })]) {
+	for (const s of [
+		firstReview(),
+		complete(candidateTurn(), { ...candidates, [seats[1]!]: null }),
+	]) {
 		const { state, send } = owner(s, "decline");
 		assert.deepEqual(send ?? [], []);
 		assert.deepEqual(design.effects(state, world), []);
@@ -374,11 +513,20 @@ test("a stopped designer resumes the same arena turn under a new expectation wit
 	for (const s of [grounded(), synthesisTurn(), answeringTurn()]) {
 		const [turn] = design.agents(s, world)[0]!.expects;
 		assert.ok(turn);
-		const held = step(s, { kind: "agent_stalled", agent: "designer", tokens: [turn.token], cause: "stopped", lastWords: "Still checking the evidence." });
+		const held = step(s, {
+			kind: "agent_stalled",
+			agent: "designer",
+			tokens: [turn.token],
+			cause: "stopped",
+			lastWords: "Still checking the evidence.",
+		});
 		assert.ok(held.send?.[0]);
 		assert.equal(input(held.state), "");
 		const resumed = step(held.state, {
-			kind: "resume", cause: held.send[0].event.cause!, direction: "Continue this turn.", evidence: "Stopped.",
+			kind: "resume",
+			cause: held.send[0].event.cause!,
+			direction: "Continue this turn.",
+			evidence: "Stopped.",
 		}).state;
 		const [after] = design.agents(resumed, world)[0]!.expects;
 		assert.ok(after);
@@ -394,5 +542,8 @@ test("cancelling a pending arena withdraws its effect and an old completion cann
 	const key = pending(s).key;
 	const cancelled = step(s, { kind: "cancel" }).state;
 	assert.deepEqual(design.effects(cancelled, world), []);
-	assert.deepEqual(step(cancelled, { kind: "effect_done", key, result: {} }).state, cancelled);
+	assert.deepEqual(
+		step(cancelled, { kind: "effect_done", key, result: {} }).state,
+		cancelled,
+	);
 });

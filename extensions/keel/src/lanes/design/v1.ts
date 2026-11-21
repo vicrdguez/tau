@@ -41,6 +41,41 @@ type Reply = {
 	status: "acted_on" | "considered" | "dismissed";
 	reason: string;
 };
+type ArenaSeat = { seat: string; model: string };
+type Arena = {
+	frame: { question: string; rubric: string };
+	seedRound: number | null;
+	setup:
+		| { candidates: ArenaSeat[]; judge: string; challenger: string }
+		| { error: string };
+	runs: {
+		stage: "candidates" | "judge" | "challenger";
+		jobs: (ArenaSeat & { question: string })[];
+		outcome: {
+			results: {
+				seat: string;
+				conversation: string;
+				answer: string | null;
+				error: string | null;
+			}[];
+			error: string | null;
+		} | null;
+	}[];
+	forcedBase: string | null;
+};
+type Synthesis = {
+	draft: Draft;
+	replies: Reply[];
+	base: string;
+	grafts: { seat: string; text: string }[];
+};
+type DesignerPhase =
+	| "seeded"
+	| "directed"
+	| "resumed"
+	| "framing"
+	| "drafting"
+	| "answering";
 type Mandate = {
 	encodeRequired: boolean;
 	approvalNotes: string[];
@@ -61,14 +96,13 @@ export const designV1 = {
 	version: 1,
 	sample: () => ({
 		phase: "entry" as
+			| DesignerPhase
 			| "entry"
-			| "seeded"
 			| "ambiguous"
-			| "directed"
-			| "resumed"
 			| "held"
 			| "bound"
-			| "drafting"
+			| "dispatching"
+			| "arena_blocked"
 			| "review"
 			| "landed"
 			| "closed"
@@ -83,7 +117,14 @@ export const designV1 = {
 			reference: string | null;
 			text: string;
 		} | null,
-		rounds: [] as { draft: Draft; replies: Reply[]; answer: Answer | null }[],
+		arenas: [] as Arena[],
+		proposal: null as Synthesis | null,
+		rounds: [] as (Synthesis & {
+			arena: number;
+			challenge: number;
+			dispositions: Reply[];
+			answer: Answer | null;
+		})[],
 		revisions: [] as {
 			phase:
 				| "queued"
@@ -110,6 +151,7 @@ export const designV1 = {
 		readings: [] as string[],
 		direction: "",
 		cause: null as string | null,
+		heldTurn: null as DesignerPhase | null,
 		seq: 0,
 	}),
 };

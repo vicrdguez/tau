@@ -14,11 +14,19 @@ export type Answer = {
 		excerpt: string | null;
 	}[];
 };
-export type Round = {
+export type Synthesis = {
 	draft: Draft;
 	replies: Reply[];
+	base: string;
+	grafts: { seat: string; text: string }[];
+};
+export type Round = Synthesis & {
+	arena: number;
+	challenge: number;
+	dispositions: Reply[];
 	answer: Answer | null;
 };
+type DraftRound = Pick<Round, "draft" | "replies" | "answer">;
 const dir = import.meta.dirname + "/../../prose";
 const review = prose(dir, "documents/review.md", ["round", "changes", "body"]);
 const roundText = prose(dir, "documents/mandate-round.md", [
@@ -41,34 +49,41 @@ const riderText = prose(dir, "documents/mandate-rider.md", [
 	"disposition",
 ]);
 const draftInput = prose(dir, "inputs/design/draft.md", [
-	"reference",
-	"audit",
+	"ground",
+	"evidence",
+	"base",
+	"answer",
 	"direction",
 ]);
 const revise = prose(dir, "inputs/design/revise.md", [
 	"basis",
+	"base",
 	"answer",
 	"direction",
 ]);
 const declined = prose(dir, "documents/declined.md", ["annotations"]);
 const mainKey = (n: number) => subject(`mandate/${n}`);
-const owed = (r: Round | undefined) =>
-	r?.answer?.choice === "rework" ? r.answer.annotations : [];
+export const continuesReview = (choice: string) =>
+	["rework", "arena", "arena_fresh"].includes(choice) ||
+	choice.startsWith("base:");
+const owed = (r: DraftRound | undefined) =>
+	r?.answer && continuesReview(r.answer.choice) ? r.answer.annotations : [];
+export const owedText = (r: Round | undefined) =>
+	owed(r)
+		.map((n) => annotation(n))
+		.join("\n") || "None.";
 
-export function openRound(
+export function synthesisError(
 	audit: Audit,
 	history: Round[],
-	draft: Draft,
-	replies: Reply[],
-): { reject: string } | { round: Round } {
-	const error = draftError(draft, audit);
-	if (error) return { reject: error };
-	if (!repliesCover(owed(history.at(-1)).length, replies))
-		return {
-			reject:
-				"Reply to every owed number exactly once: acted_on, considered or dismissed, with a reason.",
-		};
-	return { round: { draft, replies, answer: null } };
+	synthesis: Synthesis,
+) {
+	return (
+		draftError(synthesis.draft, audit) ||
+		(!repliesCover(owed(history.at(-1)).length, synthesis.replies)
+			? "Reply to every owed number exactly once: acted_on, considered or dismissed, with a reason."
+			: null)
+	);
 }
 function passage(a: Answer["annotations"][number]) {
 	return a.excerpt === null
@@ -81,7 +96,7 @@ function passage(a: Answer["annotations"][number]) {
 export function annotation(a: Answer["annotations"][number], status = "") {
 	return `${a.n}. ${a.text}${status}${passage(a)}`;
 }
-function repliesText(r: Round, prev: Round | undefined) {
+function repliesText(r: DraftRound, prev: DraftRound | undefined) {
 	return (
 		owed(prev)
 			.map((a) => {
@@ -147,7 +162,7 @@ function entryText(n: Entry, mark = "") {
 function body(
 	a: Audit,
 	reference: string,
-	history: Round[],
+	history: DraftRound[],
 	showChanges = true,
 ) {
 	const r = history.at(-1)!;
@@ -205,63 +220,60 @@ export function reviewAsk(
 	a: Audit,
 	reference: string,
 	history: Round[],
-): Ask | null {
+	evidence: string,
+	candidates: string[],
+): Ask {
 	const r = history.at(-1)!;
-	if (r.answer) return null;
+	const document = body(a, reference, history);
 	return {
 		subject: mainKey(history.length),
 		title: `Review Mandate: ${r.draft.intent.trim().split("\n", 1)[0]}`,
 		basis: review({
 			round: String(history.length),
-			...body(a, reference, history),
+			changes: document.changes,
+			body: document.body.trimEnd() + "\n\n" + evidence,
 		}),
-		choices: ["approve", "rework", "decline"],
+		choices: [
+			"approve",
+			"rework",
+			...candidates.map((seat) => `base:${seat}`),
+			"arena",
+			"arena_fresh",
+			"decline",
+		],
 	};
 }
+export const auditText = (a: Audit, reference: string) =>
+	[
+		reference,
+		a.exists,
+		...a.gaps.map((g) => `Gap ${g.label}: ${g.text}`),
+		...a.contradictions.map((g) => `Contradiction ${g.label}: ${g.text}`),
+	].join("\n\n");
+export const synthesisBody = (
+	a: Audit,
+	reference: string,
+	synthesis: Synthesis,
+) => body(a, reference, [{ ...synthesis, answer: null }]).body;
+
 export function designerInput(
 	a: Audit,
 	reference: string,
 	history: Round[],
+	arena: number,
+	evidence: string,
+	base: string,
 	direction: string,
 ) {
-	if (!history.length)
-		return draftInput({
-			reference,
-			audit: [
-				a.exists,
-				...a.gaps.map((g) => `Gap ${g.label}: ${g.text}`),
-				...a.contradictions.map((g) => `Contradiction ${g.label}: ${g.text}`),
-			].join("\n"),
-			direction,
-		});
-	return revise({
-		basis: body(a, reference, history, false).body.trimEnd(),
-		answer:
-			owed(history.at(-1))
-				.map((n) => annotation(n))
-				.join("\n") || "None.",
-		direction,
-	});
-}
-export function answered(
-	a: Audit,
-	reference: string,
-	history: Round[],
-	f: Fact,
-) {
-	if (f.subject !== mainKey(history.length)) return null;
-	const ask = reviewAsk(a, reference, history);
-	if (!ask?.choices.includes(f.choice)) return null;
-	const answer = reviewAnswer(f, ask.basis);
-	return {
-		rounds: [...history.slice(0, -1), { ...history.at(-1)!, answer }],
-		phase:
-			f.choice === "approve"
-				? ("bound" as const)
-				: f.choice === "rework"
-					? ("drafting" as const)
-					: ("closed" as const),
-	};
+	const previous = history.at(-1);
+	const common = { base, answer: owedText(previous), direction };
+	return previous?.arena === arena
+		? revise({
+				...common,
+				basis:
+					body(a, reference, history, false).body.trimEnd() + "\n\n" + evidence,
+			})
+		: draftInput({ ...common, ground: auditText(a, reference), evidence });
 }
 export function reviewAnswer(f: Fact, basis: string): Answer {
 	return {

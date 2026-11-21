@@ -1,4 +1,8 @@
-The owner asked you to rework the Mandate. Address these annotations:
+Revise the synthesis in response to the owner's choice and annotations.
+
+{{base}}
+
+## Owner annotations
 
 {{answer}}
 
@@ -8,4 +12,4 @@ The owner asked you to rework the Mandate. Address these annotations:
 
 {{basis}}
 
-Keep labels stable. Revise the riders and their dispositions alongside the other entries. Return the whole draft with `publish_mandate`. Reply to each numbered annotation listed above: acted on, considered or dismissed, with your reason.
+Keep labels stable. Revise the riders and their dispositions with the other entries. Return the whole draft, base and attributed grafts with `publish_mandate`. Reply to each numbered annotation: acted on, considered or dismissed, with your reason. Keel sends the revised synthesis to the challenger before asking the owner.

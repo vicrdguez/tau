@@ -1,0 +1,11 @@
+Frame the decision the candidates should contest. Give them a single question and a rubric that distinguishes viable designs against the owner's intent. Ask for the choices still open; carry forward the approved references and constraints from Ground. Call `frame_arena` with the question and rubric.
+
+## Ground
+
+{{ground}}
+
+{{notes}}
+
+{{seed}}
+
+{{direction}}
