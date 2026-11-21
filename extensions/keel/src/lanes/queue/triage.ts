@@ -407,6 +407,16 @@ export function classify(
 			};
 		}
 		if (original.status === "triage") return joined(state, original, event);
+		if (original.status === "revision_pending" && live.active)
+			return {
+				state,
+				send: [
+					revision(
+						[{ ...event, investigation: original.investigation }],
+						reportText(event),
+					),
+				],
+			};
 		return { state, send: releases([event]) };
 	}
 	if (i.duplicateOf !== null)
@@ -490,7 +500,7 @@ export function cancelWork(q: Queue, work: WorkId): Queue {
 		...q,
 		entries: q.entries.map((f) =>
 			f.intake.work === work &&
-			f.status === "triage" &&
+			(f.status === "triage" || f.status === "revision_pending") &&
 			f.investigation?.classification === "mandate_wrong"
 				? { ...f, status: "cancelled" }
 				: f,
