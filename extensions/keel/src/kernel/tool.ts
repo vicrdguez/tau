@@ -46,7 +46,6 @@ type ToolSpec<P extends object, F> = Header & {
 	description: string;
 	parameters: P;
 	terminate: boolean | ((args: Args<P>) => boolean);
-	expectation?(args: Args<P>): Token;
 	citations?(args: Args<P>): readonly string[];
 	observe(args: Args<P>, self: Self, context: Context, view: View): Promise<F>;
 	event(args: Args<P>, facts: F, self: Self): LaneEvent;
@@ -58,7 +57,6 @@ type PlainTool<P extends object> = Omit<ToolSpec<P, undefined>, "observe"> & {
 type Publish = (
 	api: ToolExecutionApi,
 	context: Context,
-	selected: Token | undefined,
 	citations: readonly string[],
 	prepare: (
 		self: Self,
@@ -117,7 +115,6 @@ export function defineLaneTool<P extends object, F>(
 					return publish(
 						api,
 						context,
-						spec.expectation?.(args),
 						spec.citations?.(args) ?? [],
 						async (self, view) => ({
 							event: spec.observe
@@ -163,7 +160,6 @@ async function assistantEntry(tx: Tx, api: ToolExecutionApi) {
 async function callToken(
 	tx: Tx,
 	api: ToolExecutionApi,
-	selected: Token | undefined,
 ): Promise<string | null | undefined> {
 	const assistant = await assistantEntry(tx, api);
 	if (assistant === undefined) return undefined;
@@ -187,11 +183,11 @@ async function callToken(
 				typeof data.token !== "string"
 			)
 				return undefined;
-			if (selected === undefined || data.token === selected) return data.token;
+			return data.token;
 		}
 		cursor = page.next;
 	} while (cursor);
-	return selected === undefined ? null : undefined;
+	return null;
 }
 
 type Refusal = { reject: string };
@@ -248,7 +244,6 @@ async function admit(
 	conversation: ConversationId,
 	spec: Header,
 	token: string | null | undefined,
-	selected: Token | undefined,
 ): Promise<Self | Refusal> {
 	const { binding } = await tx.doc(stateDoc(BindingState), conversation);
 	if (spec.gate === "adopt" && !binding) {
@@ -287,7 +282,7 @@ async function admit(
 	let matched: Token | null = null;
 	if (spec.gate !== "standing") {
 		const eligible = slot.open.filter((e) => e.tools.includes(spec.name));
-		if (selected === undefined && eligible.length > 1)
+		if (eligible.length > 1)
 			return { reject: `Ambiguous open expectation for ${spec.name}` };
 		const match = eligible.find((e) =>
 			token === null
@@ -327,7 +322,6 @@ export async function dispatchCaller(
 				: { gate: "adopt", name: "ground" }),
 		},
 		null,
-		undefined,
 	);
 	if ("reject" in self) throw new Error(self.reject);
 	return { self, bound: binding !== null };
@@ -372,21 +366,14 @@ export function wrapTool(
 	const targetScope = scopeForLane(spec.lane);
 	if (spec.gate === "adopt" && targetScope !== "conversation")
 		throw new Error("Adoption needs a work lane");
-	const publish: Publish = async (
-		api,
-		context,
-		selected,
-		citations,
-		prepare,
-	) => {
+	const publish: Publish = async (api, context, citations, prepare) => {
 		// Document presence, not reply text, marks a completed call (a reply may be null).
 		const receipt = stateDoc(ReceiptState);
 		const saved = await api.snapshot(receipt, api.taskId, context);
 		if (saved) return output(saved);
 		const first = await api.commit(async (tx) => {
-			const token =
-				spec.gate === "standing" ? null : await callToken(tx, api, selected);
-			const self = await admit(tx, api.conversationId, spec, token, selected);
+			const token = spec.gate === "standing" ? null : await callToken(tx, api);
+			const self = await admit(tx, api.conversationId, spec, token);
 			if ("reject" in self)
 				return {
 					done: finish(await tx.doc(receipt, api.taskId), self, false),
@@ -415,13 +402,7 @@ export function wrapTool(
 				const doc = await tx.doc(receipt, api.taskId);
 				// The transcript cutoff is immutable, but a token, binding or cwd may
 				// have changed during observe. Never apply facts read for another agent.
-				const self = await admit(
-					tx,
-					api.conversationId,
-					spec,
-					first.token,
-					selected,
-				);
+				const self = await admit(tx, api.conversationId, spec, first.token);
 				if ("reject" in self) return finish(doc, self, false);
 				const prev = first.self;
 				if (
