@@ -692,7 +692,8 @@ test("a blocked filer linked after a non-blocking defect was planned waits for i
 	b.brief(fix.id, "report");
 	b.ready();
 	b.send(hold("queue/2", "ledger"));
-	b.send({ kind: "link_defect", cause: "queue/1", linked: "queue/2" });
+	b.send(hold("queue/1", "ledger"));
+	b.send(release("queue/2"));
 	assert.equal(b.worker("ledger")?.paused, true);
 	b.publish(fix.id);
 	assert.equal(b.worker("ledger")?.paused, true);
