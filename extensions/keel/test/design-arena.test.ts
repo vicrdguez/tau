@@ -423,7 +423,7 @@ test("candidate headings are flexible and the judge can return fenced JSON with 
 	}
 });
 
-test("the judge reads the first fenced block or first object, with surrounding prose", () => {
+test("the judge reads fenced and bare JSON with surrounding prose without skipping a schema-invalid value", () => {
 	const decorated = judge.replace(
 		"Judge's score for arena_seat_1",
 		'Measured {one} and } inside a quote: \\"ok\\".',
@@ -431,17 +431,47 @@ test("the judge reads the first fenced block or first object, with surrounding p
 	for (const response of [
 		`Here is my report:\n\n\`\`\`json\n${decorated}\n\`\`\`\n\nNothing else.\n\`\`\`json\n{}\n\`\`\``,
 		`Here is my report: ${decorated} End of report. {}`,
+		`Here is my report:\r\n   ~~~~\r\n${decorated}\r\n   ~~~~\r\n`,
 	]) {
 		const turn = complete(judgeTurn(), { arena_judge: response });
 		assert.match(input(turn), /Measured \{one\}/);
 	}
 	for (const response of [
 		`\`\`\`json\n{}\n\`\`\`\n\`\`\`json\n${judge}\n\`\`\``,
+		`\`\`\`json\nnull\n\`\`\`\n\`\`\`json\n${judge}\n\`\`\``,
 		`First {} then ${judge}`,
 	]) {
 		const turn = complete(judgeTurn(), { arena_judge: response });
 		assert.match(ask(turn).basis, /Name a candidate as base/);
 	}
+});
+
+test("the judge skips a non-JSON fence and prefers the first parseable fence over a bare object", () => {
+	const turn = complete(judgeTurn(), {
+		arena_judge: `Not this: {}\n\`\`\`text\nI weighed both seats.\n\`\`\`\n\`\`\`json\n${judge}\n\`\`\`\n\`\`\`json\n{}\n\`\`\``,
+	});
+	assert.match(input(turn), /Judge's score for arena_seat_1/);
+});
+
+test("the judge falls back to the first parseable object when no fence parses", () => {
+	const turn = complete(judgeTurn(), {
+		arena_judge: `\`\`\`text\nI weighed both seats.\n\`\`\`\nMy report: ${judge} End of report. {}`,
+	});
+	assert.match(input(turn), /Judge's score for arena_seat_1/);
+});
+
+test("the judge skips a brace-delimited phrase before the report", () => {
+	const turn = complete(judgeTurn(), {
+		arena_judge: `I weighed {both seats}; result: ${judge}`,
+	});
+	assert.match(input(turn), /Judge's score for arena_seat_1/);
+});
+
+test("the judge finds the report after an unmatched opening brace", () => {
+	const turn = complete(judgeTurn(), {
+		arena_judge: `I weighed {both seats; result: ${judge}`,
+	});
+	assert.match(input(turn), /Judge's score for arena_seat_1/);
 });
 
 test("base and graft decisions accept a label or a reason alone and refuse missing, duplicate, ambiguous or unknown outcomes", () => {
