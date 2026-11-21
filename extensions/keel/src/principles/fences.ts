@@ -36,19 +36,16 @@ export function overlapsFence(fence: string, pattern: string): boolean {
 	const path = normalizeFence(fence);
 	if (path === null || !pattern) return false;
 	if (path === ".") return true;
+	const glob = pattern.replace(/^(?:\.\/)+/u, "");
 	// A glob can match the fence directly, or cover a directory above it.
 	for (
 		let ancestor = path;
 		ancestor !== ".";
 		ancestor = posix.dirname(ancestor)
 	)
-		if (matchesGlob(ancestor, pattern)) return true;
+		if (matchesGlob(ancestor, glob)) return true;
 	// A fence can also cover the directory from which a glob descends.
-	for (
-		let i = pattern.lastIndexOf("/");
-		i > 0;
-		i = pattern.lastIndexOf("/", i - 1)
-	)
-		if (matchesGlob(path, pattern.slice(0, i))) return true;
+	for (let i = glob.lastIndexOf("/"); i > 0; i = glob.lastIndexOf("/", i - 1))
+		if (matchesGlob(path, glob.slice(0, i))) return true;
 	return false;
 }
