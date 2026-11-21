@@ -264,6 +264,7 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 			event: {
 				...request,
 				kind: "propose_revision",
+				number: 1,
 				mandate: next,
 				changes: "R1: rule, falsifying probe",
 			},
@@ -634,6 +635,7 @@ test("causes after approval wait without changing it, then join the next revisio
 	assert.notEqual(next.subject, first.subject);
 	const approved = x.answer(next.subject, "approve").send?.[0]?.event;
 	assert.deepEqual(approved?.causes, late);
+	assert.equal(approved?.number, 2);
 	assert.deepEqual(
 		(approved?.mandate as { approvalNotes: string[] }).approvalNotes,
 		[],
