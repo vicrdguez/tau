@@ -35,20 +35,9 @@ type QueueV1 = {
 				pattern: string | null;
 				blocking: boolean;
 			};
+			goal: string | null;
 			basis: string | null;
-			status:
-				| "filed"
-				| "triage"
-				| "routed"
-				| "dropped"
-				| "deferred"
-				| "duplicate"
-				| "blessed"
-				| "cancelled"
-				| "revision_pending"
-				| "no_action"
-				| "revision_declined"
-				| "settled";
+			status: "filed" | "triage" | "defect" | "revision" | "closed";
 			investigation: {
 				classification:
 					| "defect_in_scope"
@@ -56,7 +45,6 @@ type QueueV1 = {
 					| "sets_precedent"
 					| "mandate_wrong"
 					| "unapproved_pattern"
-					| "duplicate"
 					| "no_action";
 				nodes: string[];
 				evidence: string;
@@ -64,9 +52,9 @@ type QueueV1 = {
 				cause: string;
 				recommendation: string;
 				reference: string | null;
-				duplicateOf: number | null;
+				sameAs: number | null;
 			} | null;
-			batch: number | null;
+			group: number | null;
 			disposition: string | null;
 		}[];
 		patterns: {
@@ -112,6 +100,7 @@ export const queueFixture = {
 						pattern: null,
 						blocking: true,
 					},
+					goal: "Keep the ledger balanced.",
 					basis: "Decide what to do about rounding.",
 					status: "triage",
 					investigation: {
@@ -122,9 +111,9 @@ export const queueFixture = {
 						cause: "the boundary",
 						recommendation: "build",
 						reference: null,
-						duplicateOf: null,
+						sameAs: null,
 					},
-					batch: 1,
+					group: 1,
 					disposition: null,
 				},
 			],

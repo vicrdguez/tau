@@ -9,7 +9,6 @@ export const classes = [
 	"sets_precedent",
 	"mandate_wrong",
 	"unapproved_pattern",
-	"duplicate",
 	"no_action",
 ] as const;
 export type Classification = (typeof classes)[number];
@@ -23,13 +22,12 @@ export type Investigation = {
 	cause: string;
 	recommendation: string;
 	reference: string | null;
-	duplicateOf: number | null;
+	sameAs: number | null;
 };
-export type Investigated = {
+export type Investigated = Investigation & {
 	kind: "investigated";
 	finding: number;
-	sameAs: number | null;
-} & Investigation;
+};
 export type PlanItem = {
 	id: string;
 	goal: string;
@@ -50,43 +48,27 @@ export function context(world: World, work: WorkId | null) {
 			? null
 			: (world.view("design", work) as {
 					mandate: Mandate | null;
+					goal?: string;
 					reference: string | null;
 				} | null);
 	return {
 		active: build?.phase === "active",
-		plan:
-			build?.plan.map(({ id, goal, stage, nodes, deps }) => ({
-				id,
-				goal,
-				stage,
-				nodes,
-				deps,
-			})) ?? [],
+		plan: build?.plan ?? [],
+		goal: (design?.goal ?? design?.mandate?.intent)?.split("\n", 1)[0] ?? null,
 		mandate: design?.mandate ?? null,
 		reference: design?.reference ?? null,
 	};
 }
 
-export type Status =
-	| "filed"
-	| "triage"
-	| "routed"
-	| "dropped"
-	| "deferred"
-	| "duplicate"
-	| "blessed"
-	| "cancelled"
-	| "revision_pending"
-	| "no_action"
-	| "revision_declined"
-	| "settled";
 export type Finding = {
 	id: number;
 	intake: Intake;
+	goal: string | null;
 	basis: string | null;
-	status: Status;
+	status: "filed" | "triage" | "defect" | "revision" | "closed";
 	investigation: Investigation | null;
-	batch: number | null;
+	// An open decision's first finding, or the finding whose fix holds this filer.
+	group: number | null;
 	disposition: string | null;
 };
 export type Queue = {
@@ -130,20 +112,27 @@ export function choices(classification: Classification) {
 			: workChoices;
 }
 
-export function batches(q: Queue) {
-	const open = new Map<number, Finding[]>();
-	for (const f of q.entries) {
-		if (f.status !== "triage" || f.batch === null) continue;
-		const batch = open.get(f.batch);
-		if (batch) batch.push(f);
-		else open.set(f.batch, [f]);
+export function decisions(q: Queue) {
+	return q.entries.filter((f) => f.status === "triage" && f.basis !== null);
+}
+
+export const decisionMembers = (q: Queue, id: number) =>
+	q.entries.filter((f) => f.status === "triage" && f.group === id);
+
+export function disposition(f: Finding): string {
+	switch (f.status) {
+		case "filed":
+			return "open: awaiting investigation";
+		case "triage":
+			return "open: awaiting triage";
+		case "revision":
+			return "build: awaiting Mandate revision";
+		case "defect":
+			return "open: awaiting defect fix";
+		case "closed":
+			return f.disposition!;
 	}
-	return [...open.values()];
 }
-export function duplicates(q: Queue, batch: readonly Finding[]) {
-	return q.entries.filter(
-		(f) =>
-			f.status === "duplicate" &&
-			batch.some((b) => b.id === f.investigation?.duplicateOf),
-	);
-}
+
+export const close = (disposition: string) =>
+	({ status: "closed", basis: null, group: null, disposition }) as const;

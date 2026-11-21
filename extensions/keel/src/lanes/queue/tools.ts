@@ -81,7 +81,7 @@ export const queueTools = [
 		name: "report_investigation",
 		roles: ["investigator"],
 		description:
-			"Report the requested investigation with evidence, estimate, decision cause and recommendation. Name an approved reference when determined, affected nodes when the Mandate is wrong, and the original finding when duplicate.",
+			"Report the investigation with evidence, estimate, decision cause and recommendation. Name the approved reference when determined and binding nodes when the Mandate is wrong. Link related evidence with sameAs.",
 		parameters: obj({
 			finding,
 			classification: oneOf(classes),
@@ -98,7 +98,6 @@ export const queueTools = [
 			]),
 			cause: opt(text),
 			sameAs: opt(finding),
-			duplicateOf: opt(finding),
 			reference: opt(text),
 		}),
 		terminate: true,
@@ -112,7 +111,6 @@ export const queueTools = [
 			recommendation: args.recommendation,
 			cause: args.cause ?? "",
 			sameAs: args.sameAs ?? null,
-			duplicateOf: args.duplicateOf ?? null,
 			reference: args.reference ?? null,
 		}),
 	}),

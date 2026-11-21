@@ -8,7 +8,13 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
-import type { Holding, HoldingAddress, Intake, Resume } from "./public.ts";
+import type {
+	FindingDisposition,
+	Holding,
+	HoldingAddress,
+	Intake,
+	Resume,
+} from "./public.ts";
 import { type Investigated, initial, pending, type Queue } from "./state.ts";
 import * as triage from "./triage.ts";
 
@@ -96,42 +102,13 @@ export const queueLane = defineLane(
 					? withTriage(state, result)
 					: { reject: result.reject };
 			}
-			if (event.kind === "defect_merged")
+			if (event.kind === "revision_disposition")
 				return withTriage(state, {
-					state: {
-						...state.triage,
-						entries: state.triage.entries.map((f) =>
-							f.intake.work === event.work && `queue/${f.id}` === event.cause
-								? {
-										...f,
-										status: "settled",
-										disposition: `fixed by ${event.item}`,
-									}
-								: f,
-						),
-					},
+					state: triage.recordDisposition(
+						state.triage,
+						event as FindingDisposition,
+					),
 				});
-			if (event.kind === "revision_disposition") {
-				const causes = event.causes as string[];
-				const disposition = String(event.disposition);
-				return withTriage(state, {
-					state: {
-						...state.triage,
-						entries: state.triage.entries.map((f) =>
-							f.intake.work === event.work && causes.includes(`queue/${f.id}`)
-								? {
-										...f,
-										disposition,
-										status:
-											disposition === "revision declined"
-												? "revision_declined"
-												: "settled",
-									}
-								: f,
-						),
-					},
-				});
-			}
 			if (event.kind === "resolve_holding") {
 				const resolved = address(
 					event as HoldingAddress & { kind: "resolve_holding" },

@@ -9,7 +9,6 @@ Use `report_investigation` once for the finding in your input. Give a concise si
 - `sets_precedent`: no approved reference settles the answer.
 - `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them.
 - `unapproved_pattern`: a ruling cites a pattern the owner has not approved.
-- `duplicate`: an earlier finding already covers this cause. Name its finding number in `duplicateOf`. A deferred finding reopens with both reports.
-- `no_action`: an observation needs no change and holds nothing. Give the reason in the evidence. The owner sees it at hand-over.
+- `no_action`: an observation needs no change, holds nothing and did not come from the owner. Give the reason in the evidence. The owner sees it at hand-over or as a note if the hand-over is already written.
 
-Give `sameAs` with the earlier finding number if they take the same answer for the same cause. Reuse the earlier cause instead of writing it again. Shared labels or shared choices alone are not enough. Recommend `build`, `defer` or `drop` for work, and `bless`, `revoke` or `defer` for a pattern.
+Use `sameAs` to link evidence to an earlier finding with the same cause. If the earlier decision is open, the owner sees both reports in the decision before answering. If the coordinator is fixing the same defect, both filers wait for that fix. Otherwise the owner gets a new decision citing the earlier finding and its outcome. Recommend `build`, `defer` or `drop` for work, and `bless`, `revoke` or `defer` for a pattern.

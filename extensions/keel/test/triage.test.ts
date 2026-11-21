@@ -598,7 +598,13 @@ test("a second blocked filer linked to a defect being fixed stays held until tha
 		blocking: true,
 	});
 	const messages = q.send(q.investigation(2, "defect_in_scope", { sameAs: 1 }));
-	assert.deepEqual(messages.map((m) => [m.event.kind, m.event.cause]), [["queue_hold", "queue/1"], ["queue_release", "queue/2"]]);
+	assert.deepEqual(
+		messages.map((m) => [m.event.kind, m.event.cause]),
+		[
+			["queue_hold", "queue/1"],
+			["queue_release", "queue/2"],
+		],
+	);
 	assert.deepEqual(q.ask(), []);
 	q.send({
 		kind: "revision_disposition",
@@ -764,7 +770,9 @@ test("approving triage asks the designer of the same work for a revision and kee
 	const [second] = q.send(q.investigation(2, "mandate_wrong", { sameAs: 1 }));
 	const out = q.answer("build");
 	const revision = out.find((m) => m.event.kind === "revise_mandate");
-	assert.ok(out.every((m) => ["queue_hold", "revise_mandate"].includes(m.event.kind)));
+	assert.ok(
+		out.every((m) => ["queue_hold", "revise_mandate"].includes(m.event.kind)),
+	);
 	assert.equal(revision?.lane, "design");
 	assert.equal(revision?.work, 4);
 	assert.deepEqual(revision?.event.causes, [

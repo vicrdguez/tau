@@ -1,6 +1,14 @@
+import type { WorkId } from "../../kernel/ids.ts";
+import type { Message } from "../../kernel/lane.ts";
 import type { RepoInfo, Sha } from "../../repo/index.ts";
-import type { Ruling } from "../build/public.ts";
-import type { Mandate, Reply } from "../design/public.ts";
+import type { Approval, Ruling } from "../build/public.ts";
+import type { Mandate } from "../design/public.ts";
+
+export type FindingNote = { kind: "finding_note"; text: string };
+export function findingNote(work: WorkId, text: string): Message {
+	const event: FindingNote = { kind: "finding_note", text };
+	return { lane: "verify", work, event };
+}
 
 type BuildSnapshot = {
 	repo: RepoInfo;
@@ -26,6 +34,6 @@ export type Publication = BuildSnapshot &
 				base: Sha;
 				summary: string;
 				risk: string;
-				approvalReplies: Reply[];
+				approvals: Approval[];
 		  }
 	);

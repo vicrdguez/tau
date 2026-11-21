@@ -26,7 +26,7 @@ import {
 } from "../queue/public.ts";
 import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
-import type { Publication } from "./public.ts";
+import type { FindingNote, Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
@@ -44,6 +44,7 @@ export { verifyTools } from "./tools.ts";
 
 type Event =
 	| Publication
+	| FindingNote
 	| Resume
 	| { kind: "ambiguity_answer"; direction: string }
 	| {
@@ -541,6 +542,8 @@ function transition(prev: State, world: World) {
 		return settle();
 	}
 	function reduce(e: Event): Reduction<State> {
+		if (e.kind === "finding_note")
+			return { state: prev, notes: [{ agent: null, text: e.text }] };
 		if (s.cancelled) return { state: prev };
 		switch (e.kind) {
 			case "cancel":
@@ -665,7 +668,7 @@ function transition(prev: State, world: World) {
 						summary: e.summary,
 						risk: e.risk,
 						rulings: e.rulings,
-						approvalReplies: e.approvalReplies,
+						approvals: e.approvals,
 					};
 				checkout(c);
 				break;

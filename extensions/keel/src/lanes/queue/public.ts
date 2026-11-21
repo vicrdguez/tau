@@ -70,3 +70,23 @@ export type Intake = {
 export function fileIntake(finding: Intake): Message {
 	return { lane: "queue", work: null, event: { kind: "intake", ...finding } };
 }
+
+export type FindingDisposition = {
+	kind: "revision_disposition";
+	work: WorkId;
+	causes: string[];
+	disposition: string;
+};
+export function closeFindings(
+	work: WorkId,
+	causes: string[],
+	disposition: string,
+): Message {
+	const event: FindingDisposition = {
+		kind: "revision_disposition",
+		work,
+		causes,
+		disposition,
+	};
+	return { lane: "queue", work: null, event };
+}
