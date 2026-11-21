@@ -453,6 +453,30 @@ test("a revision shows and applies all differences, including an unreported addi
 	);
 });
 
+test("triage evidence remains usable when an intervening revision removed a reported label", () => {
+	const x = pending();
+	x.act({ ...publish, changes: { remove: ["R2"] } });
+	x.answer(x.asks()[0]!.subject, "approve");
+	x.act({ kind: "revision_activated", causes: request.causes });
+	x.act({
+		...request,
+		causes: ["finding-8"],
+		nodes: ["R2"],
+		text: "The old timestamp report.",
+	});
+	assert.match(x.input(), /The old timestamp report/);
+	const closed = x.act({
+		kind: "revision_settled",
+		cause: "finding-8",
+		node: "R1",
+	});
+	assert.equal(
+		closed.send?.find((m) => m.lane === "queue")?.event.disposition,
+		"already settled by R1",
+	);
+	assert.equal(x.turn(), undefined);
+});
+
 test("a cause arriving while the approved plan is owed withdraws that plan and returns to the designer", () => {
 	const x = pending();
 	x.act(publish);

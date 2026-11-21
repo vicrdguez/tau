@@ -412,6 +412,34 @@ test("revision activation and the edited plan take effect together, retaining a 
 	assert.deepEqual(b.coord()?.tools, ["handoff_build"]);
 });
 
+test("the approved revision holds every affected brief, including a removed node the investigator did not name", () => {
+	const first = goal("first");
+	const report = goal("report");
+	const b = setup([first, report]);
+	b.brief(first.id);
+	b.ready();
+	b.brief(report.id, "report");
+	b.ready();
+	b.send(hold("queue/1", null, ["ledger"]));
+	b.send({
+		...proposal,
+		nodes: ["ledger", "report"],
+		mandate: { ...revised, nodes: [revised.nodes[0]!] },
+	});
+	assert.equal(b.worker(report.id)?.paused, true);
+	const correction = goal("new-reporter");
+	b.plan([first, { ...report, deps: [correction.id] }, correction], reply);
+	assert.equal(b.worker(report.id)?.paused, true);
+	b.brief(correction.id);
+	b.ready();
+	b.publish(correction.id);
+	b.merge(correction.id);
+	const input = b.worker(report.id)?.expects[0]?.input?.() ?? "";
+	assert.match(input, /New ledger crossing/);
+	assert.doesNotMatch(input, /Stable reporting/);
+	assert.doesNotMatch(input, /Mandate nodes: report/);
+});
+
 test("a verified item awaiting merge is a record: require a separate correction depending on it", () => {
 	const original = goal("verified");
 	const b = setup([original]);
