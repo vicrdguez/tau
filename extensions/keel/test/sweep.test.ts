@@ -26,7 +26,7 @@ const timer = (kind: string, input: unknown) => {
 	const data = input as { spec?: { kind: string }; key?: string };
 	return (
 		kind.startsWith("keel.effect") &&
-		(data.spec?.kind === "sweep" || data.key?.startsWith("sweep/"))
+		(data.spec?.kind === "sweep" || data.key?.startsWith("sweep/") === true)
 	);
 };
 

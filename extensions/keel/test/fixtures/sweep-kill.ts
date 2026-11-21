@@ -26,8 +26,12 @@ const s = await openScenario(
 	() => Number(time),
 );
 await s.store.harness.commit(
-	(tx) =>
-		options.patch(tx, { sweep_minutes: 1, sweeper: "sweep-fixture/sweeper" }),
+	async (tx) =>
+		options.set(tx, {
+			...(await options.get(tx)),
+			sweep_minutes: 1,
+			sweeper: "sweep-fixture/sweeper",
+		}),
 	ctx,
 );
 await s.start();
