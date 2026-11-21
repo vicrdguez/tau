@@ -27,6 +27,9 @@ const roundText = prose(dir, "documents/mandate-round.md", [
 	"nodes",
 	"riders",
 	"considerations",
+	"history",
+]);
+const roundHistory = prose(dir, "documents/mandate-round-history.md", [
 	"removed",
 	"replies",
 ]);
@@ -66,17 +69,22 @@ export function openRound(
 	return { round: { draft, replies, answer: null } };
 }
 function passage(a: Answer["annotations"][number]) {
-	return a.excerpt === null ? "" : `\n> ${a.excerpt}`;
+	return a.excerpt === null
+		? ""
+		: `\n${a.excerpt
+				.split("\n")
+				.map((line) => `> ${line}`)
+				.join("\n")}`;
 }
 export function annotation(a: Answer["annotations"][number], status = "") {
-	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}${status}${passage(a)}`;
+	return `${a.n}. ${a.text}${status}${passage(a)}`;
 }
 function repliesText(r: Round, prev: Round | undefined) {
 	return (
 		owed(prev)
 			.map((a) => {
 				const reply = r.replies.find((v) => v.n === a.n)!;
-				return `${annotation(a)}\n   ${reply.status}: ${reply.reason}`;
+				return `${annotation(a)}\n\n   ${reply.status}: ${reply.reason}`;
 			})
 			.join("\n") || "None."
 	);
@@ -120,9 +128,8 @@ function entries(d: Draft, a: Audit): Entry[] {
 		reference: d.references.find((r) => r.label === n.label)?.source ?? "",
 	}));
 }
-function entryText(n: Entry, mark = "") {
+function entryBody(n: Entry) {
 	return [
-		`### ${n.label}: ${n.section}${mark}`,
 		n.body,
 		...(n.probe
 			? [
@@ -132,9 +139,17 @@ function entryText(n: Entry, mark = "") {
 		...(n.reference ? [`Reference: ${n.reference}`] : []),
 	].join("\n\n");
 }
-function body(a: Audit, reference: string, history: Round[]) {
+function entryText(n: Entry, mark = "") {
+	return `### ${n.label}: ${n.section}${mark}\n\n${entryBody(n)}`;
+}
+function body(
+	a: Audit,
+	reference: string,
+	history: Round[],
+	showChanges = true,
+) {
 	const r = history.at(-1)!;
-	const prev = history.at(-2);
+	const prev = showChanges ? history.at(-2) : undefined;
 	const previous = prev ? entries(prev.draft, a) : [];
 	const current = entries(r.draft, a);
 	const sections: Record<Entry["group"], string[]> = {
@@ -154,9 +169,12 @@ function body(a: Audit, reference: string, history: Round[]) {
 				old.body !== n.body ||
 				old.probe !== n.probe ||
 				old.reference !== n.reference);
-		const change = !old ? "new" : changed ? "changed" : null;
+		const change = !prev ? null : !old ? "new" : changed ? "changed" : null;
 		if (change) summary.push(`${label(n)} ${change}`);
-		sections[n.group].push(entryText(n, change ? ` (${change})` : ""));
+		const before = changed
+			? `\n\n#### Previously\n\n**${old.label}: ${old.section}**\n\n${entryBody(old)}`
+			: "";
+		sections[n.group].push(entryText(n, change ? ` (${change})` : "") + before);
 	}
 	const removed = previous.filter(
 		(p) => !current.some((n) => n.label === p.label),
@@ -172,8 +190,12 @@ function body(a: Audit, reference: string, history: Round[]) {
 			nodes: sections.nodes.join("\n\n"),
 			riders: sections.riders.join("\n\n") || "None.",
 			considerations: sections.considerations.join("\n\n"),
-			removed: removed.map((p) => entryText(p)).join("\n\n") || "None.",
-			replies: repliesText(r, prev),
+			history: prev
+				? roundHistory({
+						removed: removed.map((p) => entryText(p)).join("\n\n") || "None.",
+						replies: repliesText(r, prev),
+					})
+				: "",
 		}),
 	};
 }
@@ -211,7 +233,7 @@ export function designerInput(
 			direction,
 		});
 	return revise({
-		basis: body(a, reference, history).body,
+		basis: body(a, reference, history, false).body.trimEnd(),
 		answer:
 			owed(history.at(-1))
 				.map((n) => annotation(n))
@@ -251,7 +273,8 @@ export function reviewAnswer(f: Fact, basis: string): Answer {
 		})),
 	};
 }
-export const approvalNotes = (a: Answer) => a.annotations.map((n) => n.text + passage(n));
+export const approvalNotes = (a: Answer) =>
+	a.annotations.map((n) => n.text + passage(n));
 export function declineText(history: Round[]) {
 	return declined({
 		annotations:
