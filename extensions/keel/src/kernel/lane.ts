@@ -68,6 +68,8 @@ export type AgentDecl = {
 export type EffectDecl = {
 	key: EffectKey;
 	spec: JsonObject;
+	/** Delay first invocation on the durable clock, without running the effect. */
+	delayMs?: number;
 	/** Stop and join the task and its children when this declaration disappears. */
 	interruptible?: true;
 };

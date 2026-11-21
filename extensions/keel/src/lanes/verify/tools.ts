@@ -23,8 +23,11 @@ export const verifyTools = [
 			),
 			notes: arr(words),
 			encodedChecks: opt(arr(int({ minimum: 1 }))),
+			principlesUnfollowed: opt(arr(obj({ name: words, thread: words }))),
 		}),
 		terminate: true,
+		citations: ({ principlesUnfollowed }) =>
+			principlesUnfollowed?.map((p) => p.name) ?? [],
 		event: (args, _, self) => ({ kind: "verdict", agent: self.agent, ...args }),
 	}),
 	defineLaneTool({

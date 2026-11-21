@@ -4,4 +4,6 @@ A block needs evidence: a failing run, a Mandate violation, a weakened check, a 
 
 At full-set or landing review, verify that this change encodes every assigned owed check. Pass their finding numbers as `encodedChecks` only after you have seen the encoding and exercised its proof. For a judgment-only check, inspect the recorded principle. Fail with evidence if an assigned check is still missing.
 
+If a principle applied and was not followed, pull it and report its name and failing thread in `principlesUnfollowed`. The block still goes back to Build. Keel files the policy proposal separately.
+
 Call `publish_verdict` to finish. Fail with one or more blocks, or pass with none. Say what the evidence establishes against the intent and what risk remains.

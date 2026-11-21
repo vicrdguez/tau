@@ -1,4 +1,4 @@
-import { subject, type WorkId } from "../../kernel/ids.ts";
+import { effectKey, subject, type WorkId } from "../../kernel/ids.ts";
 import {
 	type Accepted,
 	defineLane,
@@ -9,13 +9,18 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import type { Sha } from "../../repo/index.ts";
+import type { PrincipleSample } from "../build/public.ts";
+import type { AuthorityIndex } from "../design/public.ts";
 import { queueFixture } from "./fixture.ts";
-import type {
-	FindingDisposition,
-	Holding,
-	HoldingAddress,
-	Intake,
-	Resume,
+import {
+	fileIntake,
+	type FindingDisposition,
+	type Holding,
+	type HoldingAddress,
+	type Intake,
+	type LandingSample,
+	type Resume,
+	type SweepFinding,
 } from "./public.ts";
 import { type Investigated, initial, pending, type Queue } from "./state.ts";
 import * as triage from "./triage.ts";
@@ -26,7 +31,15 @@ type Finding = Holding & {
 	status: "open" | "resumed" | "resolved" | "cancelled";
 };
 type FileFinding = { kind: "file" } & Holding;
-type QueueState = { findings: Finding[]; triage: Queue };
+type QueueState = {
+	findings: Finding[];
+	triage: Queue;
+	sweepMinutes: number | null;
+	sweepTick: number;
+	authority: AuthorityIndex[];
+	samples: LandingSample[];
+};
+const sweepKey = (state: QueueState) => effectKey(`sweep/${state.sweepTick}`);
 const withTriage = (
 	state: QueueState,
 	result: Accepted<Queue>,
@@ -85,10 +98,49 @@ export const queueLane = defineLane(
 			kind: "keel.queue",
 			scope: "session",
 			version: 1,
-			initial: (): QueueState => ({ findings: [], triage: initial() }),
+			initial: (): QueueState => ({
+				findings: [],
+				triage: initial(),
+				sweepMinutes: null,
+				sweepTick: 0,
+				authority: [],
+				samples: [],
+			}),
 		}),
 		workInHand: (state, event) => triage.workFor(state.triage, event),
 		reduce(state, event, world): Reduction<QueueState> {
+			if (event.kind === "sweep_configured") {
+				const sweepMinutes = world.options.sweep_minutes ?? null;
+				return {
+					state:
+						sweepMinutes === state.sweepMinutes
+							? state
+							: {
+									...state,
+									sweepMinutes,
+									sweepTick: (state.sweepTick ?? 0) + 1,
+								},
+				};
+			}
+			if (event.kind === "sweep_landing") {
+				const { work, authority, samples } = event as LaneEvent & {
+					work: WorkId;
+					authority: AuthorityIndex | null;
+					samples: PrincipleSample[];
+				};
+				return {
+					state: {
+						...state,
+						authority: authority
+							? [...(state.authority ?? []), authority]
+							: (state.authority ?? []),
+						samples: [
+							...(state.samples ?? []),
+							...samples.map((sample) => ({ work, ...sample })),
+						].slice(-30),
+					},
+				};
+			}
 			if (event.kind === "begin_investigation")
 				return withTriage(state, { state: triage.begin(state.triage, world) });
 			if (event.kind === "intake" || event.kind === "investigated") {
@@ -158,6 +210,46 @@ export const queueLane = defineLane(
 			return { reject: `Unknown queue event: ${event.kind}` };
 		},
 		onFact(state, answer, world): Accepted<QueueState> {
+			if (
+				"key" in answer &&
+				state.sweepMinutes &&
+				answer.key === sweepKey(state)
+			) {
+				const findings =
+					answer.kind === "effect_done"
+						? (answer.result.findings as SweepFinding[])
+						: [];
+				return {
+					state: {
+						...state,
+						sweepTick: state.sweepTick + 1,
+						triage: triage.revisit(state.triage, world),
+					},
+					send: findings.map((f) =>
+						fileIntake({
+							work: null,
+							source: "sweeper",
+							item: null,
+							sha: null,
+							text: f.text,
+							report: f.report,
+							nodes: [],
+							edgeCase: null,
+							pattern: f.pattern ?? null,
+							blocking: false,
+							...(f.principle && { principle: true }),
+						}),
+					),
+					...(answer.kind === "effect_failed" && {
+						notes: [
+							{
+								agent: null,
+								text: `Sweep failed; the next tick is still scheduled. ${answer.error}`,
+							},
+						],
+					}),
+				};
+			}
 			if (answer.kind !== "answered")
 				return withTriage(state, triage.onFact(state.triage, answer, world));
 			const finding = state.findings.find(
@@ -233,6 +325,8 @@ export const queueLane = defineLane(
 		],
 		view: (state) => ({
 			patternRulings: state.triage.patterns,
+			authority: state.authority ?? [],
+			samples: state.samples ?? [],
 			owedChecks: (except: number[] = []) =>
 				triage.checks(
 					state.triage,
@@ -253,7 +347,17 @@ export const queueLane = defineLane(
 				].join("\n"),
 		}),
 		agents: (state) => triage.agents(state.triage),
-		effects: () => [],
+		effects: (state) =>
+			state.sweepMinutes
+				? [
+						{
+							key: sweepKey(state),
+							interruptible: true,
+							delayMs: state.sweepMinutes * 60_000,
+							spec: { kind: "sweep" },
+						},
+					]
+				: [],
 	},
 	queueFixture,
 );

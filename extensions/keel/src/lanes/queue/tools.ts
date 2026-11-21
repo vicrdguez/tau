@@ -37,6 +37,7 @@ export const queueTools = [
 			nodes: opt(arr(text)),
 			blocking: opt(oneOf([true, false])),
 			source: opt(oneOf(["agent", "owner"])),
+			pattern: opt(text),
 			edgeCase: opt(obj({ failure: text, likelihood: text, cost: text })),
 		}),
 		terminate: ({ blocking }) => blocking === true,
@@ -66,7 +67,10 @@ export const queueTools = [
 				report: args.report ?? null,
 				nodes: args.nodes ?? [],
 				edgeCase: args.edgeCase ?? null,
-				pattern: null,
+				pattern:
+					args.source === "owner" && self.role === "designer"
+						? (args.pattern ?? null)
+						: null,
 				blocking: args.blocking ?? false,
 			} satisfies Intake;
 			return {

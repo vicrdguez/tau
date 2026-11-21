@@ -151,6 +151,9 @@ export function indexFor(
 		"\n",
 	);
 }
+export function projectPrincipleNames(pinned: readonly ProjectPrincipleFile[]) {
+	return project(null, pinned).principles.map((p) => p.name);
+}
 export function projectPrinciplesText(cwd: string) {
 	const { principles, errors } = project(cwd);
 	return (

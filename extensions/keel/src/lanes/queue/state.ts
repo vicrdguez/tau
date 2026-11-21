@@ -63,7 +63,10 @@ export function context(world: World, work: WorkId | null) {
 
 export type Finding = {
 	id: number;
-	intake: Omit<Intake, "missingCheck"> & { missingCheck: true | null };
+	intake: Omit<Intake, "missingCheck" | "principle"> & {
+		missingCheck: true | null;
+		principle: true | null;
+	};
 	goal: string | null;
 	basis: string | null;
 	status: "filed" | "triage" | "defect" | "revision" | "closed";
@@ -72,6 +75,8 @@ export type Finding = {
 	group: number | null;
 	disposition: string | null;
 	encodedAt: Sha | null;
+	deferredAt: number | null;
+	revisits: number[];
 };
 export type Queue = {
 	entries: Finding[];

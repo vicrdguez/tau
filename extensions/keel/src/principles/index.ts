@@ -3,8 +3,10 @@ import {
 	defineEntry,
 	defineTool,
 	type Extension,
+	type Tx,
 } from "tau/durable";
 import { obj, str } from "tau/schema";
+import { slotKey } from "../kernel/ids.ts";
 import {
 	BindingState,
 	ProjectState,
@@ -12,9 +14,10 @@ import {
 	WorkState,
 } from "../kernel/records.ts";
 import { stateDoc } from "../kernel/state.ts";
-import { activeSlot } from "../kernel/storage.ts";
+import { activeSlot, ledger } from "../kernel/storage.ts";
 import type { CheckCitations } from "../kernel/tool.ts";
-import { bodyOf, indexFor, render } from "./catalog.ts";
+import type { LandingSample } from "../lanes/queue/public.ts";
+import { bodyOf, indexFor, projectPrincipleNames, render } from "./catalog.ts";
 
 export { indexFor };
 
@@ -116,3 +119,49 @@ const checkCitations: CheckCitations = async (
 		: null;
 };
 export const principleInputs = { render, checkCitations };
+
+/** Read actual deliveries and pulls for the queue's bounded sample of landed items. */
+export async function principleUsage(tx: Tx, samples: LandingSample[]) {
+	return Promise.all(
+		samples.map(async ({ work, worker, kind, citations }) => {
+			const conversationId = (await ledger(tx, work)).agents[
+				slotKey("build", worker)
+			]?.conversation;
+			const pulled = new Set<string>();
+			const delivered = new Set<string>();
+			if (!conversationId) return null;
+			const pin = (await tx.doc(stateDoc(BindingState), conversationId))
+				.projectPrinciples;
+			let cursor: Cursor | undefined;
+			do {
+				const page = await tx.scanEntries(
+					{ conversationId, order: "descending" },
+					64,
+					cursor,
+				);
+				cursor = page.next;
+				for (const e of page.items) {
+					const d = e.data;
+					if (!d || typeof d !== "object" || Array.isArray(d)) continue;
+					if (e.kind === "keel.pull" && typeof d.name === "string")
+						pulled.add(d.name);
+					if (e.kind === "keel.input")
+						for (const names of [d.bound, d.triggered]) {
+							if (Array.isArray(names))
+								for (const name of names)
+									if (typeof name === "string") delivered.add(name);
+						}
+				}
+			} while (cursor);
+			return {
+				work,
+				worker,
+				kind,
+				citations,
+				pulled: [...pulled],
+				delivered: [...delivered],
+				project: projectPrincipleNames(pin ?? []),
+			};
+		}),
+	).then((items) => items.filter((item) => item !== null));
+}

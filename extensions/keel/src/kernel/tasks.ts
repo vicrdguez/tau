@@ -38,6 +38,7 @@ export type EffectInput = Address & {
 	key: EffectKey;
 	spec: JsonObject;
 	root: string;
+	delayMs?: number;
 };
 export type StopInput = Address & {
 	key: AgentKey;
@@ -238,10 +239,14 @@ export function makeTasks(hooks: Hooks) {
 					];
 					if (slot?.task !== id || slot.status !== "planned") return completed;
 					slot.status = "running";
-					return {
-						status: "running",
-						checkpoint: { phase: "run", attempt: 1 },
-					};
+					const checkpoint = { phase: "run", attempt: 1 } as const;
+					return input.delayMs === undefined
+						? { status: "running", checkpoint }
+						: {
+								status: "sleeping",
+								until: runtime.now() + input.delayMs,
+								checkpoint,
+							};
 				}, ctx),
 			run: async ({ input, id, state }, runtime, ctx) => {
 				const { attempt } = state.checkpoint;

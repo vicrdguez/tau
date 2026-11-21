@@ -1,4 +1,5 @@
 import { arr, int, obj, oneOf, str } from "tau/schema";
+import type { WorkId } from "../../kernel/ids.ts";
 import { prose } from "../../kernel/lane.ts";
 import type { Draft } from "./draft.ts";
 
@@ -61,6 +62,34 @@ export function explorerDesign(view: unknown) {
 	} | null;
 	return design?.unavailable ? null : design;
 }
+export function reviewedHistory(view: unknown) {
+	const prior = explorerDesign(view);
+	if (!prior?.mandate) return null;
+	const mandate = prior.ownerReviewed ? prior.mandate : null;
+	const nodes = mandateNodes(prior.mandate).filter(
+		(n) => mandate || prior.revisedLabels.includes(n.label),
+	);
+	return mandate || nodes.length
+		? { mandate, nodes, goal: mandate ? prior.goal : "Reviewed revision only" }
+		: null;
+}
+const firstLine = (text: string) => text.trim().split(/\r?\n/, 1)[0]!.trim();
+export function authorityIndex(
+	work: WorkId,
+	history: NonNullable<ReturnType<typeof reviewedHistory>>,
+) {
+	return {
+		work,
+		goal: firstLine(history.goal),
+		revisionOnly: !history.mandate,
+		nodes: history.nodes.map(({ label, body }) => ({
+			label,
+			line: firstLine(body),
+		})),
+	};
+}
+export type AuthorityIndex = ReturnType<typeof authorityIndex>;
+
 export function mandateLabels(mandate: Mandate) {
 	return [
 		"intent",

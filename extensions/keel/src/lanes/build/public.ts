@@ -55,6 +55,18 @@ export function toBuild(work: WorkId, event: BuildUpdate): Message {
 }
 
 /** Cost ranks are ordinal. A larger rank means a higher cost if wrong. */
+export type PrincipleSample = {
+	worker: string;
+	kind: "build" | "encode";
+	citations: string[];
+};
+export function workPrinciples(view: unknown): PrincipleSample[] {
+	return (
+		(view as { principleSamples?: PrincipleSample[] } | null)
+			?.principleSamples ?? []
+	);
+}
+
 export type Ruling = {
 	what: string;
 	why: string;

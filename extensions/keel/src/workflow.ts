@@ -1,7 +1,11 @@
 import type { JsonObject } from "tau/durable";
 import { createKernel } from "./kernel/kernel.ts";
+import { readViews } from "./kernel/routing.ts";
+import { project } from "./kernel/storage.ts";
 import type { EffectRunner } from "./kernel/tasks.ts";
 import { lanes, tools } from "./lanes/index.ts";
+import { queueLane } from "./lanes/queue/index.ts";
+import { sweepConfigured, type SweepHistory } from "./lanes/queue/public.ts";
 import {
 	principleInputs,
 	principleSections,
@@ -14,7 +18,17 @@ import {
 	type RepoOp,
 	readRepo,
 } from "./repo/index.ts";
-import { explorerDispatch, runDesignDispatch } from "./roles/dispatch.ts";
+import {
+	explorerDispatch,
+	runDesignDispatch,
+	sweepDispatch,
+} from "./roles/dispatch.ts";
+import { options } from "./roles/index.ts";
+
+const history = new Map([[queueLane.name, queueLane]]);
+const sweep = sweepDispatch(
+	async (tx) => (await readViews(tx, history, null))("queue") as SweepHistory,
+);
 
 // Specs are authored by lane declarations and committed by the kernel, not supplied by agents.
 // Discovery pins the repository before the *next* operation is planned. Never rediscover it on retry.
@@ -36,16 +50,32 @@ export const runRepoEffect: EffectRunner = async ({ root, spec }) => {
 	return (await converge(nodeExec, repo, op)) as JsonObject;
 };
 export function createWorkflow(runEffect: EffectRunner = runRepoEffect) {
-	return createKernel({
+	const kernel = createKernel({
 		lanes,
 		tools,
-		runEffect: (input, ctx, owner) =>
-			input.spec.kind === "arena_dispatch"
-				? runDesignDispatch(input, ctx, owner)
-				: runEffect(input, ctx, owner),
+		firstProjectEvent: sweepConfigured,
+		runEffect: (input, ctx, owner) => {
+			if (input.spec.kind === "arena_dispatch")
+				return runDesignDispatch(input, ctx, owner);
+			if (input.spec.kind === "sweep") return sweep(input, ctx, owner);
+			return runEffect(input, ctx, owner);
+		},
 		dispatch: explorerDispatch,
 		plainTools: principleTools,
 		sections: principleSections,
 		input: principleInputs,
 	});
+	return {
+		...kernel,
+		options: {
+			...options,
+			async set(...[tx, value]: Parameters<typeof options.set>) {
+				const before = (await options.get(tx)).sweep_minutes;
+				await options.set(tx, value);
+				if (before !== value.sweep_minutes && (await project(tx)).root)
+					// The task uses its durable clock on admission. This event opens no decision.
+					await kernel.transact(tx, sweepConfigured, 0);
+			},
+		},
+	};
 }

@@ -237,6 +237,13 @@ export function buildView(s: Build) {
 			brief,
 		})),
 		mandate: s.mandate,
+		principleSamples: s.items
+			.filter((i) => i.stage === "merged")
+			.map((i) => ({
+				worker: workerKey(i),
+				kind: i.kind,
+				citations: [...new Set(i.rulings.flatMap((r) => r.principles))],
+			})),
 		rulings: s.items.flatMap(({ id, rulings }) =>
 			rulings.map((ruling) => ({ item: id, ...ruling })),
 		),

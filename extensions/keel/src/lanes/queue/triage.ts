@@ -77,6 +77,7 @@ function filingText(f: Finding) {
 		edgeCase &&
 			`Failure mode: ${edgeCase.failure}\nLikelihood: ${edgeCase.likelihood}\nComplexity cost: ${edgeCase.cost}`,
 		pattern && `Pattern: ${pattern}`,
+		f.intake.principle && "Principle proposal: route to owner triage.",
 		blocking && `The filer could not continue item ${item}.`,
 	]
 		.filter(Boolean)
@@ -198,7 +199,8 @@ export function intake(
 		};
 	const pattern = e.pattern?.trim() || null;
 	const precedent = q.patterns.find((p) => p.name === pattern);
-	if (precedent?.status === "blessed")
+	const counterexample = e.source === "owner" || e.source === "sweeper";
+	if (precedent?.status === "blessed" && !counterexample)
 		return {
 			state: q,
 			reply: `Approved reference: ${pattern}. No finding filed.`,
@@ -215,6 +217,10 @@ export function intake(
 		pattern,
 		blocking: e.blocking,
 		missingCheck: e.missingCheck && e.source === "owner" ? true : null,
+		principle:
+			e.principle && (e.source === "sweeper" || e.source === "verifier")
+				? true
+				: null,
 	};
 	const sameCheck =
 		input.missingCheck &&
@@ -243,6 +249,8 @@ export function intake(
 		group: null,
 		disposition: null,
 		encodedAt: null,
+		deferredAt: null,
+		revisits: [],
 	};
 	if (input.missingCheck) {
 		f.investigation = {
@@ -261,6 +269,7 @@ export function intake(
 	}
 	if (
 		precedent?.status === "revoked" &&
+		!counterexample &&
 		f.intake.work !== null &&
 		live.active
 	) {
@@ -289,6 +298,51 @@ export function intake(
 		send: input.blocking ? [hold(f, [])] : [],
 		reply: `Filed finding #${f.id}.`,
 	};
+}
+
+const deferredAge = 30 * 86_400_000;
+export function revisit(q: Queue, world: World): Queue {
+	const due = q.entries.filter(
+		(f) => f.deferredAt != null && world.now - f.deferredAt >= deferredAge,
+	);
+	if (!due.length) return q;
+	const ids = due.map((f) => f.id);
+	const filed = intake(
+		q,
+		{
+			work: null,
+			source: "sweeper",
+			item: null,
+			sha: null,
+			text: "Review long-deferred findings",
+			report: evidence(q, due),
+			nodes: [],
+			edgeCase: null,
+			pattern: null,
+			blocking: false,
+		},
+		world,
+	);
+	if (filed.reject !== undefined || filed.state === q) return q;
+	const entries = filed.state.entries.map((f) =>
+		ids.includes(f.id) ? { ...f, deferredAt: null } : f,
+	);
+	const first = entries.at(-1)!;
+	first.revisits = ids;
+	first.status = "triage";
+	first.group = first.id;
+	first.investigation = {
+		classification: "sets_precedent",
+		cause: "long-deferred findings",
+		recommendation: "defer",
+		size: "review the listed findings",
+		evidence: "These findings have been deferred for at least 30 days.",
+		reference: null,
+		nodes: [],
+		sameAs: null,
+	};
+	first.basis = triageBasis(q, first, [first], context(world, null));
+	return { ...q, entries };
 }
 
 function shareDecision(f: Finding, i: Investigation, other: Finding) {
@@ -375,6 +429,10 @@ export function classify(
 				"Use the unapproved pattern class only when the filing names a pattern.",
 		};
 
+	if (f.intake.principle && i.classification !== "sets_precedent")
+		return {
+			reject: "A principle proposal goes to the owner as sets_precedent.",
+		};
 	const found = { ...f, investigation: i };
 	const work = f.intake.work;
 	if (i.classification === "no_action") {
@@ -424,7 +482,7 @@ export function classify(
 				: [],
 		};
 	}
-	if (!earlier && i.classification === "defect_in_scope") {
+	if (!earlier && work !== null && i.classification === "defect_in_scope") {
 		if (!live.active)
 			return {
 				reject: "An in-scope defect must go directly to an active build.",
@@ -434,7 +492,7 @@ export function classify(
 			send: [plan(f, [found], reportText(found), null)],
 		};
 	}
-	if (i.classification === "mandate_wrong") {
+	if (i.classification === "mandate_wrong" && work !== null) {
 		const labels = live.mandate ? mandateLabels(live.mandate) : [];
 		if (!i.nodes.length || i.nodes.some((n) => !labels.includes(n)))
 			return { reject: "Name binding nodes of the current Mandate." };
@@ -570,7 +628,14 @@ export function onFact(
 					: defect
 						? { ...close(outcome), status: "defect" as const, group: first.id }
 						: close(outcome);
-				return { ...entry, ...next };
+				return {
+					...entry,
+					...next,
+					deferredAt:
+						fact.choice === "defer" && !entry.revisits.length
+							? world.now
+							: null,
+				};
 			}
 			// The ruling changes the reference. Other unapproved-pattern decisions no longer apply.
 			if (
@@ -617,7 +682,17 @@ export function onFact(
 					? plan(first, related, text, i.reference!)
 					: seed("follow", text, i.reference),
 			);
-		else send.push(seed("precedent", text, null));
+		else if (first.revisits.length) {
+			const owed = q.entries
+				.filter(
+					(f) =>
+						first.revisits.includes(f.id) &&
+						f.intake.missingCheck &&
+						!f.encodedAt,
+				)
+				.map((f) => f.id);
+			send.push(seed("precedent", text, null, owed));
+		} else send.push(seed("precedent", text, null));
 	}
 	if (fact.choice === "revoke")
 		send.push(
@@ -660,7 +735,16 @@ function triageBasis(
 			: i.classification === "mandate_wrong" && !live.active
 				? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
 				: actions(i.classification),
-		findings: evidence(q, related),
+		findings: [
+			first.intake.pattern &&
+				q.patterns.find(
+					(p) => p.name === first.intake.pattern && p.status === "blessed",
+				) &&
+				`This pattern is blessed until you revoke it.`,
+			evidence(q, related),
+		]
+			.filter(Boolean)
+			.join("\n\n"),
 		nodes:
 			live.mandate && nodes.length ? renderMandate(live.mandate, nodes) : "",
 	});
@@ -758,8 +842,7 @@ export function agents(q: Queue): AgentDecl[] {
 	];
 }
 
-const checkKey = (text: string) =>
-	text.toLowerCase().replace(/\s+/g, " ").trim();
+const checkKey = (text: string) => text.trim();
 export function checks(q: Queue, select: (f: Finding) => boolean) {
 	return q.entries
 		.filter((f) => f.intake.missingCheck && select(f))

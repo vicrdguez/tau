@@ -13,6 +13,20 @@ type QueueV1 = {
 		resume: string;
 		status: "open" | "resumed" | "resolved" | "cancelled";
 	}[];
+	sweepMinutes: number | null;
+	sweepTick: number;
+	authority: {
+		work: WorkId;
+		goal: string;
+		revisionOnly: boolean;
+		nodes: { label: string; line: string }[];
+	}[];
+	samples: {
+		work: WorkId;
+		worker: string;
+		kind: "build" | "encode";
+		citations: string[];
+	}[];
 	triage: {
 		entries: {
 			id: number;
@@ -25,7 +39,8 @@ type QueueV1 = {
 					| "worker"
 					| "verifier"
 					| "diagnoser"
-					| "investigator";
+					| "investigator"
+					| "sweeper";
 				item: string | null;
 				sha: Sha | null;
 				text: string;
@@ -35,6 +50,7 @@ type QueueV1 = {
 				pattern: string | null;
 				blocking: boolean;
 				missingCheck: true | null;
+				principle: true | null;
 			};
 			goal: string | null;
 			basis: string | null;
@@ -58,6 +74,8 @@ type QueueV1 = {
 			group: number | null;
 			disposition: string | null;
 			encodedAt: Sha | null;
+			deferredAt: number | null;
+			revisits: number[];
 		}[];
 		patterns: {
 			name: string;
@@ -86,6 +104,10 @@ export const queueFixture = {
 				resume: "Send the evidence to the worker for rework.",
 			},
 		],
+		sweepMinutes: null,
+		sweepTick: 0,
+		authority: [],
+		samples: [],
 		triage: {
 			entries: [
 				{
@@ -102,6 +124,7 @@ export const queueFixture = {
 						pattern: null,
 						blocking: true,
 						missingCheck: null,
+						principle: null,
 					},
 					goal: "Keep the ledger balanced.",
 					basis: "Decide what to do about rounding.",
@@ -119,6 +142,8 @@ export const queueFixture = {
 					group: 1,
 					disposition: null,
 					encodedAt: null,
+					deferredAt: null,
+					revisits: [],
 				},
 			],
 			patterns: [],

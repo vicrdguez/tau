@@ -16,13 +16,18 @@ import {
 	type RepoResult,
 	type Sha,
 } from "../../repo/index.ts";
-import { toBuild } from "../build/public.ts";
-import type { Mandate } from "../design/public.ts";
+import { toBuild, workPrinciples } from "../build/public.ts";
+import {
+	authorityIndex,
+	type Mandate,
+	reviewedHistory,
+} from "../design/public.ts";
 import {
 	checksEncoded,
 	fileHolding,
 	fileIntake,
 	type QueueChecks,
+	recordLanding,
 	type Resume,
 	resumption,
 } from "../queue/public.ts";
@@ -74,6 +79,7 @@ type Event =
 			blocks: Block[];
 			notes: string[];
 			encodedChecks?: number[];
+			principlesUnfollowed?: { name: string; thread: string }[];
 			outcome: "pass" | "fail";
 			text: string;
 	  }
@@ -108,7 +114,7 @@ function transition(prev: State, world: World) {
 		text: string,
 		report: string,
 		nodes: string[],
-		missingCheck?: true,
+		purpose?: "missingCheck" | "principle",
 	) {
 		send.push(
 			fileIntake({
@@ -122,7 +128,7 @@ function transition(prev: State, world: World) {
 				edgeCase: null,
 				pattern: null,
 				blocking: false,
-				...(missingCheck && { missingCheck }),
+				...(purpose && { [purpose]: true }),
 			}),
 		);
 	}
@@ -253,7 +259,19 @@ function transition(prev: State, world: World) {
 			findings: queue?.findingsFor?.(work) ?? "",
 			owed: queue?.owedChecks?.(encoded) ?? "",
 		};
-		if (!s.cancelled) deliver("design", { kind: "landed" });
+		if (!s.cancelled) {
+			const history = reviewedHistory(design);
+			const samples = workPrinciples(world.view("build"));
+			if (history || samples.length)
+				send.push(
+					recordLanding(
+						work,
+						history ? authorityIndex(work, history) : null,
+						samples,
+					),
+				);
+			deliver("design", { kind: "landed" });
+		}
 		note(
 			`${s.cancelled ? "Cancelled work: " : ""}${unchanged ? "trunk unchanged at" : "landed on trunk at"} ${sha}`,
 		);
@@ -395,7 +413,7 @@ function transition(prev: State, world: World) {
 								a.text,
 								`Annotation ${a.n}. Rejected hand-over:\n${original}`,
 								[],
-								true,
+								"missingCheck",
 							);
 					}
 					deliver("design", { kind: "closed" });
@@ -732,6 +750,12 @@ function transition(prev: State, world: World) {
 						reject:
 							"Record exactly the assigned owed checks on a full-set or landing pass, or fail with evidence if they are missing.",
 					};
+				const unfollowed = e.principlesUnfollowed ?? [];
+				if (unfollowed.some((p) => !p.name.trim() || !ids.includes(p.thread)))
+					return {
+						reject:
+							"Name the existing block thread for each unfollowed principle.",
+					};
 				const diagnose: string[] = [];
 				s.verdicts.push({
 					item: c.item,
@@ -753,6 +777,16 @@ function transition(prev: State, world: World) {
 						text,
 						e.text,
 						c.nodes,
+					);
+				for (const p of unfollowed)
+					file(
+						"verifier",
+						c.sha,
+						c.scope === "item" ? c.item : null,
+						`Clarify or bind principle ${p.name}.`,
+						`${p.thread}: ${blocks.find((b) => b.thread === p.thread)!.evidence}\n\n${e.text}`,
+						c.nodes,
+						"principle",
 					);
 				// The agent that just answered has received its direction.
 				c.direction = "";

@@ -1,6 +1,8 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import { type Message, prose } from "../../kernel/lane.ts";
 import type { Sha } from "../../repo/index.ts";
+import type { PrincipleSample } from "../build/public.ts";
+import type { AuthorityIndex } from "../design/public.ts";
 
 const dir = `${import.meta.dirname}/../../prose/documents/resume`;
 const action = (name: string) => prose(dir, `${name}.md`, [])({}).trim();
@@ -56,7 +58,8 @@ export type Intake = {
 		| "worker"
 		| "verifier"
 		| "diagnoser"
-		| "investigator";
+		| "investigator"
+		| "sweeper";
 	item: string | null;
 	sha: Sha | null;
 	text: string;
@@ -66,10 +69,41 @@ export type Intake = {
 	pattern: string | null;
 	blocking: boolean;
 	missingCheck?: true;
+	principle?: true;
 };
 
 export function fileIntake(finding: Intake): Message {
 	return { lane: "queue", work: null, event: { kind: "intake", ...finding } };
+}
+
+export const sweepConfigured = {
+	lane: "queue",
+	work: null,
+	event: { kind: "sweep_configured" },
+} as const;
+export type SweepFinding = {
+	text: string;
+	report: string;
+	pattern?: string | null;
+	principle?: boolean;
+};
+
+export type LandingSample = PrincipleSample & { work: WorkId };
+export type SweepHistory = {
+	authority: AuthorityIndex[];
+	samples: LandingSample[];
+	patternRulings: unknown;
+};
+export function recordLanding(
+	work: WorkId,
+	authority: AuthorityIndex | null,
+	samples: PrincipleSample[],
+): Message {
+	return {
+		lane: "queue",
+		work: null,
+		event: { kind: "sweep_landing", work, authority, samples },
+	};
 }
 
 export type QueueChecks = {

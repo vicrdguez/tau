@@ -64,6 +64,7 @@ export const ROLES = {
 		instructions: prose(dir, "../prose/roles/investigator.md", [])({}),
 	},
 	queue_explorer: { lane: "queue", tools: inspect },
+	sweeper: { lane: "queue", tools: inspect },
 } as const;
 export type RoleName = keyof typeof ROLES;
 
@@ -92,6 +93,7 @@ const stored = projectOptions(
 		trunk: str({ minLength: 1, default: defaultTrunk }),
 		base: str({ minLength: 1, default: defaultBase }),
 		max_workers: int({ minimum: 1, default: 3 }),
+		sweep_minutes: opt(int({ minimum: 1, maximum: 35791 })),
 		dispatch_rounds: int({ minimum: 1, default: DEFAULT_DISPATCH_ROUNDS }),
 		dispatch_minutes: int({
 			minimum: 1,

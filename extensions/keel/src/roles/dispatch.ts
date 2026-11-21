@@ -2,12 +2,19 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { modelRef, prose } from "tau";
-import { CodingTools } from "tau/durable";
+import { CodingTools, type Tx } from "tau/durable";
 import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
 import { workRulings } from "../lanes/build/public.ts";
-import { explorerDesign, mandateNodes } from "../lanes/design/public.ts";
+import {
+	authorityIndex,
+	explorerDesign,
+	reviewedHistory,
+} from "../lanes/design/public.ts";
+import type { SweepFinding, SweepHistory } from "../lanes/queue/public.ts";
+import { principleUsage } from "../principles/index.ts";
+import { nodeExec, readRepo } from "../repo/index.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
 import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
@@ -64,26 +71,9 @@ export const explorerDispatch: NonNullable<
 			investigation: unknown;
 		} | null;
 		const history = priorWorks.flatMap(({ work, view }) => {
-			const prior = explorerDesign(view("design"));
-			if (!prior?.mandate) return [];
-			const nodes = mandateNodes(prior.mandate);
-			const mandate = prior.ownerReviewed ? prior.mandate : null;
-			const revisionNodes = nodes.filter((n) =>
-				prior.revisedLabels.includes(n.label),
-			);
-			if (!mandate && !revisionNodes.length) return [];
-			return [
-				{
-					work,
-					goal: prior.goal,
-					mandate,
-					nodes: mandate ? nodes : revisionNodes,
-					view,
-				},
-			];
+			const prior = reviewedHistory(view("design"));
+			return prior ? [{ work, ...prior, view }] : [];
 		});
-		const firstLine = (text: string) =>
-			text.trim().split(/\r?\n/, 1)[0]!.trim();
 		const record = JSON.stringify(
 			{
 				design,
@@ -96,15 +86,7 @@ export const explorerDispatch: NonNullable<
 				})),
 				earlierWorks: history
 					.slice(0, -3)
-					.map(({ work, goal, mandate, nodes }) => ({
-						work,
-						goal: firstLine(goal),
-						...(mandate ? {} : { revisionOnly: true }),
-						nodes: nodes.map(({ label, body }) => ({
-							label,
-							line: firstLine(body),
-						})),
-					})),
+					.map((prior) => authorityIndex(prior.work, prior)),
 				patternRulings: queue?.patternRulings ?? [],
 				investigation:
 					role === "investigator" ? (queue?.investigation ?? null) : null,
@@ -120,6 +102,85 @@ export const explorerDispatch: NonNullable<
 		);
 	},
 };
+
+const sweepRole = prose(dir, "roles/sweeper.md", [
+	"revision",
+	"authority",
+	"usage",
+]);
+const sweepInput = prose(dir, "inputs/queue/sweep.md", [])({});
+
+function sweepFinding(value: unknown): value is SweepFinding {
+	return (
+		value !== null &&
+		typeof value === "object" &&
+		"text" in value &&
+		typeof value.text === "string" &&
+		Boolean(value.text.trim()) &&
+		"report" in value &&
+		typeof value.report === "string" &&
+		Boolean(value.report.trim()) &&
+		(!("pattern" in value) ||
+			value.pattern === null ||
+			typeof value.pattern === "string") &&
+		(!("principle" in value) || typeof value.principle === "boolean") &&
+		!(
+			"principle" in value &&
+			value.principle &&
+			"pattern" in value &&
+			value.pattern
+		)
+	);
+}
+
+export function sweepDispatch(
+	readHistory: (tx: Tx) => Promise<SweepHistory>,
+): EffectRunner {
+	return async ({ root }, ctx, owner) => {
+		const [result] = await owner.dispatch(
+			async (tx) => {
+				const opts = await options.read(tx);
+				return {
+					...dispatchBounds(opts),
+					// Dispatch calls resolve only for a new plan. The child's evidence and
+					// model stay pinned even if trunk advances while the server is down.
+					async resolve(tx) {
+						const repo = await readRepo(nodeExec, root, opts);
+						const { authority, samples, patternRulings } =
+							await readHistory(tx);
+						return seat(
+							"sweeper",
+							opts.sweeper ?? opts.queue,
+							root,
+							sweepRole({
+								revision: repo.trunkHead ?? repo.baseHead,
+								authority: JSON.stringify({
+									earlierWorks: authority,
+									patternRulings,
+								}),
+								usage: JSON.stringify(await principleUsage(tx, samples)),
+							}),
+						);
+					},
+				};
+			},
+			[{ seat: "sweeper", question: sweepInput }],
+			ctx,
+		);
+		if (!result?.answer)
+			throw new Error(result?.error ?? "Sweep returned no answer.");
+		const findings: unknown = JSON.parse(result.answer);
+		if (
+			!Array.isArray(findings) ||
+			findings.length > 8 ||
+			!findings.every(sweepFinding)
+		)
+			throw new Error(
+				"Sweep must return at most eight findings with text and evidence.",
+			);
+		return { findings };
+	};
+}
 
 type DesignJob = DispatchJob & { model: string };
 function designJob(value: unknown): value is DesignJob {
