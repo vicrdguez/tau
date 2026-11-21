@@ -356,6 +356,40 @@ test("retry checks the failed seat's current provider against the actual success
 	assert.ok(judge.question.includes(candidate(seats[0]!)));
 });
 
+test("judge and challenger retries use current models without invalidating seats that already answered", () => {
+	const retry = (state: State, overrides: Partial<World["options"]>) =>
+		step(
+			state,
+			{
+				kind: "answered",
+				subject: ask(state).subject,
+				choice: "retry",
+				annotations: [],
+			},
+			{ ...world, options: { ...world.options, ...overrides } },
+		).state;
+	const failedJudge = complete(judgeTurn(), { arena_judge: null });
+	const badJudge = retry(failedJudge, { arena_judge: "design/judge" });
+	assert.match(ask(badJudge).basis, /different provider from the `designer`/);
+	const retriedJudge = retry(badJudge, { arena_judge: "review/corrected" });
+	assert.deepEqual(
+		pending(retriedJudge).jobs.map(({ seat, model }) => [seat, model]),
+		[["arena_judge", "review/corrected"]],
+	);
+	const failedChallenge = complete(challengeTurn(synthesisTurn(retriedJudge)), {
+		arena_challenger: null,
+	});
+	const retriedChallenge = retry(failedChallenge, {
+		arena_challenger: "alpha/challenger",
+		designer: "review/new-designer",
+	});
+	assert.deepEqual(
+		pending(retriedChallenge).jobs.map(({ seat, model }) => [seat, model]),
+		[["arena_challenger", "alpha/challenger"]],
+	);
+	assert.equal(answeringTurn(retriedChallenge).phase, "answering");
+});
+
 test("candidate headings are flexible and the judge can return fenced JSON with decimals", () => {
 	const report = `\`\`\`json\n${judge.replace('"score":9', '"score":7.5')}\n\`\`\``;
 	for (const answer of [
@@ -365,6 +399,10 @@ test("candidate headings are flexible and the judge can return fenced JSON with 
 			"## Module map\n\nMap.\n\n## Sketch",
 		),
 		candidate(seats[1]!).replaceAll("## ", "### "),
+		candidate(seats[1]!).replace(
+			"## Unasked Decisions\n",
+			"## Unasked Decisions\n### Defaults\n",
+		),
 	]) {
 		const turn = complete(candidateTurn(), {
 			...candidates,
