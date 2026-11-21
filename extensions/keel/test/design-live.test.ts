@@ -231,11 +231,11 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 	assert.deepEqual(x.mandate(), old);
 	assert.deepEqual(x.asks(), []);
 	assert.deepEqual(x.answer(ask!.subject, "approve").send ?? [], []);
-	x.act({ kind: "revision_activated", mandate: old, causes: request.causes });
+	x.act({ kind: "revision_activated", causes: [request.causes[0]!] });
 	assert.deepEqual(x.mandate(), old);
-	x.act({ kind: "revision_activated", mandate: next, causes: ["unrelated"] });
+	x.act({ kind: "revision_activated", causes: ["unrelated"] });
 	assert.deepEqual(x.mandate(), old);
-	x.act({ kind: "revision_activated", mandate: next, causes: request.causes });
+	x.act({ kind: "revision_activated", causes: request.causes });
 	assert.deepEqual(x.mandate(), next);
 });
 
@@ -370,7 +370,6 @@ test("declining releases only that proposal's causes and the next request waits 
 	assert.equal(x.turn(), undefined);
 	x.act({
 		kind: "revision_activated",
-		mandate: approved.mandate!,
 		causes: second.causes,
 	});
 	assert.ok(x.input().includes(third.text));
@@ -391,7 +390,6 @@ for (const kind of ["cancel", "closed", "landed"]) {
 		x.act({ ...request, causes: ["finding-3"] });
 		x.act({
 			kind: "revision_activated",
-			mandate: { ...old, nodes: [correction, untouched] },
 			causes: request.causes,
 		});
 		assert.deepEqual(x.answer(ask!.subject, "approve").send ?? [], []);
