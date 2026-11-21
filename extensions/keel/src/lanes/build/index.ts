@@ -35,9 +35,11 @@ import {
 	type FindingFix,
 	applyRevision,
 	releaseQueueHold,
+	revisionPlanHold,
 } from "./live-plan.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
+	affects,
 	type Brief,
 	type Build,
 	buildDoc,
@@ -48,6 +50,7 @@ import {
 	type Item,
 	newItem,
 	parked,
+	queueHeld,
 	repoHeld,
 	validatePlan,
 	workerKey,
@@ -500,19 +503,37 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			yieldCoordinator(s);
 			break;
 		}
-		case "propose_revision":
+		case "propose_revision": {
 			if (s.revision)
 				return { reject: "A Mandate revision is already being planned." };
 			s.revision = { ...e, text: e.text ?? "" };
+			const send = s.items.some((i) => affects(i, e.nodes) && !queueHeld(s, i))
+				? addQueueHold(
+						s,
+						{
+							kind: "queue_hold",
+							cause: revisionPlanHold,
+							item: null,
+							nodes: e.nodes,
+						},
+						w,
+					)
+				: [];
 			yieldCoordinator(s);
-			break;
-		case "withdraw_revision":
+			schedule(s, w);
+			return { state, send };
+		}
+		case "withdraw_revision": {
 			s.revision = null;
 			if (s.coordinator.revising) {
+				s.coordinator.pendingDirection = s.coordinator.direction;
 				s.coordinator.revising = false;
 				coordinator(s, null);
 			}
-			break;
+			const send = releaseQueueHold(s, revisionPlanHold, undefined, w);
+			schedule(s, w);
+			return { state, send };
+		}
 		case "plan": {
 			const c = s.coordinator;
 			if (c.tool !== "publish_plan" || held(s, null))

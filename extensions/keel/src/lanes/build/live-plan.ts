@@ -4,7 +4,7 @@ import {
 	type Reduction,
 	type World,
 } from "../../kernel/lane.ts";
-import { type Reply, repliesCover } from "../design/public.ts";
+import { mandateLabels, type Reply, repliesCover } from "../design/public.ts";
 import { ownerDirection } from "./agents.ts";
 import type { BuildUpdate, RevisionProposal } from "./public.ts";
 import {
@@ -23,6 +23,8 @@ const revisionDirection = prose(
 	"../../prose/documents/build-revised-item.md",
 	["nodes", "evidence", "deps", "branch"],
 );
+
+export const revisionPlanHold = "revision/plan";
 
 export function addDirection(i: Item, direction: string) {
 	i.direction = [i.direction, direction].filter(Boolean).join("\n");
@@ -194,6 +196,7 @@ export function applyRevision(
 	const old = new Map(s.items.map((i) => [i.id, i]));
 	const evidence = p.text || `Changed Mandate nodes: ${p.nodes.join(", ")}`;
 	const superseded: string[] = [];
+	const retained = new Set(mandateLabels(p.mandate));
 	s.items = goals.map((g) => {
 		const i = old.get(g.id);
 		if (!i) return newItem(g);
@@ -209,6 +212,8 @@ export function applyRevision(
 				}),
 			);
 			if (i.stage === "published") superseded.push(i.id);
+			if (i.brief) i.brief.nodes = i.brief.nodes.filter((n) => retained.has(n));
+			i.awaitingNodes = i.awaitingNodes.filter((n) => retained.has(n));
 			if (i.input === "brief" && i.stage === "building") i.input = "resume";
 			// Revised dependencies gate this attempt.
 			i.parked = true;
@@ -239,7 +244,7 @@ export function applyRevision(
 			},
 		},
 	];
-	for (const cause of p.causes)
+	for (const cause of [...p.causes, revisionPlanHold])
 		send.push(...releaseQueueHold(s, cause, undefined, w));
 	send.push({
 		lane: "design",

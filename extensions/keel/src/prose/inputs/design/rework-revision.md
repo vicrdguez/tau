@@ -20,6 +20,6 @@ Your preceding proposal:
 Owner annotations:
 {{annotations}}
 
-Call `publish_revision` with the complete replacement nodes for this round. Reply to every annotation by number. Mark each acted on, considered or dismissed, and give the reason.
+Call `publish_revision` with every addition, change and removal against the bound Mandate for this round. Reply to every annotation by number. Mark each acted on, considered or dismissed, and give the reason.
 
 {{direction}}

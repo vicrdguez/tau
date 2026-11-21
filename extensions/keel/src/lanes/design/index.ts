@@ -696,15 +696,10 @@ export const design: Lane<State> = {
 				if (s.phase !== "bound") return { state: s };
 				const { causes, nodes } = e;
 				const text = typeof e.text === "string" ? e.text.trim() : "";
-				if (
-					!text ||
-					!labels(causes) ||
-					!labels(nodes) ||
-					nodes.some((n) => !mandateLabels(s.mandate!).includes(n))
-				)
+				if (!text || !labels(causes) || !labels(nodes))
 					return {
 						reject:
-							"A Mandate revision needs finding causes, evidence and affected binding labels.",
+							"A Mandate revision needs finding causes, evidence and reported labels.",
 					};
 				const fresh = causes.filter(
 					(cause) => !s.revisions.some((r) => r.causes.includes(cause)),

@@ -200,12 +200,13 @@ export function newItem(goal: Goal): Item {
 export function buildView(s: Build) {
 	return {
 		phase: s.phase,
-		plan: s.items.map(({ id, kind, goal, deps, stage, brief }) => ({
+		plan: s.items.map(({ id, kind, goal, deps, stage, brief, verified }) => ({
 			id,
 			kind,
 			goal,
 			deps,
 			stage,
+			verified,
 			nodes: brief?.nodes ?? [],
 			brief,
 		})),
