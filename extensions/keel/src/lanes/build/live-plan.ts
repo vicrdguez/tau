@@ -183,8 +183,17 @@ export function applyRevision(
 		}
 		return { ...i, deps: g.deps };
 	});
-	s.mandate = p.mandate;
-	s.approvalReplies.push(...replies);
+	const originalNotes = s.mandate!.approvalNotes;
+	s.mandate = {
+		...p.mandate,
+		approvalNotes: [...originalNotes, ...p.mandate.approvalNotes],
+	};
+	s.approvalReplies.push(
+		...replies.map((reply) => ({
+			...reply,
+			n: originalNotes.length + reply.n,
+		})),
+	);
 	s.revision = null;
 	const send: Message[] = [
 		{

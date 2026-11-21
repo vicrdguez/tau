@@ -9,6 +9,15 @@ Previous authority for the changed labels:
 Approved Mandate:
 {{mandate}}
 
+Held items:
+{{held}}
+
+Affected items:
+{{affected}}
+
+Recorded items (keep these; correct affected records with new items):
+{{recorded}}
+
 Current plan:
 {{plan}}
 

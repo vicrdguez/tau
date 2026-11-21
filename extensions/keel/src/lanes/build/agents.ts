@@ -1,7 +1,14 @@
 import { agentKey, token } from "../../kernel/ids.ts";
 import { type AgentDecl, prose } from "../../kernel/lane.ts";
 import { renderMandate } from "../design/public.ts";
-import { type Build, held, type Item, parked, workerKey } from "./state.ts";
+import {
+	affects,
+	type Build,
+	held,
+	type Item,
+	parked,
+	workerKey,
+} from "./state.ts";
 
 const dir = import.meta.dirname;
 const plan = prose(dir, "../../prose/inputs/build/plan.md", [
@@ -30,6 +37,9 @@ const revise = prose(dir, "../../prose/inputs/build/revision-plan.md", [
 	"before",
 	"mandate",
 	"findings",
+	"held",
+	"affected",
+	"recorded",
 	"plan",
 	"annotations",
 	"direction",
@@ -184,11 +194,21 @@ function coordInput(s: Build) {
 		case "publish_plan": {
 			if (c.revising) {
 				const p = s.revision!;
+				const list = (includes: (item: Item) => boolean) =>
+					s.items
+						.filter(includes)
+						.map((item) => `- ${item.id}: ${item.goal}`)
+						.join("\n") || "None.";
 				return revise({
 					...facts,
 					before: renderMandate(s.mandate!, p.nodes),
 					mandate: renderMandate(p.mandate),
 					findings: p.text || p.nodes.join(", "),
+					held: list((i) => held(s, i.id)),
+					affected: list((i) => affects(i, p.nodes)),
+					recorded: list(
+						(i) => i.verified || i.stage === "merged" || i.stage === "cleaning",
+					),
 					plan: planRecord(),
 					annotations: approval(p.mandate.approvalNotes),
 				});
