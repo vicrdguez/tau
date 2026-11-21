@@ -20,4 +20,6 @@ Pair every domain claim with a probe that would prove it false. Say what must ne
 
 What did the winning candidate decide that the question did not ask? Give each such choice in the proposed design a rider label. Name its origin: evidence, incidental or seeded by you. Mark it `bind` if it should constrain the work or `open` if agents should settle it. Approval settles each rider as shown.
 
+Settle any remaining observable question with `start_experiment`. Keep the evidence under its named node. Keel adds the winning prototype's incidental choices as open riders. You can propose binding them in the draft.
+
 Call `publish_mandate` with the draft, base, grafts and a numbered reply to each owner annotation. Keel sends the synthesis to the challenger before asking the owner.

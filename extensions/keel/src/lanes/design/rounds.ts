@@ -19,6 +19,7 @@ export type Synthesis = {
 	replies: Reply[];
 	base: string;
 	grafts: { seat: string; text: string }[];
+	evidence: { id: number; node: string; text: string }[];
 };
 export type Round = Synthesis & {
 	arena: number;
@@ -26,7 +27,7 @@ export type Round = Synthesis & {
 	dispositions: Reply[];
 	answer: Answer | null;
 };
-type DraftRound = Pick<Round, "draft" | "replies" | "answer">;
+type DraftRound = Pick<Round, "draft" | "replies" | "answer" | "evidence">;
 const dir = import.meta.dirname + "/../../prose";
 const review = prose(dir, "documents/review.md", ["round", "changes", "body"]);
 const roundText = prose(dir, "documents/mandate-round.md", [
@@ -115,7 +116,7 @@ type Entry = {
 	probe?: string;
 	reference?: string;
 };
-function entries(d: Draft, a: Audit): Entry[] {
+function entries({ draft: d, evidence }: DraftRound, a: Audit): Entry[] {
 	const result: Entry[] = [
 		...nodes(d, a, "Proposed ruling").map((n) => ({
 			...n,
@@ -142,6 +143,10 @@ function entries(d: Draft, a: Audit): Entry[] {
 	];
 	return result.map((n) => ({
 		...n,
+		body: [
+			n.body,
+			...evidence.filter((e) => e.node === n.label).map((e) => e.text),
+		].join("\n\n"),
 		reference: d.references.find((r) => r.label === n.label)?.source ?? "",
 	}));
 }
@@ -167,8 +172,8 @@ function body(
 ) {
 	const r = history.at(-1)!;
 	const prev = showChanges ? history.at(-2) : undefined;
-	const previous = prev ? entries(prev.draft, a) : [];
-	const current = entries(r.draft, a);
+	const previous = prev ? entries(prev, a) : [];
+	const current = entries(r, a);
 	const sections: Record<Entry["group"], string[]> = {
 		nodes: [],
 		riders: [],

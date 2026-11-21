@@ -1,4 +1,4 @@
-### Experiment {{id}}: evidence for {{node}}
+#### Experiment {{id}}: evidence for {{node}}
 
 **Observable question:** {{question}}
 

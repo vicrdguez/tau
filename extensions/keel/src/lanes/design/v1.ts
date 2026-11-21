@@ -63,11 +63,34 @@ type Arena = {
 	}[];
 	forcedBase: string | null;
 };
+type Experiment = {
+	id: number;
+	protocol: {
+		node: string;
+		question: string;
+		decisionRule: string;
+		controls: string[];
+		axis: string;
+		variants: string[];
+	};
+	jobs: { seat: "design_prototype"; model: string; question: string }[];
+	outcome: {
+		results: {
+			seat: "design_prototype";
+			conversation: string;
+			answer: string | null;
+			error: string | null;
+		}[];
+		error: string | null;
+	} | null;
+	comparison: { comparison: string; winner: string | null } | null;
+};
 type Synthesis = {
 	draft: Draft;
 	replies: Reply[];
 	base: string;
 	grafts: { seat: string; text: string }[];
+	evidence: { id: number; node: string; text: string }[];
 };
 type DesignerPhase =
 	| "seeded"
@@ -75,7 +98,8 @@ type DesignerPhase =
 	| "resumed"
 	| "framing"
 	| "drafting"
-	| "answering";
+	| "answering"
+	| "experiment_comparing";
 type Mandate = {
 	encodeRequired: boolean;
 	approvalNotes: string[];
@@ -102,6 +126,7 @@ export const designV1 = {
 			| "held"
 			| "bound"
 			| "dispatching"
+			| "experiment_running"
 			| "arena_blocked"
 			| "review"
 			| "landed"
@@ -118,6 +143,8 @@ export const designV1 = {
 			text: string;
 		} | null,
 		arenas: [] as Arena[],
+		experiments: [] as Experiment[],
+		experimentReturn: null as "framing" | "drafting" | null,
 		proposal: null as Synthesis | null,
 		rounds: [] as (Synthesis & {
 			arena: number;

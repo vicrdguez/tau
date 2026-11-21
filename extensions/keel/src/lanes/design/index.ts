@@ -39,6 +39,17 @@ import {
 	validSmall,
 } from "./draft.ts";
 import {
+	type Experiment,
+	experimentEffect,
+	experimentEvidence,
+	experimentInput,
+	experimentRiders,
+	experimentTools,
+	finishExperiment,
+	recordExperiment,
+	startExperiment,
+} from "./experiment.ts";
+import {
 	type Mandate,
 	mandateLabels,
 	type Reply,
@@ -75,6 +86,7 @@ import {
 import { designV1 } from "./v1.ts";
 
 export const designTools = [
+	...experimentTools,
 	defineLaneTool({
 		lane: "design",
 		roles: ["designer"],
@@ -168,7 +180,8 @@ type DesignerPhase =
 	| "resumed"
 	| "framing"
 	| "drafting"
-	| "answering";
+	| "answering"
+	| "experiment_comparing";
 type State = {
 	phase:
 		| DesignerPhase
@@ -177,6 +190,7 @@ type State = {
 		| "held"
 		| "bound"
 		| "dispatching"
+		| "experiment_running"
 		| "arena_blocked"
 		| "review"
 		| "landed"
@@ -189,6 +203,8 @@ type State = {
 	audit: Audit | null;
 	seed: Seed | null;
 	arenas: Arena[];
+	experiments: Experiment[];
+	experimentReturn: "framing" | "drafting" | null;
 	proposal: Synthesis | null;
 	rounds: Round[];
 	revisions: Revision[];
@@ -211,6 +227,8 @@ const doc = defineState<State>({
 		audit: null,
 		seed: null,
 		arenas: [],
+		experiments: [],
+		experimentReturn: null,
 		proposal: null,
 		rounds: [],
 		revisions: [],
@@ -363,6 +381,54 @@ const setArena = (s: State, arena: Arena): State => ({
 	arenas: s.arenas.with(-1, arena),
 });
 const auditedGround = (s: State) => auditText(s.audit!, groundContext(s));
+const currentExperiment = (s: State) => s.experiments.at(-1)!;
+function newExperiments(s: State) {
+	const reviewed = new Set(
+		s.rounds.flatMap((r) => r.evidence.map(({ id }) => id)),
+	);
+	return s.experiments.filter((e) => e.comparison && !reviewed.has(e.id));
+}
+const comparedGround = (s: State) =>
+	[auditedGround(s), ...newExperiments(s).map(experimentEvidence)].join("\n\n");
+function attachExperiments(s: State, proposal: Synthesis): string | null {
+	const { draft } = proposal;
+	const labels = new Set([
+		"intent",
+		"never",
+		"tradeoffs",
+		"alternatives",
+		...draft.checks.map((c) => c.id),
+		...[...draft.nodes, ...draft.seams, ...draft.settlements].map(
+			(n) => n.label,
+		),
+	]);
+	const added = newExperiments(s);
+	for (const experiment of added) {
+		if (!labels.has(experiment.protocol.node))
+			return `Include the Mandate node ${experiment.protocol.node} alongside its recorded experiment evidence.`;
+		for (const rider of experimentRiders(experiment)) {
+			const supplied = draft.riders.find((r) => r.label === rider.label);
+			if (
+				supplied &&
+				(supplied.origin !== rider.origin || supplied.text !== rider.text)
+			)
+				return `Keep ${rider.label}'s recorded incidental choice or leave it to Keel to add.`;
+			if (!supplied) draft.riders.push(rider);
+		}
+	}
+	proposal.evidence = s.experiments.flatMap((experiment) =>
+		experiment.comparison && labels.has(experiment.protocol.node)
+			? [
+					{
+						id: experiment.id,
+						node: experiment.protocol.node,
+						text: experimentEvidence(experiment),
+					},
+				]
+			: [],
+	);
+	return null;
+}
 
 function mandateAsk(s: State, number = s.rounds.length): Ask {
 	const rounds = s.rounds.slice(0, number);
@@ -412,11 +478,11 @@ function designerTurn(s: State): Expectation | undefined {
 		case "framing":
 			return {
 				token: token("frame", s.seq),
-				tools: ["frame_arena"],
+				tools: ["frame_arena", "start_experiment"],
 				situation: "shape",
 				input: () =>
 					framingInput({
-						ground: auditedGround(s),
+						ground: comparedGround(s),
 						direction: s.direction,
 						notes: owedText(s.rounds.at(-1)),
 						seed: arenaSeed(
@@ -430,7 +496,7 @@ function designerTurn(s: State): Expectation | undefined {
 		case "drafting":
 			return {
 				token: token("draft", s.seq),
-				tools: ["publish_mandate"],
+				tools: ["publish_mandate", "start_experiment"],
 				situation: "shape",
 				input: () => {
 					const arena = currentArena(s);
@@ -440,13 +506,26 @@ function designerTurn(s: State): Expectation | undefined {
 						groundContext(s),
 						s.rounds,
 						number,
-						arenaEvidence(arena, number),
+						[
+							arenaEvidence(arena, number),
+							...newExperiments(s).map(experimentEvidence),
+						].join("\n\n"),
 						arena.forcedBase
 							? `The owner chose ${arena.forcedBase} as the base. Use it.`
 							: "Choose the base and explain your choice with the tradeoffs.",
 						s.direction,
 					);
 				},
+			};
+		case "experiment_comparing":
+			return {
+				token: token("experiment", s.seq),
+				tools: ["record_experiment"],
+				situation: "shape",
+				input: () =>
+					[experimentInput(currentExperiment(s)), s.direction]
+						.filter(Boolean)
+						.join("\n\n"),
 			};
 		case "answering":
 			return {
@@ -490,14 +569,18 @@ export const design: Lane<State> = {
 	view: (s) => ({
 		mandate: s.mandate,
 		reference: s.reference,
+		experimentEvidence: s.rounds.at(-1)?.evidence ?? [],
 		decisions: [...s.rounds, ...s.revisions.flatMap((r) => r.rounds)].flatMap(
 			(r) => (r.answer ? [r.answer] : []),
 		),
 	}),
-	effects: (s) =>
-		s.phase === "dispatching"
-			? [arenaEffect(currentArena(s), s.arenas.length)]
-			: [],
+	effects: (s) => {
+		if (s.phase === "dispatching")
+			return [arenaEffect(currentArena(s), s.arenas.length)];
+		if (s.phase === "experiment_running")
+			return [experimentEffect(currentExperiment(s))!];
+		return [];
+	},
 	reduce(s, e, w) {
 		switch (e.kind) {
 			case "request_cancel":
@@ -623,6 +706,69 @@ export const design: Lane<State> = {
 					),
 				};
 			}
+			case "start_experiment": {
+				if (s.phase !== "framing" && s.phase !== "drafting")
+					return { reject: "Start an experiment during framing or synthesis." };
+				if (typeof e.decisionRule !== "string" || !e.decisionRule.trim())
+					return {
+						reject: "Write the decision rule before starting a prototype.",
+					};
+				const { node, question, decisionRule, controls, axis, variants } = e;
+				if (
+					typeof node !== "string" ||
+					typeof question !== "string" ||
+					typeof axis !== "string" ||
+					!Array.isArray(controls) ||
+					!controls.every((v) => typeof v === "string") ||
+					!Array.isArray(variants) ||
+					!variants.every((v) => typeof v === "string")
+				)
+					return {
+						reject:
+							"Name the Mandate node, observable question, shared controls and variants on one axis.",
+					};
+				const started = startExperiment(
+					s.experiments.length + 1,
+					{ node, question, decisionRule, controls, axis, variants },
+					w.options,
+				);
+				if ("reject" in started) return started;
+				return {
+					state: {
+						...s,
+						phase: "experiment_running",
+						experimentReturn: s.phase,
+						experiments: [...s.experiments, started.experiment],
+					},
+				};
+			}
+			case "record_experiment": {
+				if (s.phase !== "experiment_comparing")
+					return { reject: "No completed experiment needs a comparison." };
+				const { comparison, winner } = e;
+				if (
+					typeof comparison !== "string" ||
+					(winner !== undefined && typeof winner !== "string")
+				)
+					return {
+						reject:
+							"Explain the comparison and name the winning variant, if any.",
+					};
+				const recorded = recordExperiment(currentExperiment(s), {
+					comparison,
+					...(winner !== undefined && { winner }),
+				});
+				if ("reject" in recorded) return recorded;
+				return {
+					state: {
+						...s,
+						phase: s.experimentReturn!,
+						experimentReturn: null,
+						experiments: s.experiments.with(-1, recorded.experiment),
+						seq: s.seq + 1,
+					},
+				};
+			}
 			case "frame_arena": {
 				if (s.phase !== "framing")
 					return { reject: "There is no open arena framing turn." };
@@ -644,7 +790,7 @@ export const design: Lane<State> = {
 						seed,
 						w,
 					),
-					auditedGround(s),
+					comparedGround(s),
 					arenaSeed(s, seed),
 				);
 				return {
@@ -682,13 +828,16 @@ export const design: Lane<State> = {
 					return {
 						reject: `Use ${arena.forcedBase} as the base, as the owner chose.`,
 					};
-				const proposal = {
-					draft: e.draft as Draft,
+				const proposal: Synthesis = {
+					draft: structuredClone(e.draft as Draft),
 					replies: e.replies as Reply[],
 					base: e.base,
 					grafts,
+					evidence: [],
 				};
-				const error = synthesisError(s.audit, s.rounds, proposal);
+				const error =
+					attachExperiments(s, proposal) ??
+					synthesisError(s.audit, s.rounds, proposal);
 				if (error) return { reject: error };
 				const synthesis =
 					synthesisSources(proposal.base, proposal.grafts) +
@@ -879,6 +1028,19 @@ export const design: Lane<State> = {
 	},
 	onFact(s, e, w) {
 		if (e.kind === "effect_done" || e.kind === "effect_failed") {
+			if (s.phase === "experiment_running") {
+				const experiment = finishExperiment(currentExperiment(s), e);
+				return experiment
+					? {
+							state: {
+								...s,
+								phase: "experiment_comparing",
+								experiments: s.experiments.with(-1, experiment),
+								seq: s.seq + 1,
+							},
+						}
+					: { state: s };
+			}
 			if (
 				s.phase !== "dispatching" ||
 				e.key !== arenaEffect(currentArena(s), s.arenas.length).key
@@ -959,7 +1121,7 @@ export const design: Lane<State> = {
 					};
 				const { arena, phase } = retryArena(
 					current,
-					auditedGround(s),
+					comparedGround(s),
 					arenaSeed(s, current.seedRound),
 					w,
 				);
