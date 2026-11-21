@@ -426,7 +426,7 @@ test("a changed rider and proof include their complete previous content", () => 
 test("the reply quotes the exact multiline owner passage and keeps only stored offsets", () => {
 	const x = review();
 	const basis = x.asks()[0]!.basis;
-	const passage = `Current callers: ${seam.callersNow}\n\nFuture callers: ${seam.callersLater}`;
+	const passage = `Current callers: ${seam.callersNow}\nFuture callers: ${seam.callersLater}`;
 	const start = basis.indexOf(passage);
 	assert.ok(start >= 0);
 	const range = { start, end: start + passage.length };
@@ -438,7 +438,7 @@ test("the reply quotes the exact multiline owner passage and keeps only stored o
 	const rendered = x.asks()[0]!.basis;
 	assert.ok(
 		rendered.includes(
-			`> Current callers: ${seam.callersNow}\n> \n> Future callers: ${seam.callersLater}`,
+			`> Current callers: ${seam.callersNow}\n> Future callers: ${seam.callersLater}`,
 		),
 	);
 	assert.ok(!rendered.includes(`[${range.start}:${range.end}]`));
