@@ -87,12 +87,14 @@ export type Queue = {
 	entries: Finding[];
 	patterns: { name: string; finding: number; evidence: string }[];
 	attempt: number;
+	direction: string;
 	stall: { cause: string; lastWords: string } | null;
 };
 export const initial = (): Queue => ({
 	entries: [],
 	patterns: [],
 	attempt: 0,
+	direction: "",
 	stall: null,
 });
 export const pending = (q: Queue) =>

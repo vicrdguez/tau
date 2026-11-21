@@ -73,7 +73,12 @@ export const queueLane = defineLane(
 							)
 						: triage.classify(state.triage, event as Investigated, world);
 				return result.reject === undefined
-					? withTriage(state, result)
+					? withTriage(
+							state,
+							event.kind === "investigated"
+								? { ...result, state: { ...result.state, direction: "" } }
+								: result,
+						)
 					: { reject: result.reject };
 			}
 			if (event.kind === "resolve_holding") {

@@ -39,7 +39,7 @@ export type Item = Goal & {
 	seq: number;
 	retry: number;
 	mergedHead: Sha | null;
-	input: "resume" | "brief" | "integration" | "rework";
+	input: "resume" | "brief" | "integration" | "rework" | "superseded";
 	evidence: string;
 	threads: string[];
 	direction: string;

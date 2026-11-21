@@ -37,6 +37,7 @@ export type BuildUpdate =
 			head: Sha;
 			inheritedTrunk?: Sha;
 			direction?: string;
+			reason?: "mandate_revision";
 			threads: string[];
 			evidence: string;
 	  }

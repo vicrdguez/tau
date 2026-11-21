@@ -631,7 +631,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
 			addDirection(i, e.direction ?? "");
-			i.input = e.kind;
+			i.input = e.reason === "mandate_revision" ? "superseded" : e.kind;
 			i.stage = "building";
 			i.verified = false;
 			i.evidence = e.evidence;
@@ -686,11 +686,9 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				direction: e.direction,
 				evidence: h.evidence,
 			});
-			if (i?.stage === "building") {
-				i.input = "resume";
-				i.direction = direction;
-			} else if (i?.stage === "preparing") {
-				i.direction = [i.direction, direction].filter(Boolean).join("\n");
+			if (i?.stage === "building" || i?.stage === "preparing") {
+				if (i.stage === "building" && i.input === "brief") i.input = "resume";
+				addDirection(i, direction);
 			} else if (!i && s.coordinator.tool) {
 				s.coordinator.direction = direction;
 			} else {

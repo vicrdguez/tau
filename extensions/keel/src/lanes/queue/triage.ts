@@ -32,7 +32,7 @@ const documents = `${import.meta.dirname}/../../prose/documents`;
 const investigateInput = prose(
 	import.meta.dirname,
 	"../../prose/inputs/queue/investigate.md",
-	["id", "finding", "context", "queue", "patterns"],
+	["id", "finding", "context", "queue", "patterns", "direction"],
 );
 const triageDocument = prose(documents, "triage.md", [
 	"cause",
@@ -409,11 +409,22 @@ export function onFact(
 	}
 	if (fact.kind !== "answered") return { state: q };
 	if (f && q.stall && fact.subject === stalled(f, q)) {
-		if (fact.choice === "resume")
-			return { state: { ...q, attempt: q.attempt + 1, stall: null } };
+		if (fact.choice === "resume") {
+			const direction = [
+				q.direction,
+				...fact.annotations.map((a) => `${a.n}. ${a.text}`),
+			]
+				.filter(Boolean)
+				.join("\n");
+			return {
+				state: { ...q, attempt: q.attempt + 1, stall: null, direction },
+			};
+		}
 		if (fact.choice === "cancel")
 			return {
-				state: update({ ...q, stall: null }, f, { status: "dropped" }),
+				state: update({ ...q, stall: null, direction: "" }, f, {
+					status: "dropped",
+				}),
 				send: releases([f], "The owner cancelled the investigation."),
 			};
 		return { state: q };
@@ -556,6 +567,7 @@ function investigationText(q: Queue, f: Finding) {
 	return investigateInput({
 		id: String(f.id),
 		finding: filingText(f),
+		direction: q.direction ? `Owner direction:\n${q.direction}` : "",
 		context: [
 			reference && `Reference: ${reference}.`,
 			mandate && renderMandate(mandate),

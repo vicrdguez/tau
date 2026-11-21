@@ -77,6 +77,7 @@ type QueueV1 = {
 		}[];
 		patterns: { name: string; finding: number; evidence: string }[];
 		attempt: number;
+		direction: string;
 		stall: { cause: string; lastWords: string } | null;
 	};
 };
@@ -141,6 +142,7 @@ export const queueFixture = {
 			],
 			patterns: [],
 			attempt: 0,
+			direction: "",
 			stall: null,
 		},
 	}),

@@ -66,6 +66,12 @@ const initial = prose(dir, "../../prose/inputs/build/brief.md", [
 	"mandate",
 	"direction",
 ]);
+const superseded = prose(dir, "../../prose/inputs/build/superseded.md", [
+	"evidence",
+	"threads",
+	"brief",
+	"direction",
+]);
 const resumed = prose(dir, "../../prose/inputs/build/resume.md", [
 	"brief",
 	"direction",
@@ -239,6 +245,8 @@ function workerInput(s: Build, i: Item) {
 			});
 		case "rework":
 			return rework(common);
+		case "superseded":
+			return superseded(common);
 		case "integration":
 			return integrate({ ...common, branch: w.from });
 	}

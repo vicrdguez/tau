@@ -128,7 +128,7 @@ type V1 = {
 		seq: number;
 		retry: number;
 		mergedHead: Sha | null;
-		input: "resume" | "brief" | "rework" | "integration";
+		input: "resume" | "brief" | "rework" | "integration" | "superseded";
 		evidence: string;
 		threads: string[];
 		direction: string;

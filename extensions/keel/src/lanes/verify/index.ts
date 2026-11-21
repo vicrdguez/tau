@@ -170,6 +170,7 @@ function transition(prev: State, world: World) {
 		evidence: string,
 		threads: string[],
 		inheritedTrunk?: Sha,
+		reason?: "mandate_revision",
 	) {
 		c.phase = "returned";
 		if (c.scope !== "item") release();
@@ -182,6 +183,7 @@ function transition(prev: State, world: World) {
 				threads,
 				head: s.head!,
 				...(inheritedTrunk && { inheritedTrunk }),
+				...(reason && { reason }),
 			}),
 		);
 		c.direction = "";
@@ -285,6 +287,8 @@ function transition(prev: State, world: World) {
 			s.verdicts
 				.findLast((v) => v.item === c.item)
 				?.blocks.map((b) => b.thread) ?? [],
+			undefined,
+			"mandate_revision",
 		);
 		c.obsolete = null;
 	}
