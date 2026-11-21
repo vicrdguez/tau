@@ -64,9 +64,7 @@ export async function openLiveRevision(
 		Readonly<ReturnType<typeof design.state.initial>> | undefined
 	>;
 	asks(): Promise<unknown[]>;
-	review(
-		prefix: string,
-	): Promise<{
+	review(prefix: string): Promise<{
 		decision: NonNullable<Awaited<ReturnType<typeof decision>>>;
 		text: string;
 	}>;
