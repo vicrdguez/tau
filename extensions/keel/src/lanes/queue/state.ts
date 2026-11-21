@@ -1,6 +1,5 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import type { World } from "../../kernel/lane.ts";
-import type { Sha } from "../../repo/index.ts";
 import type { Mandate } from "../design/public.ts";
 import type { Intake } from "./public.ts";
 
@@ -76,10 +75,9 @@ export type Finding = {
 	// An open decision's first finding, or the finding whose fix holds this filer.
 	group: number | null;
 	disposition: string | null;
-	encodedAt: Sha | null;
 	deferredAt: number | null;
 	triageDirection: string;
-	revisits: number[];
+	revisit: boolean;
 };
 export type Queue = {
 	entries: Finding[];

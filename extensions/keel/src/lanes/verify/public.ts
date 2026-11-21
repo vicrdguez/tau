@@ -4,8 +4,6 @@ import type { RepoInfo, Sha } from "../../repo/index.ts";
 import type { Approval, Ruling } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
 
-export type PassedResult = { sha: Sha; evidence: string };
-
 export type FindingNote = { kind: "finding_note"; text: string };
 export function findingNote(work: WorkId, text: string): Message {
 	const event: FindingNote = { kind: "finding_note", text };

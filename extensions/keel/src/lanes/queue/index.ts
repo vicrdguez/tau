@@ -8,11 +8,11 @@ import {
 	type Reduction,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
-import type { Sha } from "../../repo/index.ts";
 import type { PrincipleSample } from "../build/public.ts";
 import type { AuthorityIndex } from "../design/public.ts";
 import { queueFixture } from "./fixture.ts";
 import {
+	type ChecksFinished,
 	type FindingDisposition,
 	fileIntake,
 	type Holding,
@@ -156,22 +156,10 @@ export const queueLane = defineLane(
 					? withTriage(state, result)
 					: { reject: result.reject };
 			}
-			if (event.kind === "checks_encoded") {
-				const { ids, sha } = event as LaneEvent & {
-					ids: number[];
-					sha: Sha;
-				};
+			if (event.kind === "checks_finished")
 				return withTriage(state, {
-					state: {
-						...state.triage,
-						entries: state.triage.entries.map((f) =>
-							f.intake.missingCheck && !f.encodedAt && ids.includes(f.id)
-								? { ...f, encodedAt: sha }
-								: f,
-						),
-					},
+					state: triage.finishChecks(state.triage, event as ChecksFinished),
 				});
-			}
 			if (event.kind === "revision_disposition")
 				return withTriage(state, {
 					state: triage.recordDisposition(
@@ -328,13 +316,9 @@ export const queueLane = defineLane(
 			patternRulings: state.triage.patterns,
 			authority: state.authority ?? [],
 			samples: state.samples ?? [],
-			owedChecks: (except: number[] = []) =>
-				triage.checks(
-					state.triage,
-					(f) => !f.encodedAt && !except.includes(f.id),
-				),
-			checks: (ids: number[]) =>
-				triage.checks(state.triage, (f) => ids.includes(f.id)),
+			owedChecks: (encoded?: number[], returning?: readonly number[]) =>
+				triage.owedChecks(state.triage, encoded, returning),
+			checks: (ids: number[]) => triage.checks(state.triage, ids),
 			investigation: pending(state.triage) ? state.triage.context : null,
 			directionsFor: (work: WorkId) =>
 				state.triage.entries.flatMap((f) =>

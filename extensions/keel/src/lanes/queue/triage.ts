@@ -12,8 +12,8 @@ import {
 } from "../../kernel/lane.ts";
 import { toBuild } from "../build/public.ts";
 import { mandateLabels, renderMandate } from "../design/public.ts";
-import { findingNote, type PassedResult } from "../verify/public.ts";
-import type { FindingDisposition, Intake } from "./public.ts";
+import { findingNote } from "../verify/public.ts";
+import type { ChecksFinished, FindingDisposition, Intake } from "./public.ts";
 import {
 	cause,
 	choices,
@@ -29,14 +29,35 @@ import {
 	pending,
 	type Queue,
 	update,
+	workChoices,
 } from "./state.ts";
 
 const documents = `${import.meta.dirname}/../../prose/documents`;
+const investigationSlots = [
+	"id",
+	"finding",
+	"context",
+	"queue",
+	"patterns",
+	"direction",
+] as const;
 const investigateInput = prose(
 	import.meta.dirname,
 	"../../prose/inputs/queue/investigate.md",
-	["id", "finding", "context", "queue", "patterns", "direction"],
+	investigationSlots,
 );
+const investigateProject = prose(
+	import.meta.dirname,
+	"../../prose/inputs/queue/investigate-project.md",
+	investigationSlots,
+);
+const owedDocument = prose(documents, "owed-check.md", [
+	"name",
+	"work",
+	"revision",
+	"evidence",
+	"outcome",
+]);
 const triageDocument = prose(documents, "triage.md", [
 	"cause",
 	"work",
@@ -168,27 +189,53 @@ function seed(
 	};
 }
 
-function owedTriage(q: Queue, f: Finding, world: World) {
-	f.investigation = {
-		classification: "determined",
-		nodes: [],
-		evidence: "The owner overruled the verified result.",
-		size: "not estimated",
-		cause: "encoding the missing check",
-		recommendation: "build",
-		reference: f.intake.text,
-		sameAs: null,
+const isOwed = (f: Finding) =>
+	f.intake.missingCheck &&
+	f.disposition !== "dropped" &&
+	f.disposition !== "encoded";
+const beingBuilt = (f: Finding) =>
+	isOwed(f) && f.disposition === "build: routed";
+
+function owedTriage(f: Finding, outcome = ""): Finding {
+	return {
+		...f,
+		status: "triage",
+		group: f.id,
+		disposition: null,
+		basis: owedDocument({
+			name: f.intake.text,
+			work: f.goal ?? "unnamed work",
+			revision: f.intake.sha ?? "not available",
+			evidence:
+				f.intake.report
+					?.trim()
+					.split("\n")
+					.map((line) => (line ? `> ${line}` : ">"))
+					.join("\n") ?? "",
+			outcome: outcome ? `\n\n${outcome}` : "",
+		}),
 	};
-	f.status = "triage";
-	f.group = f.id;
-	f.disposition = null;
-	f.deferredAt = null;
-	f.basis = triageBasis(q, f, [f], context(world, null));
+}
+
+export function finishChecks(
+	q: Queue,
+	{ ids, encoded, outcome }: ChecksFinished,
+): Queue {
+	return {
+		...q,
+		entries: q.entries.map((f) =>
+			!beingBuilt(f) || !ids.includes(f.id)
+				? f
+				: encoded.includes(f.id)
+					? { ...f, ...close("encoded") }
+					: owedTriage(f, outcome),
+		),
+	};
 }
 
 export function intake(
 	q: Queue,
-	e: Intake & { requestedOwner?: boolean; overridePassed?: boolean },
+	e: Intake & { requestedOwner?: boolean },
 	world: World,
 ): Reduction<Queue> {
 	if (e.requestedOwner && e.source !== "owner")
@@ -196,34 +243,6 @@ export function intake(
 			reject: "Only the work's designer can file on behalf of the owner.",
 		};
 	if (!e.text.trim()) return { reject: "Name the finding." };
-	if (e.overridePassed) {
-		const passed =
-			e.work === null
-				? null
-				: (
-						world.view("verify", e.work) as {
-							passedResult?(): PassedResult | null;
-						} | null
-					)?.passedResult?.();
-		if (
-			e.source !== "owner" ||
-			!passed ||
-			e.blocking ||
-			e.pattern ||
-			e.edgeCase
-		)
-			return {
-				reject:
-					"Only the owner can name a missing check against this work's verified landing.",
-			};
-		e = {
-			...e,
-			sha: passed.sha,
-			nodes: [],
-			report: [e.report, passed.evidence].filter(Boolean).join("\n\n"),
-			missingCheck: true,
-		};
-	}
 	if (
 		e.edgeCase &&
 		(!e.edgeCase.failure.trim() ||
@@ -272,36 +291,9 @@ export function intake(
 	};
 	const sameCheck =
 		input.missingCheck &&
-		q.entries.find(
-			(f) =>
-				f.intake.missingCheck && !f.encodedAt && f.intake.text === input.text,
-		);
-	if (sameCheck) {
-		const reply = `Already owed as finding #${sameCheck.id}.`;
-		if (
-			sameCheck.intake.sha === input.sha &&
-			sameCheck.intake.work === input.work
-		)
-			return { state: q, reply };
-		const evidence = `Also overruled ${input.sha ?? "an unpinned result"}:\n${input.report ?? ""}`;
-		if (sameCheck.intake.report?.includes(evidence)) return { state: q, reply };
-		const revised = {
-			...sameCheck,
-			intake: {
-				...sameCheck.intake,
-				report: [sameCheck.intake.report, evidence]
-					.filter(Boolean)
-					.join("\n\n"),
-			},
-		};
-		if (
-			revised.status === "triage" ||
-			revised.disposition === "dropped" ||
-			revised.disposition === "deferred"
-		)
-			owedTriage(q, revised, world);
-		return { state: update(q, sameCheck, revised), reply };
-	}
+		q.entries.find((f) => isOwed(f) && f.intake.text === input.text);
+	if (sameCheck)
+		return { state: q, reply: `Already owed as finding #${sameCheck.id}.` };
 	const serialized = JSON.stringify(input);
 	const prior = q.entries.findLast(
 		(f) => JSON.stringify(f.intake) === serialized,
@@ -309,7 +301,7 @@ export function intake(
 	if (prior && !input.missingCheck && prior.disposition !== "deferred")
 		return { state: q, reply: `Already filed as finding #${prior.id}.` };
 	const live = context(world, input.work);
-	const f: Finding = {
+	let f: Finding = {
 		id: q.entries.length + 1,
 		intake: input,
 		goal: input.work === null ? null : (live.goal ?? "unnamed work"),
@@ -318,12 +310,11 @@ export function intake(
 		investigation: null,
 		group: null,
 		disposition: null,
-		encodedAt: null,
 		deferredAt: null,
 		triageDirection: "",
-		revisits: [],
+		revisit: false,
 	};
-	if (input.missingCheck) owedTriage(q, f, world);
+	if (input.missingCheck) f = owedTriage(f);
 	if (
 		precedent?.status === "revoked" &&
 		!counterexample &&
@@ -360,7 +351,10 @@ export function intake(
 const deferredAge = 30 * 86_400_000;
 export function revisit(q: Queue, world: World): Queue {
 	const due = q.entries.filter(
-		(f) => f.deferredAt != null && world.now - f.deferredAt >= deferredAge,
+		(f) =>
+			!f.intake.missingCheck &&
+			f.deferredAt != null &&
+			world.now - f.deferredAt >= deferredAge,
 	);
 	if (!due.length) return q;
 	const ids = due.map((f) => f.id);
@@ -385,7 +379,7 @@ export function revisit(q: Queue, world: World): Queue {
 		ids.includes(f.id) ? { ...f, deferredAt: null } : f,
 	);
 	const first = entries.at(-1)!;
-	first.revisits = ids;
+	first.revisit = true;
 	first.status = "triage";
 	first.group = first.id;
 	first.investigation = {
@@ -494,6 +488,7 @@ export function classify(
 	const work = f.intake.work;
 	if (i.classification === "no_action") {
 		if (
+			work === null ||
 			earlier ||
 			f.intake.source === "owner" ||
 			f.intake.blocking ||
@@ -501,11 +496,11 @@ export function classify(
 		)
 			return {
 				reject:
-					"No action is for an unlinked observation, not one from the owner, holding a filer, or changing a binding node.",
+					"No action is for an unlinked observation on a work, not one from the owner, holding a filer, or changing a binding node.",
 			};
-		const afterHandover =
-			work !== null &&
-			(world.view("verify", work) as { landed?: string } | null)?.landed;
+		const afterHandover = (
+			world.view("verify", work) as { landed?: string } | null
+		)?.landed;
 		return {
 			state: update(q, f, { ...found, ...close(`no action: ${i.evidence}`) }),
 			...(afterHandover && {
@@ -660,8 +655,45 @@ export function onFact(
 		return { state: q };
 	}
 	const first = decisions(q).find((f) => decisionSubject(f) === fact.subject);
-	const i = first?.investigation;
-	if (!first || !i || !choices(i.classification).some((c) => c === fact.choice))
+	if (!first) return { state: q };
+	if (first.intake.missingCheck) {
+		switch (fact.choice) {
+			case "build": {
+				const direction = fact.annotations
+					.map((a) => `${a.n}. ${a.text}`)
+					.join("\n");
+				return {
+					state: update(q, first, close("build: routed")),
+					send: [
+						seed(
+							"follow",
+							[
+								first.intake.report,
+								direction && `Owner direction:\n${direction}`,
+							]
+								.filter(Boolean)
+								.join("\n\n"),
+							first.intake.text,
+							[first.id],
+						),
+					],
+				};
+			}
+			case "defer":
+			case "drop":
+				return {
+					state: update(
+						q,
+						first,
+						close(fact.choice === "drop" ? "dropped" : "deferred"),
+					),
+				};
+			default:
+				return { state: q };
+		}
+	}
+	const i = first.investigation!;
+	if (!choices(i.classification).some((c) => c === fact.choice))
 		return { state: q };
 	const related = decisionMembers(q, first.id);
 	const annotations = fact.annotations
@@ -678,10 +710,7 @@ export function onFact(
 	const revising = building && active && i.classification === "mandate_wrong";
 	const defect = i.classification === "defect_in_scope";
 	const planning =
-		building &&
-		active &&
-		!first.intake.missingCheck &&
-		(defect || i.classification === "determined");
+		building && active && (defect || i.classification === "determined");
 	const fixing = planning && (defect || related.some((f) => f.intake.blocking));
 	const pattern = ["bless", "revoke"].includes(fact.choice)
 		? first.intake.pattern
@@ -713,9 +742,7 @@ export function onFact(
 							? [entry.triageDirection, annotations].filter(Boolean).join("\n")
 							: (entry.triageDirection ?? ""),
 					deferredAt:
-						fact.choice === "defer" && !entry.revisits.length
-							? world.now
-							: null,
+						fact.choice === "defer" && !entry.revisit ? world.now : null,
 				};
 			}
 			return entry;
@@ -753,21 +780,9 @@ export function onFact(
 
 	const send: Message[] = [];
 	if (building) {
-		if (first.intake.missingCheck)
-			send.push(seed("follow", text, i.reference!, [first.id]));
-		else if (i.classification === "determined")
+		if (i.classification === "determined")
 			send.push(seed("follow", text, i.reference));
-		else if (first.revisits.length) {
-			const owed = q.entries
-				.filter(
-					(f) =>
-						first.revisits.includes(f.id) &&
-						f.intake.missingCheck &&
-						!f.encodedAt,
-				)
-				.map((f) => f.id);
-			send.push(seed("precedent", text, null, owed));
-		} else send.push(seed("precedent", text, null));
+		else send.push(seed("precedent", text, null));
 	}
 	if (fact.choice === "revoke")
 		send.push(
@@ -805,8 +820,8 @@ function triageBasis(
 	return triageDocument({
 		cause: distinct(related.map((f) => f.investigation!.cause)).join("; "),
 		work: first.goal ?? "the project queue",
-		choices: first.intake.missingCheck
-			? "Build starts work to encode this check. Defer or drop closes this decision but the check remains owed."
+		choices: first.revisit
+			? "Build starts new work with design and Mandate review. Defer and drop both close this list without scheduling work or listing these findings again."
 			: i.classification === "mandate_wrong" && !live.active
 				? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
 				: actions(i.classification),
@@ -838,7 +853,9 @@ export function asks(q: Queue): Ask[] {
 			subject: decisionSubject(first),
 			title: basis.split("\n", 1)[0]!,
 			basis,
-			choices: choices(first.investigation!.classification),
+			choices: first.intake.missingCheck
+				? workChoices
+				: choices(first.investigation!.classification),
 			works: decisionMembers(q, first.id).map((f) => f.intake.work),
 		};
 	});
@@ -881,7 +898,7 @@ export function begin(q: Queue, world: World): Queue {
 	};
 }
 function investigationText(q: Queue, f: Finding) {
-	return investigateInput({
+	return (f.intake.work === null ? investigateProject : investigateInput)({
 		id: String(f.id),
 		finding: filingText(f),
 		direction: q.direction ? `\n\nOwner direction:\n${q.direction}` : "",
@@ -926,10 +943,29 @@ export function agents(q: Queue): AgentDecl[] {
 	];
 }
 
-export function checks(q: Queue, select: (f: Finding) => boolean) {
+const checkLine = (f: Finding) => `- #${f.id}: ${f.intake.text}`;
+export function checks(q: Queue, ids: number[]) {
 	return q.entries
-		.filter((f) => f.intake.missingCheck && select(f))
-		.map((f) => `- #${f.id}: ${f.intake.text} (rejected ${f.intake.sha})`)
+		.filter((f) => isOwed(f) && ids.includes(f.id))
+		.map(checkLine)
+		.join("\n");
+}
+export function owedChecks(
+	q: Queue,
+	encoded: number[] = [],
+	returning: readonly number[] = [],
+) {
+	return q.entries
+		.filter((f) => isOwed(f) && !encoded.includes(f.id))
+		.map((f) => {
+			const state =
+				f.status === "triage" || returning.includes(f.id)
+					? "in triage"
+					: beingBuilt(f)
+						? "being built"
+						: "deferred";
+			return `${checkLine(f)} (${state}; rejected ${f.intake.sha})`;
+		})
 		.join("\n");
 }
 

@@ -4,10 +4,10 @@ Use `dispatch` with seat `queue_explorer` to split independent read-only evidenc
 
 Use `report_investigation` once for the finding in your input. Give a concise size estimate, a cause stated as the decision to make, evidence and a recommendation. Choose a class:
 
-- `defect_in_scope`: the behaviour violates a node of the current Mandate and the build can take another item. For a project finding with no work, use this class for a demonstrated defect. The owner decides whether to start work.
+- `defect_in_scope`: the behaviour violates a node of the current Mandate and the build can take another item.
 - `determined`: an approved reference settles the answer. Name the reference.
 - `sets_precedent`: no approved reference settles the answer, or this is a proposal to change a principle, its description or its binding.
-- `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them. A project finding with no work names the decision record instead and holds nothing. An unlikely edge case does not hold them until the owner answers `build`.
+- `mandate_wrong`: the current Mandate itself is wrong. Name the exact binding nodes that need review. Keel holds items that rely on them. An unlikely edge case does not hold them until the owner answers `build`.
 - `unapproved_pattern`: a ruling cites a pattern the owner has not approved, or a finding challenges a pattern the owner blessed.
 - `no_action`: an observation needs no change, holds nothing and did not come from the owner. Give the reason in the evidence. The owner sees it at hand-over or as a note if the hand-over is already written.
 

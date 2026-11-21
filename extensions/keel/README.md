@@ -54,9 +54,9 @@ The investigator links evidence by naming an earlier finding with the same cause
 
 ### Owed checks
 
-When you reject a hand-over, name one missing check per annotation. An unannotated rejection asks again. You can also tell the work's designer that you are overruling a verified landing and name what should have stopped it. Keel files your words, the original hand-over and its commit directly for triage. Repeating the same check text keeps one outstanding obligation; later evidence can reopen its triage.
+Only rejecting a hand-over creates owed checks. Name one missing check per annotation. An unannotated rejection asks again. Each annotation opens triage with your words, the rejected commit and its evidence. Repeating the same check text while it is owed keeps one obligation. A later objection through the designer is an ordinary owner finding.
 
-`build` starts work to encode the check as a regression test, boundary rule or type. Use a principle for a judgment-only check. The verifier confirms the encoding on the full-set pass and on the prepared commit if trunk moved. A new, non-cancelled landing records the encoding commit and clears the obligation. Deferring, dropping, passing without a new landing, and unrelated work do not clear it. Every later hand-over lists the project's outstanding checks as of its landing.
+`build` starts work to encode the check as a regression test, boundary rule or type. Use a principle for a judgment-only check. The verifier confirms the encoding on the full-set pass and on the prepared commit if trunk moved. A new, non-cancelled landing clears the check if the verifier confirmed it. If the work is cancelled, declined or ends without clearing the check, triage reopens with the outcome. `defer` keeps the check owed and listed; `drop` clears it. Every later hand-over shows the outstanding checks as of its landing, with their states: in triage, deferred or being built. Owed checks are not repeated in the 30-day deferrals list.
 
 ### Project sweep
 

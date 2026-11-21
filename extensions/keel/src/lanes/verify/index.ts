@@ -23,7 +23,7 @@ import {
 	reviewedHistory,
 } from "../design/public.ts";
 import {
-	checksEncoded,
+	checksFinished,
 	fileHolding,
 	fileIntake,
 	type QueueChecks,
@@ -36,10 +36,10 @@ import {
 	agents,
 	asks,
 	effects,
-	handoverAsk,
+	rejectedEvidence,
 } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
-import type { FindingNote, PassedResult, Publication } from "./public.ts";
+import type { FindingNote, Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
@@ -256,14 +256,26 @@ function transition(prev: State, world: World) {
 	}
 	function landed(sha: Sha, unchanged: boolean) {
 		release();
-		const design = world.view("design") as { revisionSummary: string } | null;
+		const design = world.view("design") as {
+			revisionSummary: string;
+			owed?: number[];
+		} | null;
 		const encoded =
 			s.cancelled || unchanged
 				? []
 				: (s.verdicts.findLast(
 						(v) => v.scope !== "item" && v.outcome === "pass",
 					)?.encodedChecks ?? []);
-		if (encoded.length) send.push(checksEncoded(work, encoded, sha));
+		const returning = s.cancelled ? [] : (design?.owed ?? []);
+		send.push(
+			...checksFinished(
+				returning,
+				unchanged
+					? `Trunk was unchanged at ${sha}.`
+					: `Landed at ${sha} without verifier confirmation of this check.`,
+				encoded,
+			),
+		);
 		s.directions.push(...(queue?.directionsFor?.(work) ?? []));
 		s.handover = {
 			sha,
@@ -272,7 +284,7 @@ function transition(prev: State, world: World) {
 			missing: [],
 			revisions: design?.revisionSummary ?? "",
 			findings: queue?.findingsFor?.(work) ?? "",
-			owed: queue?.owedChecks?.(encoded) ?? "",
+			owed: queue?.owedChecks?.(encoded, returning) ?? "",
 		};
 		if (!s.cancelled) {
 			const history = reviewedHistory(design);
@@ -419,14 +431,14 @@ function transition(prev: State, world: World) {
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
 					if (e.choice === "reject") {
 						s.handover.missing = missing.map((a) => a.text);
-						const original = handoverAsk(prev)!.basis;
+						const original = rejectedEvidence(prev);
 						for (const a of missing)
 							file(
 								"owner",
 								s.handover.sha,
 								null,
 								a.text,
-								`Annotation ${a.n}. Rejected hand-over:\n${original}`,
+								original,
 								[],
 								"missingCheck",
 							);
@@ -919,12 +931,6 @@ export const verify: Lane<State> = {
 	effects,
 	view: (s) => ({
 		landed: s.handover?.sha ?? null,
-		passedResult(): PassedResult | null {
-			const handover = handoverAsk(s);
-			return handover
-				? { sha: s.handover!.sha, evidence: handover.basis }
-				: null;
-		},
 	}),
 	reduce: (s, e, w) => transition(s, w).reduce(e as Event),
 	onFact: (s, e, w) => transition(s, w).onFact(e),

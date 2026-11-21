@@ -108,15 +108,34 @@ export function recordLanding(
 }
 
 export type QueueChecks = {
-	owedChecks(except?: number[]): string;
+	owedChecks(encoded?: number[], returning?: readonly number[]): string;
 	checks(ids: number[]): string;
 };
-export function checksEncoded(work: WorkId, ids: number[], sha: Sha): Message {
-	return {
-		lane: "queue",
-		work: null,
-		event: { kind: "checks_encoded", work, ids, sha },
-	};
+export type ChecksFinished = {
+	kind: "checks_finished";
+	ids: number[];
+	encoded: number[];
+	outcome: string;
+};
+export function checksFinished(
+	ids: number[] | undefined,
+	outcome: string,
+	encoded: number[] = [],
+): Message[] {
+	return ids?.length
+		? [
+				{
+					lane: "queue",
+					work: null,
+					event: {
+						kind: "checks_finished",
+						ids,
+						encoded,
+						outcome,
+					} satisfies ChecksFinished,
+				},
+			]
+		: [];
 }
 
 export type FindingDisposition = {

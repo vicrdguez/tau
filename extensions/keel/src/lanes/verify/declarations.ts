@@ -10,12 +10,13 @@ import { renderMandate } from "../design/public.ts";
 import { cleaning, held, queueHeld, type Review, type State } from "./state.ts";
 
 const dir = `${import.meta.dirname}/../../prose`;
-const inputs = Object.fromEntries(
-	["item", "rework", "integration", "full", "landing"].map((name) => [
-		name,
-		prose(dir, `inputs/verify/${name}.md`, ["facts"]),
-	]),
-);
+const inputs = {
+	item: prose(dir, "inputs/verify/item.md", ["facts"]),
+	rework: prose(dir, "inputs/verify/rework.md", ["facts"]),
+	integration: prose(dir, "inputs/verify/integration.md", ["facts"]),
+	full: prose(dir, "inputs/verify/full.md", ["facts", "owed"]),
+	landing: prose(dir, "inputs/verify/landing.md", ["facts", "owed"]),
+};
 const form = prose(dir, "documents/verify-facts.md", [
 	"sha",
 	"base",
@@ -26,13 +27,11 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"playbook",
 	"history",
 	"addresses",
-	"owed",
 	"changedPolicyFiles",
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", ["facts", "threads"]);
 const resume = prose(dir, "inputs/verify/resume.md", ["direction", "task"]);
-const handover = prose(dir, "documents/handover.md", [
-	"trunk",
+const handoverEvidence = prose(dir, "documents/handover-evidence.md", [
 	"sha",
 	"result",
 	"intent",
@@ -46,7 +45,12 @@ const handover = prose(dir, "documents/handover.md", [
 	"revisions",
 	"findings",
 	"approvalReplies",
+]);
+const handover = prose(dir, "documents/handover.md", [
+	"trunk",
+	"sha",
 	"owed",
+	"evidence",
 	"base",
 ]);
 const title = prose(dir, "documents/handover-title.md", [
@@ -96,20 +100,19 @@ function input(s: State, c: Review) {
 				)
 				.join("\n") || "None.",
 		addresses: c.addresses.join(", ") || "None.",
-		owed: c.owed?.text ?? "None.",
 	});
-	function situation() {
-		if (c.scope !== "item") return c.scope;
-		if (!history.length) return "item";
-		return history.at(-1)?.outcome === "pass" ? "integration" : "rework";
-	}
 	const task =
 		c.phase === "diagnose"
-			? diagnose({
-					facts,
-					threads: history.at(-1)!.diagnose.join(", "),
-				})
-			: inputs[situation()]!({ facts });
+			? diagnose({ facts, threads: history.at(-1)!.diagnose.join(", ") })
+			: c.scope !== "item"
+				? inputs[c.scope]({ facts, owed: c.owed?.text || "None." })
+				: inputs[
+						!history.length
+							? "item"
+							: history.at(-1)?.outcome === "pass"
+								? "integration"
+								: "rework"
+					]({ facts });
 	return c.direction ? resume({ direction: c.direction, task }) : task;
 }
 export function agents(s: State): AgentDecl[] {
@@ -159,57 +162,63 @@ export function effects(s: State): EffectDecl[] {
 					: { repo: s.repo!, op },
 		}));
 }
-export function handoverAsk(s: State): Ask | null {
-	if (s.cancelled || !s.handover) return null;
-	const h = s.handover,
-		info = s.handoff!,
-		trunk = s.repo!.trunk;
+export function rejectedEvidence(s: State): string {
+	const h = s.handover!,
+		info = s.handoff!;
+	return handoverEvidence({
+		sha: h.sha,
+		result: h.unchanged ? unchanged : changed,
+		intent: s.mandate!.intent,
+		summary: info.summary,
+		verdict: s.verdicts
+			.filter((v) => v.scope !== "item" && v.outcome === "pass")
+			.map((v) => v.text)
+			.join("\n"),
+		rulings: rulings([...info.rulings].sort((a, b) => b.rank - a.rank)),
+		notes:
+			s.verdicts
+				.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
+				.join("\n") || "None.",
+		risk: info.risk,
+		directions: s.directions.join("\n") || "None.",
+		approvalReplies:
+			info.approvals
+				.map(({ revision, notes }) => {
+					const label =
+						revision === null
+							? "Mandate approval"
+							: `Revision ${revision} approval`;
+					return `#### ${label}\n\n${notes.map((n) => `${n.n}. ${n.text}\n   ${n.status}: ${n.reason}`).join("\n")}`;
+				})
+				.join("\n\n") || "None.",
+
+		diagnoses: s.diagnoses.join("\n") || "None.",
+		revisions: h.revisions || "None.",
+		findings: h.findings || "None.",
+	});
+}
+function handoverAsk(s: State): Ask {
+	const { sha, owed } = s.handover!;
+	const { trunk, base } = s.repo!;
 	return {
 		subject: subject("handover"),
 		title: title({
 			trunk,
-			sha: h.sha,
+			sha,
 			goal: s.mandate!.intent.trim().split("\n", 1)[0]!,
 		}).trim(),
 		choices: ["accept", "reject"],
 		basis: handover({
-			sha: h.sha,
+			sha,
 			trunk,
-			base: s.repo!.base,
-			result: h.unchanged ? unchanged : changed,
-			intent: s.mandate!.intent,
-			summary: info.summary,
-			verdict: s.verdicts
-				.filter((v) => v.scope !== "item" && v.outcome === "pass")
-				.map((v) => v.text)
-				.join("\n"),
-			rulings: rulings([...info.rulings].sort((a, b) => b.rank - a.rank)),
-			notes:
-				s.verdicts
-					.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
-					.join("\n") || "None.",
-			risk: info.risk,
-			directions: s.directions.join("\n") || "None.",
-			approvalReplies:
-				info.approvals
-					.map(({ revision, notes }) => {
-						const label =
-							revision === null
-								? "Mandate approval"
-								: `Revision ${revision} approval`;
-						return `#### ${label}\n\n${notes.map((n) => `${n.n}. ${n.text}\n   ${n.status}: ${n.reason}`).join("\n")}`;
-					})
-					.join("\n\n") || "None.",
-
-			diagnoses: s.diagnoses.join("\n") || "None.",
-			revisions: h.revisions || "None.",
-			findings: h.findings || "None.",
-			owed: h.owed || "None.",
+			base,
+			owed: owed || "None.",
+			evidence: rejectedEvidence(s),
 		}),
 	};
 }
 export function asks(s: State): Ask[] {
-	if (s.handover?.status !== "asking") return [];
-	const handover = handoverAsk(s);
-	return handover ? [handover] : [];
+	return !s.cancelled && s.handover?.status === "asking"
+		? [handoverAsk(s)]
+		: [];
 }

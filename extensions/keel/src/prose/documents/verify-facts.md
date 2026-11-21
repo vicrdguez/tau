@@ -20,6 +20,3 @@ Changed principles and playbooks reported by Git:
 Expect these files to be unchanged unless an item under review was tasked with creating or changing them.
 
 Threads this build claims to address: {{addresses}}
-
-Owed checks assigned to this build:
-{{owed}}
