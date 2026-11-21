@@ -161,7 +161,15 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			for (const [name, property] of Object.entries<{ format?: string }>(
 				items[0].schema.properties,
 			)) {
-				if (!["base", "trunk", "max_workers"].includes(name))
+				if (
+					![
+						"base",
+						"trunk",
+						"max_workers",
+						"dispatch_rounds",
+						"dispatch_minutes",
+					].includes(name)
+				)
 					assert.equal(property.format, "model", `keel option ${name}`);
 			}
 			assert.equal(items[1].schema.properties.designer.format, "model");

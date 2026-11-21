@@ -7,7 +7,7 @@ import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
-import { ROLES, type RoleName } from "./index.ts";
+import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
 
 const dir = import.meta.dirname + "/../prose";
 const explorer = prose(dir, "roles/explorer.md", [])({});
@@ -23,7 +23,6 @@ const challengerPrinciples = prose(
 
 const explorerSeats = {
 	designer: "design_explorer",
-	coordinator: "build_explorer",
 	worker: "build_explorer",
 	investigator: "queue_explorer",
 } as const satisfies Partial<Record<RoleName, RoleName>>;
@@ -51,7 +50,7 @@ function seat(
 export const explorerDispatch: NonNullable<
 	Parameters<typeof createKernel>[0]["dispatch"]
 > = {
-	roles: ["designer", "coordinator", "worker", "investigator"],
+	roles: ["designer", "worker", "investigator"],
 	resolve({ role, options, cwd, view }, { seat: requested }) {
 		const explorerRole = explorerSeat(role);
 		if (!explorerRole || requested !== explorerRole) return;
@@ -103,7 +102,8 @@ export const runDesignDispatch: EffectRunner = async (
 	if (!Array.isArray(spec.jobs) || !spec.jobs.every(designJob))
 		throw new Error("Invalid design dispatch plan.");
 	const results = await owner.dispatch(
-		{
+		async (tx) => ({
+			...dispatchBounds(await options.read(tx)),
 			async resolve(_tx, _caller, { seat: role, model }) {
 				switch (role) {
 					case "arena_seat_1":
@@ -135,7 +135,7 @@ export const runDesignDispatch: EffectRunner = async (
 					}
 				}
 			},
-		},
+		}),
 		spec.jobs,
 		ctx,
 	);

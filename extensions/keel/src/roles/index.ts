@@ -7,6 +7,10 @@ import {
 	type Tx,
 } from "tau/durable";
 import { int, obj, opt, str } from "tau/schema";
+import {
+	DEFAULT_DISPATCH_MINUTES,
+	DEFAULT_DISPATCH_ROUNDS,
+} from "../dispatch/index.ts";
 
 function coding(name: string): ToolRegistration {
 	const tool = CodingTools.tools?.find((tool) => tool.name === name);
@@ -88,6 +92,12 @@ const stored = projectOptions(
 		trunk: str({ minLength: 1, default: defaultTrunk }),
 		base: str({ minLength: 1, default: defaultBase }),
 		max_workers: int({ minimum: 1, default: 3 }),
+		dispatch_rounds: int({ minimum: 1, default: DEFAULT_DISPATCH_ROUNDS }),
+		dispatch_minutes: int({
+			minimum: 1,
+			maximum: 35791,
+			default: DEFAULT_DISPATCH_MINUTES,
+		}),
 	}),
 );
 export type KeelOptions = Awaited<ReturnType<typeof stored.read>>;
@@ -107,6 +117,13 @@ export const options = {
 		return value;
 	},
 };
+
+export function dispatchBounds(opts: KeelOptions) {
+	return {
+		maxTurns: opts.dispatch_rounds,
+		timeoutMs: opts.dispatch_minutes * 60_000,
+	};
+}
 
 export function settings(
 	role: RoleName,

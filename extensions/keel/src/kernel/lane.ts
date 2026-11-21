@@ -84,7 +84,9 @@ export type Reduction<S> = { reject: string } | Accepted<S>;
 export interface StaticFacts {
 	readonly work: WorkId | null;
 	readonly root: string;
-	readonly options: Readonly<KeelOptions>;
+	readonly options: Readonly<
+		Omit<KeelOptions, "dispatch_rounds" | "dispatch_minutes">
+	>;
 }
 export interface World extends StaticFacts {
 	readonly now: number;

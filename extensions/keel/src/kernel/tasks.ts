@@ -17,7 +17,7 @@ import {
 import {
 	type DispatchJob,
 	type DispatchResult,
-	type DispatchRoster,
+	type DispatchAdmission,
 	fanOut,
 } from "../dispatch/index.ts";
 import { type RoleName, storedRole } from "../roles/index.ts";
@@ -58,7 +58,7 @@ type EffectOwner = {
 	): ReturnType<Tx["scanConversations"]>;
 	createChild(): Promise<ConversationId>;
 	dispatch<J extends DispatchJob>(
-		roster: DispatchRoster<J>,
+		roster: DispatchAdmission<J>,
 		jobs: readonly J[],
 		context: Context,
 	): Promise<DispatchResult[]>;

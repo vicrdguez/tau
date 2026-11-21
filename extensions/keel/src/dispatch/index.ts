@@ -13,7 +13,8 @@ import {
 import { arr, obj, str } from "tau/schema";
 
 const MAX_JOBS = 8;
-const DEFAULT_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_DISPATCH_MINUTES = 20;
+export const DEFAULT_DISPATCH_ROUNDS = 64;
 const TOOL = "dispatch";
 
 export type DispatchJob = { seat: string; question: string };
@@ -35,7 +36,7 @@ export type DispatchOwner = Pick<
 >;
 export type DispatchRoster<J extends DispatchJob = DispatchJob> = {
 	timeoutMs?: number | undefined;
-	admit?(tx: Tx, caller: ConversationId): void | Promise<void>;
+	maxTurns?: number;
 	resolve(
 		tx: Tx,
 		caller: ConversationId,
@@ -44,9 +45,13 @@ export type DispatchRoster<J extends DispatchJob = DispatchJob> = {
 	): Seat | undefined | Promise<Seat | undefined>;
 };
 
+export type DispatchAdmission<J extends DispatchJob> =
+	| DispatchRoster<J>
+	| ((tx: Tx, caller: ConversationId) => Promise<DispatchRoster<J>>);
+
 type Plan = {
 	deadline: number;
-	jobs: (DispatchJob & { conversation: ConversationId; timedOut: boolean })[];
+	jobs: (DispatchJob & { conversation: ConversationId })[];
 };
 const planDoc = defineDoc<Plan>({
 	kind: "dispatch.plan",
@@ -59,7 +64,7 @@ const planDoc = defineDoc<Plan>({
 /** One foreground batch per owner task. The plan pins ordering and child IDs in the creation commit. */
 export async function fanOut<J extends DispatchJob>(
 	owner: DispatchOwner,
-	roster: DispatchRoster<J>,
+	admit: DispatchAdmission<J>,
 	jobs: readonly J[],
 	ctx: Context,
 	onChildren?: (ids: ConversationId[], ctx: Context) => Promise<void>,
@@ -72,19 +77,14 @@ export async function fanOut<J extends DispatchJob>(
 		throw new Error(
 			`Give 1 to ${MAX_JOBS} dispatch jobs with a seat and a question.`,
 		);
-	const timeoutMs = roster.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-	if (
-		!Number.isSafeInteger(timeoutMs) ||
-		timeoutMs < 1 ||
-		timeoutMs > 2147483647
-	)
-		throw new Error("Dispatch needs a positive timeout in milliseconds.");
-
 	const plan = await owner.commit(async (tx): Promise<Plan> => {
 		const caller = await tx.conversation(owner.conversationId);
 		if (!caller || caller.owner)
 			throw new Error("A child conversation cannot dispatch.");
-		await roster.admit?.(tx, owner.conversationId);
+		const roster =
+			typeof admit === "function"
+				? await admit(tx, owner.conversationId)
+				: admit;
 		const stored = await tx.doc(planDoc, owner.taskId);
 		if (stored.jobs.length) {
 			if (
@@ -100,6 +100,13 @@ export async function fanOut<J extends DispatchJob>(
 				jobs: stored.jobs.map((job) => ({ ...job })),
 			};
 		}
+		const timeoutMs = roster.timeoutMs ?? DEFAULT_DISPATCH_MINUTES * 60_000;
+		if (
+			!Number.isSafeInteger(timeoutMs) ||
+			timeoutMs < 1 ||
+			timeoutMs > 2147483647
+		)
+			throw new Error("Dispatch needs a positive timeout in milliseconds.");
 		// Resolve the whole permitted roster before making any table writes.
 		const seats: Seat[] = [];
 		for (const [index, job] of jobs.entries()) {
@@ -117,13 +124,14 @@ export async function fanOut<J extends DispatchJob>(
 					...seats[i]!,
 					// Do not inherit a narrower filter or limits from the caller.
 					modelTools: null,
-					maxTurns: seats[i]!.maxTurns ?? 12,
+					maxTurns:
+						seats[i]!.maxTurns ?? roster.maxTurns ?? DEFAULT_DISPATCH_ROUNDS,
 					thinkingLevel: seats[i]!.thinkingLevel ?? null,
 					compaction: { enabled: false },
 				},
 				{ kind: "task", taskId: owner.taskId },
 			);
-			plan.jobs.push({ seat, question, conversation, timedOut: false });
+			plan.jobs.push({ seat, question, conversation });
 		}
 		Object.assign(stored, plan);
 		return plan;
@@ -143,10 +151,7 @@ export async function fanOut<J extends DispatchJob>(
 	};
 	return Promise.all(
 		plan.jobs.map(
-			async (
-				{ seat, question, conversation, timedOut },
-				i,
-			): Promise<DispatchResult> => {
+			async ({ seat, question, conversation }, i): Promise<DispatchResult> => {
 				const failure = (error: string) => ({
 					seat,
 					conversation,
@@ -155,34 +160,36 @@ export async function fanOut<J extends DispatchJob>(
 				});
 				const handle = await owner.conversation(conversation, ctx);
 				if (!handle) throw new Error(`Missing dispatch child ${conversation}`);
-				if (timedOut) {
+				const requestId = `dispatch:${owner.taskId}:${i}`;
+				const expired = async () => {
+					const current = await owner.commit(
+						(tx) => tx.submissionByRequest(conversation, requestId),
+						ctx,
+					);
+					if (current?.status === "done") return current;
 					await handle.abort(ctx);
-					return failure("Dispatch child timed out.");
-				}
-				const submission = await handle.submit(
-					{
-						type: "input",
-						content: question,
-						requestId: `dispatch:${owner.taskId}:${i}`,
-						whenBusy: "reject",
-					},
-					ctx,
-				);
-				const settled = await submission
-					.wait(waiting)
-					.catch(async (error: unknown) => {
-						ctx.abortSignal?.throwIfAborted();
-						if (!timeout.aborted) throw error;
-						const current = await submission.status(ctx);
-						if (current.status === "done" || current.status === "unanswered")
-							return current;
-						// Record the timeout before stopping the child so recovery reports the same reason.
-						await owner.commit(async (tx) => {
-							(await tx.doc(planDoc, owner.taskId)).jobs[i]!.timedOut = true;
-						}, ctx);
-						await handle.abort(ctx);
-						return null;
-					});
+					return null;
+				};
+				const settled =
+					owner.now() >= plan.deadline
+						? await expired()
+						: await (
+								await handle.submit(
+									{
+										type: "input",
+										content: question,
+										requestId,
+										whenBusy: "reject",
+									},
+									ctx,
+								)
+							)
+								.wait(waiting)
+								.catch((error: unknown) => {
+									ctx.abortSignal?.throwIfAborted();
+									if (!timeout.aborted) throw error;
+									return expired();
+								});
 				if (!settled) return failure("Dispatch child timed out.");
 				if (settled.status === "unanswered") return failure(settled.reason);
 				const entryId = settled.answer;
@@ -210,7 +217,7 @@ export async function fanOut<J extends DispatchJob>(
 	);
 }
 
-export function dispatchTool(roster: DispatchRoster) {
+export function dispatchTool(roster: DispatchAdmission<DispatchJob>) {
 	return defineTool({
 		name: TOOL,
 		description: `Give up to ${MAX_JOBS} independent questions to available seats. Join their answers or failures in the same order.`,

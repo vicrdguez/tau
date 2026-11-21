@@ -12,13 +12,20 @@ import {
 	dispatchTool,
 } from "../dispatch/index.ts";
 import {
+	dispatchBounds,
 	options,
 	type RoleName,
 	settings,
 	storedRole,
 } from "../roles/index.ts";
 import type { WorkId } from "./ids.ts";
-import type { Delivery, FactDelivery, RegisteredLane, Result } from "./lane.ts";
+import type {
+	Delivery,
+	FactDelivery,
+	RegisteredLane,
+	Result,
+	StaticFacts,
+} from "./lane.ts";
 import { type RenderInput, reconcile } from "./reconcile.ts";
 import * as records from "./records.ts";
 import { readViews, route } from "./routing.ts";
@@ -47,7 +54,7 @@ export function createKernel(config: {
 			facts: {
 				role: RoleName;
 				cwd: string | null;
-				options: Awaited<ReturnType<typeof options.read>>;
+				options: StaticFacts["options"];
 				view: Awaited<ReturnType<typeof readViews>>;
 			},
 			job: DispatchJob,
@@ -95,26 +102,26 @@ export function createKernel(config: {
 	if (dispatch) {
 		tools.push({
 			roles: dispatch.roles,
-			tool: dispatchTool({
-				admit: async (tx, caller) => {
-					await dispatchCaller(tx, caller, dispatch.roles);
-				},
-				async resolve(tx, caller, job) {
-					const { self, bound } = await dispatchCaller(
-						tx,
-						caller,
-						dispatch.roles,
-					);
-					return dispatch.resolve(
-						{
-							role: self.role,
-							cwd: self.cwd,
-							options: await options.read(tx),
-							view: await readViews(tx, lanes, bound ? self.work : null),
-						},
-						job,
-					);
-				},
+			tool: dispatchTool(async (tx, caller) => {
+				const { self, bound } = await dispatchCaller(
+					tx,
+					caller,
+					dispatch.roles,
+				);
+				const opts = await options.read(tx);
+				return {
+					...dispatchBounds(opts),
+					resolve: async (_tx, _caller, job) =>
+						dispatch.resolve(
+							{
+								role: self.role,
+								cwd: self.cwd,
+								options: opts,
+								view: await readViews(tx, lanes, bound ? self.work : null),
+							},
+							job,
+						),
+				};
 			}),
 		});
 	}
