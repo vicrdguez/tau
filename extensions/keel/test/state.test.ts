@@ -39,7 +39,7 @@ const fixtures = {
 		def: records.BindingState,
 		kind: "keel.binding",
 		scope: "conversation",
-		initial: { binding: null },
+		initial: { binding: null, projectPrinciples: null },
 	},
 	ReceiptState: {
 		def: records.ReceiptState,
