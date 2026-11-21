@@ -93,10 +93,14 @@ export function settleCleanup(
 		j.wait = null;
 		return { state: s };
 	}
-	if (e.kind === "effect_failed" || e.result.kind !== "removed")
-		s.kept.push(
-			`${j.worker.path}: ${e.kind === "effect_failed" ? e.error : JSON.stringify(e.result)}`,
-		);
+	const kept =
+		e.kind === "effect_failed" || e.result.kind !== "removed"
+			? `${j.worker.path}: ${e.kind === "effect_failed" ? e.error : JSON.stringify(e.result)}`
+			: null;
+	if (kept) s.kept.push(kept);
 	s.cleanup = s.cleanup.filter((other) => other !== j);
-	return completion(s, w);
+	if (s.phase === "cancelled") return completion(s, w);
+	return kept
+		? { state: s, notes: [{ agent: null, text: `Kept ${kept}` }] }
+		: { state: s };
 }

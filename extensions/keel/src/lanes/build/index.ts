@@ -105,6 +105,19 @@ function prepare(s: Build, i: Item, w: World) {
 		base: s.head!,
 	};
 }
+function disposeReplacedAttempts(s: Build, item: Item, w: World) {
+	const prefix = `worker:${w.work}:${item.id}:`;
+	s.abandoned = s.abandoned.filter((worker) => {
+		if (!worker.key.startsWith(prefix)) return true;
+		s.cleanup.push({
+			worker,
+			mergedHead: null,
+			wait: null,
+			key: `replace/remove/${worker.key}`,
+		});
+		return false;
+	});
+}
 // An owner retry gets a new kernel delivery. The git plan still has its original key:
 // a CAS or branch creation may already have succeeded before the runner lost its reply.
 const delivery = (plan: string, retry: number) =>
@@ -161,14 +174,8 @@ function plans(
 function ourAdvance(s: Build, i: Item, actual: Sha | null) {
 	return actual !== null && actual === s.head && i.worker!.base !== actual;
 }
-function hold(
-	s: Build,
-	w: World,
-	item: string | null,
-	obstruction: string,
-	evidence: string,
-	actual: Sha | null = null,
-): Accepted<Build> {
+function holdingMessage(s: Build, w: World, h: Build["holds"][number]) {
+	const { item, obstruction, cause, evidence } = h;
 	const stage = s.items.find((i) => i.id === item)?.stage;
 	const resume =
 		s.phase === "discover"
@@ -191,22 +198,44 @@ function hold(
 						: item
 							? resumption.worker
 							: resumption.coordinator;
-	const cause = `build/${++s.seq}`;
-	s.holds.push({ cause, item, obstruction, evidence, actual });
-	return {
-		state: s,
-		send: [
-			fileHolding({
-				work: w.work!,
-				lane: "build",
-				goal: s.mandate!.intent,
-				resume,
-				item,
-				cause,
-				evidence,
-			}),
-		],
-	};
+	return fileHolding({
+		work: w.work!,
+		lane: "build",
+		goal: s.mandate!.intent,
+		resume,
+		item,
+		cause,
+		evidence,
+	});
+}
+function hold(
+	s: Build,
+	w: World,
+	item: string | null,
+	obstruction: string,
+	evidence: string,
+	actual: Sha | null = null,
+): Accepted<Build> {
+	const h = { cause: `build/${++s.seq}`, item, obstruction, evidence, actual };
+	s.holds.push(h);
+	return obstruction === "unattributed"
+		? { state: s }
+		: { state: s, send: [holdingMessage(s, w, h)] };
+}
+/** A merge can have written Git before Verify records its result. */
+function settleMovedPreparations(s: Build, w: World) {
+	return s.holds.flatMap((h) => {
+		if (h.obstruction !== "unattributed") return [];
+		const i = s.items.find((i) => i.id === h.item)!;
+		if (ourAdvance(s, i, h.actual)) {
+			s.holds = s.holds.filter((other) => other !== h);
+			prepare(s, i, w);
+			return [];
+		}
+		if (s.items.some((i) => i.stage === "published")) return [];
+		h.obstruction = "moved";
+		return [holdingMessage(s, w, h)];
+	});
 }
 function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 	const state = s;
@@ -215,6 +244,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 	switch (e.kind) {
 		case "effect_done":
 		case "effect_failed": {
+			if (s.cleanup.some((j) => j.key === e.key)) return settleCleanup(s, e, w);
 			const planned = plans(s, w).find((p) => p.effect.key === e.key);
 			if (!planned) return { state };
 			const id = planned.item;
@@ -255,7 +285,12 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 					s,
 					w,
 					id,
-					result.kind,
+					result.kind === "moved" &&
+						result.actual !== null &&
+						i?.stage === "preparing" &&
+						s.items.some((other) => other.stage === "published")
+						? "unattributed"
+						: result.kind,
 					`${e.key}: ${JSON.stringify(result)}`,
 					result.kind === "moved" ? result.actual : null,
 				);
@@ -273,6 +308,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 				return { state };
 			}
 			if (i?.stage === "preparing" && result.kind === "worktree") {
+				disposeReplacedAttempts(s, i, w);
 				i.projectPrinciples = [...result.principles];
 				i.stage = "building";
 				i.seq = ++s.seq;
@@ -476,7 +512,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			i.evidence = e.evidence;
 			i.threads = e.threads;
 			i.seq = ++s.seq;
-			return { state };
+			return { state, send: settleMovedPreparations(s, w) };
 		}
 		case "merged": {
 			const i = s.items.find((i) => i.id === e.item);
@@ -485,7 +521,9 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			s.head = i.mergedHead = e.head;
 			i.stage = "cleaning";
 			i.retry = 0;
-			break;
+			const send = settleMovedPreparations(s, w);
+			schedule(s, w);
+			return { state, send };
 		}
 		case "handoff":
 			if (
@@ -563,6 +601,6 @@ const build: Lane<Build> = {
 	effects: (s, w) =>
 		s.phase === "cancelled"
 			? cleanupEffects(s)
-			: plans(s, w).map((p) => p.effect),
+			: [...plans(s, w).map((p) => p.effect), ...cleanupEffects(s)],
 };
 export const buildLane = defineLane(build, buildV1);
