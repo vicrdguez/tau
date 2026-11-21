@@ -85,7 +85,10 @@ export async function openLiveRevision(
 			ctx,
 		);
 	const project = () => harness.snapshot(stateDoc(ProjectState), ctx);
-	const desk = () => harness.snapshot(stateDoc(design.state), work, ctx);
+	const desk = () => {
+		assert.equal(design.state.scope, "conversation");
+		return harness.snapshot(stateDoc(design.state), work, ctx);
+	};
 	async function asks() {
 		return Object.values((await project())?.asks ?? {});
 	}

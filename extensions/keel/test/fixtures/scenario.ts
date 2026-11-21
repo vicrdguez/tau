@@ -97,7 +97,7 @@ export async function openScriptedWorkflow(
 		name: string,
 		args: JsonObject,
 		...expectedInput: (string | { tool: string; text: string })[]
-	): FauxResponseStep {
+	): Extract<FauxResponseStep, (...args: never[]) => unknown> {
 		return (context, _, __, model) => {
 			if (model.id !== role)
 				errors.push(`${name}: expected ${role}, got ${model.id}`);
