@@ -195,6 +195,32 @@ test("cancel withdraws all questions about one work; a stale answer cannot relea
 	assert.equal(q.asks().length, 1);
 });
 
+test("resolving a superseded holding closes only that cause and never resumes its filer", () => {
+	const q = project(queueLane);
+	const old = file(a, "verify", "thread/1");
+	q.send(old);
+	const stale = q.asks()[0]!.subject;
+	const other = file(a, "verify", "thread/2");
+	q.send(other);
+	q.send(file(b, "verify", old.cause));
+	const resolve = {
+		kind: "resolve_holding",
+		work: a,
+		lane: "verify",
+		cause: old.cause,
+	};
+	assert.deepEqual(q.send(resolve), []);
+	assert.deepEqual(q.send(resolve), []);
+	assert.deepEqual(q.send(answer(stale, "resume")), []);
+	assert.equal(q.asks().length, 2);
+	assert.ok(q.asks().some((ask) => ask.basis.includes(other.evidence)));
+	assert.ok(
+		q
+			.asks()
+			.some((ask) => ask.basis.includes(file(b, "verify", old.cause).evidence)),
+	);
+});
+
 test("one project slot grants waiters once in arrival order; another work's stale release cannot unlock it", () => {
 	const trunk = project(trunkLane);
 	assert.deepEqual(trunk.send(take(a)), grant(a));
