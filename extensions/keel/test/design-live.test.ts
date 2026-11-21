@@ -370,16 +370,33 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	assert.notEqual(x.turn()?.token, token);
 	for (const part of [note.text, "Use the fixture."])
 		assert.ok(x.input().includes(part));
+	x.act({
+		...request,
+		causes: ["queue/3"],
+		nodes: ["R2"],
+		text: "The reader needs a UTC timestamp.",
+	});
+	for (const text of [note.text, "Use the fixture.", "UTC timestamp"])
+		assert.ok(x.input().includes(text));
 	const nextRule = {
 		...correction,
 		rule: "Round only once, after allocating fees.",
 	};
-	x.act({ ...publish, changes: { nodes: [nextRule] }, replies: [reply] });
+	x.act({
+		...publish,
+		changes: {
+			nodes: [nextRule, { ...untouched, rule: "Report timestamps in UTC." }],
+		},
+		answers: [...publish.answers, ...answerCauses(["queue/3"], ["R2"])],
+		replies: [reply],
+	});
 	const second = x.asks()[0]!;
 	assert.notEqual(first, second.subject);
 	assert.ok(second.basis.includes(reply.reason));
 	assert.match(second.basis, /Since round 1: R1 changed/);
-	const [proposed, previous] = second.basis.split("#### Previously");
+	const [proposed, previous, duplicateBound] =
+		second.basis.split("#### Previously");
+	assert.equal(duplicateBound, undefined);
 	assert.match(proposed!, /### R1: Rule \(changed\)/);
 	assert.ok(proposed!.includes(nextRule.rule));
 	assert.ok(previous?.includes(correction.rule));
