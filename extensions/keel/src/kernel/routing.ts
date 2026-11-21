@@ -5,6 +5,8 @@ import type {
 	Delivery,
 	FactDelivery,
 	Lane,
+	KernelEvent,
+	LaneEvent,
 	Message,
 	Note,
 	RegisteredLane,
@@ -42,6 +44,8 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 		notes,
 		// Copy the data, not the projection: a view may expose query methods.
 		view: () => lane.view(structuredClone(state)),
+		workInHand: (event: LaneEvent | KernelEvent) =>
+			lane.workInHand?.(state, event) ?? null,
 		reduce(delivery: Message | FactDelivery) {
 			const result =
 				"fact" in delivery
@@ -160,6 +164,8 @@ export async function route(
 			throw new Error(
 				`Unknown lane or wrong scope: ${lane} (${work ?? "project"})`,
 			);
+		const relatedWork = frame.workInHand(event);
+		if (relatedWork !== null) await loadScope(relatedWork);
 		touched.add(frame);
 		const result = frame.reduce(delivery);
 		if ("reject" in result) {

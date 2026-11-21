@@ -92,6 +92,8 @@ export interface World extends StaticFacts {
 export interface Lane<S extends JsonObject> {
 	name: string;
 	state: Exclude<StateDef<S>, { scope: "task" }>;
+	/** A project event may need one affected work's current views before routing its result. */
+	workInHand?(state: S, event: LaneEvent | KernelEvent): WorkId | null;
 	reduce(state: S, event: LaneEvent, world: World): Reduction<S>;
 	onFact(state: S, fact: KernelEvent, world: World): Accepted<S>;
 	view(state: S): unknown;

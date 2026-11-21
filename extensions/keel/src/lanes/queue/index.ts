@@ -8,13 +8,24 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
-import type { Holding, Resume } from "./public.ts";
+import type { Holding, HoldingAddress, Intake, Resume } from "./public.ts";
+import { type Investigated, initial, type Queue } from "./state.ts";
+import * as triage from "./triage.ts";
+
+export { queueTools } from "./tools.ts";
 
 type Finding = Holding & {
-	status: "open" | "resumed" | "cancelled";
+	status: "open" | "resumed" | "resolved" | "cancelled";
 };
 type FileFinding = { kind: "file" } & Holding;
-type QueueState = { findings: Finding[] };
+type QueueState = { findings: Finding[]; triage: Queue };
+const withTriage = (
+	state: QueueState,
+	result: Accepted<Queue>,
+): Accepted<QueueState> => ({
+	...result,
+	state: { ...state, triage: result.state },
+});
 
 const question = prose(
 	import.meta.dirname,
@@ -24,6 +35,8 @@ const question = prose(
 function cancel(state: QueueState, work: WorkId): Accepted<QueueState> {
 	return {
 		state: {
+			...state,
+			triage: triage.cancelWork(state.triage, work),
 			findings: state.findings.map((f) =>
 				f.work === work && f.status === "open"
 					? { ...f, status: "cancelled" }
@@ -37,14 +50,8 @@ function cancel(state: QueueState, work: WorkId): Accepted<QueueState> {
 		})),
 	};
 }
-const address = ({
-	work,
-	lane,
-	cause,
-}: Pick<Holding, "work" | "lane" | "cause">) =>
+const address = ({ work, lane, cause }: HoldingAddress) =>
 	subject(`finding/${work}/${lane}/${cause}`);
-
-export const queueTools = [] as const;
 export const queueLane = defineLane(
 	{
 		name: "queue",
@@ -52,15 +59,45 @@ export const queueLane = defineLane(
 			kind: "keel.queue",
 			scope: "session",
 			version: 1,
-			initial: (): QueueState => ({ findings: [] }),
+			initial: (): QueueState => ({ findings: [], triage: initial() }),
 		}),
-		reduce(state, event): Reduction<QueueState> {
+		workInHand: (state, event) => triage.workFor(state.triage, event),
+		reduce(state, event, world): Reduction<QueueState> {
+			if (event.kind === "intake" || event.kind === "investigated") {
+				const result =
+					event.kind === "intake"
+						? triage.intake(
+								state.triage,
+								event as Intake & { kind: "intake" },
+								world,
+							)
+						: triage.classify(state.triage, event as Investigated, world);
+				return result.reject === undefined
+					? withTriage(state, result)
+					: { reject: result.reject };
+			}
+			if (event.kind === "resolve_holding") {
+				const resolved = address(
+					event as HoldingAddress & { kind: "resolve_holding" },
+				);
+				return {
+					state: {
+						...state,
+						findings: state.findings.map((f) =>
+							f.status === "open" && address(f) === resolved
+								? { ...f, status: "resolved" }
+								: f,
+						),
+					},
+				};
+			}
 			if (event.kind === "file") {
 				const { kind: _, ...filing } = event as FileFinding;
 				if (state.findings.some((f) => address(f) === address(filing)))
 					return { state };
 				return {
 					state: {
+						...state,
 						findings: [...state.findings, { ...filing, status: "open" }],
 					},
 				};
@@ -69,12 +106,14 @@ export const queueLane = defineLane(
 				return cancel(state, event.work as WorkId);
 			return { reject: `Unknown queue event: ${event.kind}` };
 		},
-		onFact(state, answer): Accepted<QueueState> {
-			if (answer.kind !== "answered") return { state };
+		onFact(state, answer, world): Accepted<QueueState> {
+			if (answer.kind !== "answered")
+				return withTriage(state, triage.onFact(state.triage, answer, world));
 			const finding = state.findings.find(
 				(f) => f.status === "open" && address(f) === answer.subject,
 			);
-			if (!finding) return { state };
+			if (!finding)
+				return withTriage(state, triage.onFact(state.triage, answer, world));
 			const { work, lane, item, cause, evidence } = finding;
 			if (answer.choice === "cancel") return cancel(state, work);
 			if (answer.choice !== "resume") return { state };
@@ -114,6 +153,7 @@ export const queueLane = defineLane(
 			});
 			return {
 				state: {
+					...state,
 					findings: state.findings.map((f) =>
 						f === finding ? { ...f, status: "resumed" } : f,
 					),
@@ -121,8 +161,8 @@ export const queueLane = defineLane(
 				send,
 			};
 		},
-		asks: (state) =>
-			state.findings
+		asks: (state) => [
+			...state.findings
 				.filter((f) => f.status === "open")
 				.map((f) => {
 					const basis = question({
@@ -135,14 +175,17 @@ export const queueLane = defineLane(
 						subject: address(f),
 						title: basis.split("\n", 1)[0] ?? basis,
 						basis,
-						choices: ["resume", "cancel"],
+						choices: ["resume", "cancel"] as const,
 					};
 				}),
+			...triage.asks(state.triage),
+		],
 		view: (state) => ({
+			approvedPatterns: state.triage.patterns,
 			openFor: (work: WorkId) =>
 				state.findings.filter((f) => f.work === work && f.status === "open"),
 		}),
-		agents: () => [],
+		agents: (state) => triage.agents(state.triage),
 		effects: () => [],
 	},
 	queueFixture,

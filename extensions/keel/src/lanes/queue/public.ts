@@ -1,5 +1,6 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import { type Message, prose } from "../../kernel/lane.ts";
+import type { Sha } from "../../repo/index.ts";
 
 const dir = `${import.meta.dirname}/../../prose/documents/resume`;
 const action = (name: string) => prose(dir, `${name}.md`, [])({}).trim();
@@ -35,4 +36,37 @@ export type Resume = {
 // Session address on the envelope, affected work in the finding.
 export function fileHolding(finding: Holding): Message {
 	return { lane: "queue", work: null, event: { kind: "file", ...finding } };
+}
+
+export type HoldingAddress = Pick<Holding, "work" | "lane" | "cause">;
+export function resolveHolding(finding: HoldingAddress): Message {
+	return {
+		lane: "queue",
+		work: null,
+		event: { kind: "resolve_holding", ...finding },
+	};
+}
+
+export type Intake = {
+	work: WorkId | null;
+	source:
+		| "owner"
+		| "designer"
+		| "coordinator"
+		| "worker"
+		| "verifier"
+		| "diagnoser"
+		| "investigator";
+	item: string | null;
+	sha: Sha | null;
+	text: string;
+	report: string | null;
+	nodes: string[];
+	edgeCase: { failure: string; likelihood: string; cost: string } | null;
+	pattern: string | null;
+	blocking: boolean;
+};
+
+export function fileIntake(finding: Intake): Message {
+	return { lane: "queue", work: null, event: { kind: "intake", ...finding } };
 }

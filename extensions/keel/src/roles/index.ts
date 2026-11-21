@@ -54,7 +54,11 @@ export const ROLES = {
 		tools: inspect,
 		instructions: prose(dir, "../prose/roles/diagnoser.md", [])({}),
 	},
-	investigator: { lane: "queue", tools: inspect },
+	investigator: {
+		lane: "queue",
+		tools: inspect,
+		instructions: prose(dir, "../prose/roles/investigator.md", [])({}),
+	},
 	queue_explorer: { lane: "queue", tools: inspect },
 } as const;
 export type RoleName = keyof typeof ROLES;

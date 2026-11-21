@@ -37,6 +37,10 @@ import {
 export { type Exec, layout, nodeExec } from "./git.ts";
 export type * from "./types.ts";
 
+export function readCheckoutHead(exec: Exec, cwd: string): Promise<Sha | null> {
+	return new Git(exec, cwd).checkoutHead();
+}
+
 function roles(base: string, trunk: string) {
 	if (
 		branch(base).toLowerCase() === branch(trunk).toLowerCase() ||
