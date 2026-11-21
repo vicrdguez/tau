@@ -18,7 +18,12 @@ import {
 	renderMandate,
 	repliesCover,
 } from "./public.ts";
-import { type Answer, annotation, notPursued } from "./rounds.ts";
+import {
+	type Answer,
+	annotation,
+	notPursued,
+	precedingRound,
+} from "./rounds.ts";
 
 export const changesSchema = obj({
 	intent: opt(text),
@@ -148,7 +153,7 @@ const review = prose(dir, "documents/revision-review.md", [
 	"evidence",
 	"before",
 	"after",
-	"replies",
+	"history",
 ]);
 const draft = prose(dir, "inputs/design/propose-revision.md", [
 	"evidence",
@@ -172,21 +177,24 @@ const decline = prose(dir, "documents/revision-declined.md", ["annotations"]);
 export function revisionAsk(base: Mandate, r: Revision, index: number): Ask {
 	const current = r.rounds.at(-1)!;
 	const previous = r.rounds.at(-2);
-	const changes = previous
-		? [
-				...current.nodes.flatMap((l) =>
-					!previous.nodes.includes(l)
-						? [`${l} new`]
-						: renderMandate(current.mandate, [l]) !==
-								renderMandate(previous.mandate, [l])
-							? [`${l} changed`]
-							: [],
-				),
-				...previous.nodes
-					.filter((l) => !current.nodes.includes(l))
-					.map((l) => `${l} removed`),
-			]
-		: [];
+	const changes: string[] = [];
+	const proposed = current.nodes.map((label) => {
+		const entry = renderMandate(current.mandate, [label]);
+		if (!previous) return entry;
+		const old = previous.nodes.includes(label)
+			? renderMandate(previous.mandate, [label])
+			: null;
+		if (old === entry) return entry;
+		const marker = old === null ? "new" : "changed";
+		changes.push(`${label} ${marker}`);
+		const text = entry.replace("\n", ` (${marker})\n`);
+		return old === null
+			? text
+			: `${text}\n\n#### Previously\n\n${old.replace(/^### (.+)$/m, "**$1**")}`;
+	});
+	const removed =
+		previous?.nodes.filter((l) => !current.nodes.includes(l)) ?? [];
+	changes.push(...removed.map((l) => `${l} removed`));
 	return {
 		subject: subject(`revision/${index + 1}/${r.rounds.length}`),
 		title: `Review Mandate revision: ${current.nodes.join(", ")}`,
@@ -196,14 +204,18 @@ export function revisionAsk(base: Mandate, r: Revision, index: number): Ask {
 				: "",
 			evidence: r.text,
 			before: renderMandate(base, current.nodes),
-			after: renderMandate(current.mandate, current.nodes),
-			replies:
-				owed(previous)
-					.map((a) => {
-						const reply = current.replies.find((n) => n.n === a.n)!;
-						return `${annotation(a)}\n   ${reply.status}: ${reply.reason}`;
-					})
-					.join("\n") || "None.",
+			after: proposed.join("\n\n"),
+			history: previous
+				? precedingRound(
+						renderMandate(previous.mandate, removed),
+						owed(previous)
+							.map((a) => {
+								const reply = current.replies.find((n) => n.n === a.n)!;
+								return `${annotation(a)}\n\n   ${reply.status}: ${reply.reason}`;
+							})
+							.join("\n"),
+					)
+				: "",
 		}),
 		choices: ["approve", "rework", "decline"],
 	};

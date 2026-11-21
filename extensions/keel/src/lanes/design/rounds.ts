@@ -33,6 +33,8 @@ const roundHistory = prose(dir, "documents/mandate-round-history.md", [
 	"removed",
 	"replies",
 ]);
+export const precedingRound = (removed: string, replies: string) =>
+	roundHistory({ removed: removed || "None.", replies: replies || "None." });
 const riderText = prose(dir, "documents/mandate-rider.md", [
 	"text",
 	"origin",
@@ -191,10 +193,10 @@ function body(
 			riders: sections.riders.join("\n\n") || "None.",
 			considerations: sections.considerations.join("\n\n"),
 			history: prev
-				? roundHistory({
-						removed: removed.map((p) => entryText(p)).join("\n\n") || "None.",
-						replies: repliesText(r, prev),
-					})
+				? precedingRound(
+						removed.map((p) => entryText(p)).join("\n\n"),
+						repliesText(r, prev),
+					)
 				: "",
 		}),
 	};

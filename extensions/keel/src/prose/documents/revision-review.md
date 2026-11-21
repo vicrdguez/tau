@@ -13,6 +13,4 @@ Approve these Mandate changes, ask for rework, or decline this proposal. Approva
 
 {{after}}
 
-## Replies to the preceding round
-
-{{replies}}
+{{history}}
