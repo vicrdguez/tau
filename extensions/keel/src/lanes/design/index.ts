@@ -6,6 +6,7 @@ import {
 	defineLaneTool,
 	type Lane,
 	prose,
+	type World,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
@@ -44,6 +45,7 @@ import {
 	binding,
 	declineText,
 	designerInput,
+	notPursued,
 	openRound,
 	type Round,
 	reviewAnswer,
@@ -193,6 +195,11 @@ const confirmation = prose(
 	"../../prose/documents/cancel-work.md",
 	["goal"],
 );
+const cancelNotes = prose(
+	import.meta.dirname,
+	"../../prose/documents/cancel-annotations.md",
+	["annotations"],
+);
 const cleanupNote = prose(
 	import.meta.dirname,
 	"../../prose/documents/cancel-cleanup.md",
@@ -241,6 +248,39 @@ function labels(value: unknown): value is string[] {
 		new Set(value).size === value.length &&
 		value.every((n) => typeof n === "string" && !!n.trim())
 	);
+}
+
+function cancelledAnnotations(s: State, w: World) {
+	const sections: string[] = [];
+	const main = s.rounds.at(-1)?.answer;
+	if (main?.annotations.length) {
+		// The first persisted plan settles every initial approval note together.
+		const build =
+			main.choice === "approve"
+				? (w.view("build") as { plan?: unknown[] } | null)
+				: null;
+		if (
+			main.choice === "rework" ||
+			(main.choice === "approve" && !build?.plan?.length)
+		)
+			sections.push(
+				`### Mandate round ${s.rounds.length}\n\n${notPursued(main)}`,
+			);
+	}
+	const revision = s.revisions[revisionIndex(s)];
+	const current = revision?.rounds.at(-1)?.answer;
+	if (current?.annotations.length)
+		sections.push(
+			`### Revision round ${revision!.rounds.length}\n\n${notPursued(current)}`,
+		);
+	return sections.length
+		? [
+				{
+					agent: null,
+					text: cancelNotes({ annotations: sections.join("\n\n") }),
+				},
+			]
+		: [];
 }
 
 function draftTurn(s: State) {
@@ -513,18 +553,23 @@ export const design: Lane<State> = {
 					? { state: { ...s, phase: "landed", cancelRequested: false } }
 					: { state: s };
 			case "cancel":
-				return s.phase === "cancelled" || s.phase === "landed"
-					? { state: s }
-					: {
-							state: {
-								...s,
-								phase: "cancelled",
-								cause: null,
-								direction: "",
-								cancelRequested: false,
-								cleanup: { build: null, verify: null },
-							},
-						};
+				if (
+					s.phase === "cancelled" ||
+					s.phase === "landed" ||
+					s.phase === "closed"
+				)
+					return { state: s };
+				return {
+					state: {
+						...s,
+						phase: "cancelled",
+						cause: null,
+						direction: "",
+						cancelRequested: false,
+						cleanup: { build: null, verify: null },
+					},
+					notes: cancelledAnnotations(s, w),
+				};
 			case "closed":
 				return {
 					state: {

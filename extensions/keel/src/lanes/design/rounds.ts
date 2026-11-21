@@ -275,6 +275,8 @@ export function reviewAnswer(f: Fact, basis: string): Answer {
 }
 export const approvalNotes = (a: Answer) =>
 	a.annotations.map((n) => n.text + passage(n));
+export const notPursued = (a: Answer) =>
+	a.annotations.map((n) => annotation(n, ": not pursued")).join("\n");
 export function declineText(history: Round[]) {
 	return declined({
 		annotations:
@@ -282,7 +284,7 @@ export function declineText(history: Round[]) {
 				.map(({ answer }, i) =>
 					(answer?.choice === "approve" || answer?.choice === "decline") &&
 					answer.annotations.length
-						? `### Round ${i + 1}\n\n${answer.annotations.map((a) => annotation(a, ": not pursued")).join("\n")}`
+						? `### Round ${i + 1}\n\n${notPursued(answer)}`
 						: "",
 				)
 				.filter(Boolean)

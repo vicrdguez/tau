@@ -18,7 +18,7 @@ import {
 	renderMandate,
 	repliesCover,
 } from "./public.ts";
-import { type Answer, annotation } from "./rounds.ts";
+import { type Answer, annotation, notPursued } from "./rounds.ts";
 
 export const changesSchema = obj({
 	intent: opt(text),
@@ -245,9 +245,7 @@ export function revisionTurn(
 }
 export const declinedRevision = (a: Answer) =>
 	decline({
-		annotations:
-			a.annotations.map((n) => annotation(n, ": not pursued")).join("\n") ||
-			"None.",
+		annotations: notPursued(a) || "None.",
 	});
 export const sameCauses = (causes: string[], reply: string[]) =>
 	causes.length === reply.length && causes.every((c) => reply.includes(c));
