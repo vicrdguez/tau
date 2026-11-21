@@ -352,6 +352,19 @@ function revisionDisposition(
 		event: { kind: "revision_disposition", work, causes, disposition },
 	};
 }
+const revisionApprovalNotes = (revision: Revision) =>
+	revision.rounds.flatMap((r) =>
+		r.answer?.choice === "approve" ? approvalNotes(r.answer) : [],
+	);
+function followupApproval(
+	work: NonNullable<World["work"]>,
+	revision: Revision,
+): Message[] {
+	const notes = revisionApprovalNotes(revision);
+	return notes.length
+		? [toBuild(work, { kind: "approval_followup", notes })]
+		: [];
+}
 function labels(value: unknown): value is string[] {
 	return (
 		Array.isArray(value) &&
@@ -756,6 +769,7 @@ export const design: Lane<State> = {
 						remaining.length ? { causes: remaining } : { phase: "settled" },
 					),
 					send: [
+						...(remaining.length ? [] : followupApproval(w.work!, r)),
 						toBuild(w.work!, {
 							kind: "queue_release",
 							cause,
@@ -818,9 +832,7 @@ export const design: Lane<State> = {
 				const round = r.rounds.at(-1)!;
 				const mandate = {
 					...round.mandate,
-					approvalNotes: r.rounds.flatMap((r) =>
-						r.answer?.choice === "approve" ? approvalNotes(r.answer) : [],
-					),
+					approvalNotes: revisionApprovalNotes(r),
 				};
 				return {
 					state: amend({ ...s, mandate }, i, { phase: "applied" }),
@@ -1209,6 +1221,7 @@ export const design: Lane<State> = {
 						return {
 							state: amend(state, index, { phase: "declined" }),
 							send: [
+								...followupApproval(w.work!, revision),
 								...revision.causes.map((cause) =>
 									toBuild(w.work!, { kind: "queue_release", cause }),
 								),
@@ -1229,11 +1242,7 @@ export const design: Lane<State> = {
 									mandate: {
 										...round.mandate,
 										approvalNotes: [
-											...revision.rounds.flatMap((r) =>
-												r.answer?.choice === "approve"
-													? approvalNotes(r.answer)
-													: [],
-											),
+											...revisionApprovalNotes(revision),
 											...approvalNotes(answer),
 										],
 									},

@@ -153,6 +153,11 @@ export const buildDoc = defineState({
 	}),
 });
 
+export const approvalFollowup = (s: Build) =>
+	s.items.length
+		? s.mandate!.approvalNotes.slice(s.approvalReplies.length)
+		: [];
+
 export const repoHeld = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
 export const affects = (i: Item, nodes: readonly string[]) =>

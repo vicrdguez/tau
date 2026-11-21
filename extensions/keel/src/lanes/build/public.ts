@@ -33,6 +33,7 @@ export type BuildUpdate =
 	| PlanFinding
 	| RevisionProposal
 	| { kind: "withdraw_revision" }
+	| { kind: "approval_followup"; notes: string[] }
 	| {
 			kind: "integration" | "rework";
 			item: string;
