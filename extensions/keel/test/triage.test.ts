@@ -29,7 +29,21 @@ const activeWorld: World = {
 	view: (lane) =>
 		lane === "build"
 			? { phase: "active", plan }
-			: { mandate: { nodes: [{ label: "sums" }], checks: [] } },
+			: {
+					mandate: {
+						intent: "Post each cent once.",
+						nodes: [
+							{
+								label: "sums",
+								rule: "Round once.",
+								probe: "Post a half-cent.",
+							},
+						],
+						checks: [],
+						delegated: [],
+						considerations: null,
+					},
+				},
 };
 const filing = {
 	kind: "intake",
@@ -110,6 +124,7 @@ test("filing twice opens one investigation with the source revision, report, nod
 		filing.text,
 		filing.report,
 		"sums",
+		"Post each cent once.",
 		plan[0]!.goal,
 	])
 		assert.ok(turn?.input?.().includes(part), part);
@@ -336,6 +351,28 @@ test("an investigation must answer the head finding and name its evidence, autho
 		q.agents()[0]?.expects[0]?.input?.() ?? "",
 		/Which rounding boundary/,
 	);
+});
+
+test("cancelling a work closes only its wrong-Mandate decisions and makes old answers inert", () => {
+	const q = queue();
+	q.file();
+	q.send(q.investigation(1, "mandate_wrong"));
+	const cancelled = q.ask()[0]!.subject;
+	q.file({ text: "Independent follow-up" });
+	q.send(q.investigation(2, "determined"));
+	q.file({ work: 5, text: "Another work's Mandate" });
+	q.send(q.investigation(3, "mandate_wrong"));
+	const out = q.send({ kind: "cancel_work", work: 4 });
+	assert.equal(out.length, 3);
+	assert.ok(out.every((m) => m.work === 4 && m.event.kind === "cancel"));
+	assert.deepEqual(q.answer("build", cancelled), []);
+	const remaining = q.ask().map((ask) => ask.basis);
+	assert.equal(remaining.length, 2);
+	assert.ok(remaining.some((basis) => basis.includes("Independent follow-up")));
+	assert.ok(
+		remaining.some((basis) => basis.includes("Another work's Mandate")),
+	);
+	assert.match(JSON.stringify(q.state()), /cancelled/);
 });
 
 test("a deferred Mandate finding releases its causes just as a dropped one does", () => {
