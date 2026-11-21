@@ -324,22 +324,15 @@ test("X3: a coordinator stalled on an approved removal reports the held item in 
 		),
 	);
 	await x.answer("triage/", "build");
-	await x.must("design", {
-		kind: "publish_revision",
-		changes: { remove: ["R2"] },
-		answers: [
-			{ cause: "queue/1", nodes: ["R2"], reason: "Remove the wrong rule." },
-		],
-		replies: [],
-	});
-	assert.equal(
-		(await x.asks()).length,
-		1,
-		"the owner's revision review is already open",
-	);
-	await x.answer("revision/", "approve");
-	assert.deepEqual(await x.plan([goal("stats")]), {
-		reject: "Item stats cites R2, a removed Mandate node.",
+	// Replay the approved proposal that reached Build before removal was refused at source.
+	const bound = (await x.build())!.mandate!;
+	await x.must("build", {
+		kind: "propose_revision",
+		number: 1,
+		causes: ["queue/1"],
+		nodes: ["R2"],
+		changes: "R2: removed",
+		mandate: { ...bound, nodes: bound.nodes.filter((n) => n.label !== "R2") },
 	});
 	const { coordinator } = (await x.build())!;
 	await x.fact({

@@ -4,7 +4,7 @@ import {
 	type Reduction,
 	type World,
 } from "../../kernel/lane.ts";
-import { mandateLabels, type Reply, repliesCover } from "../design/public.ts";
+import { type Reply, repliesCover } from "../design/public.ts";
 import { ownerDirection } from "./agents.ts";
 import type { BuildUpdate, RevisionProposal } from "./public.ts";
 import {
@@ -150,11 +150,7 @@ function replacementPlan(
 			? validateDependencies(s, addedDeps, goals, releasing, true)
 			: null);
 	if (graph) return graph;
-	const labels = new Set(mandateLabels(p?.mandate ?? s.mandate!));
 	for (const i of s.items) {
-		const removed = i.brief?.nodes.find((n) => !labels.has(n));
-		if (removed)
-			return `Item ${i.id} cites ${removed}, a removed Mandate node.`;
 		if (i.stage === "planned") continue;
 		const g = byId.get(i.id);
 		if (!g || g.kind !== i.kind || g.goal !== i.goal)
