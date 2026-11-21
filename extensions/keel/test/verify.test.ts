@@ -942,11 +942,26 @@ test("the hand-over pairs numbered approval replies with the owner's notes", () 
 		/2\. Consider another oracle\.[\s\S]*considered: The boundary already has an oracle\./,
 	);
 });
-test("the hand-over title names the goal", () => {
+test("the hand-over title names the goal without the done predicate", () => {
 	const x = flow();
-	x.prepared();
+	x.merged();
+	const predicate = "Both sums match.";
+	x.handoff({
+		mandate: {
+			...mandate,
+			intent: `${mandate.intent}\n\nDone when: ${predicate}`,
+		},
+	});
+	x.checkout();
+	x.pass();
+	x.clean();
+	x.prepare();
+	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	x.done("land", { kind: "landed", sha: "prepared" });
-	assert.ok(x.asks()[0]!.title.includes(mandate.intent));
+	const ask = x.asks()[0]!;
+	assert.ok(ask.title.includes(mandate.intent));
+	assert.doesNotMatch(ask.title, /\n|Done when:/);
+	assert.ok(ask.basis.includes(predicate));
 });
 test("hand-over retains the chosen ambiguity reading and numbered annotations from Ground", () => {
 	const x = flow();
