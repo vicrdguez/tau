@@ -7,7 +7,7 @@ import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
 import { projectPrinciplesText } from "../principles/catalog.ts";
-import { type RoleName, ROLES } from "./index.ts";
+import { ROLES, type RoleName } from "./index.ts";
 
 const dir = import.meta.dirname + "/../prose";
 const explorer = prose(dir, "roles/explorer.md", [])({});

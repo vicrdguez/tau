@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
@@ -17,10 +17,10 @@ import {
 	openStore,
 } from "tau/testing";
 import {
-	dispatchTool,
-	fanOut,
 	type DispatchJob,
 	type DispatchResult,
+	dispatchTool,
+	fanOut,
 } from "../src/dispatch/index.ts";
 
 async function stopped(signal: AbortSignal | undefined): Promise<never> {

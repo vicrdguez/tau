@@ -16,8 +16,8 @@ import {
 } from "tau/durable";
 import {
 	type DispatchJob,
-	type DispatchRoster,
 	type DispatchResult,
+	type DispatchRoster,
 	fanOut,
 } from "../dispatch/index.ts";
 import { type RoleName, storedRole } from "../roles/index.ts";

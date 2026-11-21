@@ -1,13 +1,15 @@
+import { role } from "tau";
 import type { Context } from "tau/chord";
 import {
 	type AgentChange,
 	type ConversationId,
 	defineDoc,
 	defineTool,
+	type Extension,
 	type ToolExecutionApi,
+	type ToolRegistration,
 	type Tx,
 } from "tau/durable";
-import { role } from "tau";
 import { arr, obj, str } from "tau/schema";
 
 const MAX_JOBS = 8;
@@ -23,8 +25,8 @@ export type DispatchResult = {
 };
 type Seat = AgentChange & {
 	model: NonNullable<AgentChange["model"]>;
-	extensions: readonly import("tau/durable").Extension[];
-	tools: readonly import("tau/durable").ToolRegistration[];
+	extensions: readonly Extension[];
+	tools: readonly ToolRegistration[];
 	instructions: string;
 };
 export type DispatchOwner = Pick<

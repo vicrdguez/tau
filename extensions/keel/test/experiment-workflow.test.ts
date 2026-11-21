@@ -7,9 +7,9 @@ import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { MemoryStorage } from "tau/durable";
 import {
+	type FauxResponseStep,
 	fauxAssistantMessage,
 	fauxToolCall,
-	type FauxResponseStep,
 } from "tau/testing";
 import { ProjectState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
