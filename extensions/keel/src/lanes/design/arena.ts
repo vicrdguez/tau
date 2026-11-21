@@ -377,12 +377,14 @@ function judging(arena: Arena) {
 	)!;
 }
 export function candidateDecisions(arena: Arena, seat: string) {
-	return judgeReport(judging(arena).outcome!.results[0]!.answer!)!.scores.find(
-		(row) => row.seat === seat,
-	)!.unaskedDecisions;
+	const score = judgeReport(
+		judging(arena).outcome!.results[0]!.answer!,
+	)!.scores.find((row) => row.seat === seat)!;
+	return {
+		decisions: score.unaskedDecisions,
+		own: unaskedText(candidateAnswer(arena, seat)),
+	};
 }
-export const candidateUnasked = (arena: Arena, seat: string) =>
-	unaskedText(candidateAnswer(arena, seat));
 export const quote = (text: string) =>
 	text
 		.split("\n")

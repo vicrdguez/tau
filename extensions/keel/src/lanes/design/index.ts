@@ -14,12 +14,7 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
 import { closeFindings, fileHolding, resumption } from "../queue/public.ts";
-import {
-	accountingError,
-	outcomesText,
-	synthesisParts,
-	unaskedSources,
-} from "./accounting.ts";
+import { accountingError, outcomesText, synthesisParts } from "./accounting.ts";
 import {
 	type Arena,
 	arenaEffect,
@@ -474,7 +469,7 @@ function mandateAsk(s: State): Ask {
 	const experiments = s.experiments.slice(0, round.experimentCount);
 	const tail = [
 		"## Unasked decisions from the base, graft sources and experiments\n\n" +
-			outcomesText(s.audit!, round, unaskedSources(arena, round, experiments)),
+			outcomesText(s.audit!, round, arena, experiments),
 		challengeText({
 			model: arena.runs[round.challenge - 1]!.jobs[0]!.model,
 			round: String(challenged + 1),
@@ -599,7 +594,9 @@ export const design: Lane<State> = {
 	view: (s) => ({
 		mandate: s.mandate,
 		goal: goal(s),
-		phase: s.phase,
+		// A landed work can be closed too; declining initial design never binds one.
+		unavailable:
+			s.phase === "cancelled" || (s.phase === "closed" && !s.mandate),
 		ownerReviewed:
 			s.phase !== "cancelled" &&
 			s.rounds.some((r) => r.answer?.choice === "approve"),
@@ -901,11 +898,7 @@ export const design: Lane<State> = {
 				const synthesis = [
 					synthesisSources(proposal),
 					synthesisBody(s.audit, groundContext(s), proposal),
-					outcomesText(
-						s.audit,
-						proposal,
-						unaskedSources(arena, proposal, s.experiments),
-					),
+					outcomesText(s.audit, proposal, arena, s.experiments),
 				].join("\n\n");
 				return {
 					state: setArena(

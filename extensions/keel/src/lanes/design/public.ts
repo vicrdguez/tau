@@ -51,19 +51,15 @@ export type Mandate = {
 	/** Design context, not authority for briefs. Null in a small Mandate. */
 	considerations: { tradeoffs: string; alternatives: string } | null;
 };
-/** A closed work without a Mandate never bound one. Landed work can also be closed. */
 export function explorerDesign(view: unknown) {
 	const design = view as {
-		phase: string;
+		unavailable: boolean;
 		goal: string;
 		mandate: Mandate | null;
 		ownerReviewed: boolean;
 		revisedLabels: string[];
 	} | null;
-	return design?.phase === "cancelled" ||
-		(design?.phase === "closed" && !design.mandate)
-		? null
-		: design;
+	return design?.unavailable ? null : design;
 }
 export function mandateLabels(mandate: Mandate) {
 	return [
