@@ -211,6 +211,10 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 	])
 		assert.ok(ask!.basis.includes(part), part);
 	assert.ok(!ask!.basis.includes(untouched.rule));
+	assert.doesNotMatch(
+		ask!.basis,
+		/\(new\)|previous round|last round|preceding round/i,
+	);
 	assert.deepEqual(x.mandate(), old);
 	const at = ask!.basis.indexOf(correction.probe);
 	const approved = x.answer(ask!.subject, "approve", [
@@ -327,10 +331,20 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	assert.notEqual(x.turn()?.token, token);
 	for (const part of [note.text, "Use the fixture."])
 		assert.ok(x.input().includes(part));
-	x.act({ ...publish, replies: [reply] });
+	const nextRule = {
+		...correction,
+		rule: "Round only once, after allocating fees.",
+	};
+	x.act({ ...publish, changes: { nodes: [nextRule] }, replies: [reply] });
 	const second = x.asks()[0]!;
 	assert.notEqual(first, second.subject);
 	assert.ok(second.basis.includes(reply.reason));
+	assert.match(second.basis, /Since round 1: R1 changed/);
+	const [proposed, previous] = second.basis.split("#### Previously");
+	assert.match(proposed!, /### R1: Rule \(changed\)/);
+	assert.ok(proposed!.includes(nextRule.rule));
+	assert.ok(previous?.includes(correction.rule));
+	assert.ok(previous?.includes(correction.probe));
 	assert.deepEqual(x.answer(first, "approve").send ?? [], []);
 	assert.equal(x.asks()[0]?.subject, second.subject);
 });
