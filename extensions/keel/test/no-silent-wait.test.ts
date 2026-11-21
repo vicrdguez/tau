@@ -127,7 +127,23 @@ async function start(
 			principles: [],
 		});
 	}
-	const file = (item: string, text: string, blocking = true) =>
+	async function merge(id: string, head: string) {
+		await must("build", {
+			kind: "publish",
+			agent: `worker/${id}/1`,
+			summary: `Published ${id}`,
+			addresses: [],
+			facts: { kind: "ok", sha: head, base: sha, changedPolicyFiles: [] },
+		});
+		await must("build", { kind: "merged", item: id, head });
+		await done(`remove:worker:${work}:${id}:`, { kind: "removed" });
+	}
+	const file = (
+		item: string,
+		text: string,
+		blocking = true,
+		pattern: string | null = null,
+	) =>
 		must("queue", {
 			kind: "intake",
 			work,
@@ -139,7 +155,7 @@ async function start(
 			nodes: [],
 			report: null,
 			edgeCase: null,
-			pattern: null,
+			pattern,
 		});
 	const classify = (finding: number, extra: JsonObject = {}) =>
 		send("queue", {
@@ -186,6 +202,7 @@ async function start(
 		readAsk,
 		answer,
 		brief,
+		merge,
 		file,
 		classify,
 		plan,
@@ -337,6 +354,78 @@ test("X3: a coordinator stalled on an approved removal reports the held item in 
 		(await x.readAsk("finding/")).text,
 		/stats.*Statistics rule R2 is wrong/,
 	);
+});
+
+test("A-3: determined triage keeps both filers held until both planned items merge, then restarts them at the final head", async (t) => {
+	const x = await start(t);
+	await x.brief("writer");
+	await x.brief("stats", "R2");
+	const determined = {
+		classification: "determined",
+		reference: "Approved framing ADR",
+	};
+	await x.file("writer", "Which escape does the approved format require?");
+	assert.ok(!("reject" in (await x.classify(1, determined))));
+	await x.file("stats", "The reader needs that same approved escape.");
+	assert.ok(!("reject" in (await x.classify(2, { ...determined, sameAs: 1 }))));
+	await x.answer("triage/", "build");
+	assert.ok((await x.build())?.items.every((i) => i.parked));
+	assert.ok(
+		!("reject" in (await x.plan([goal("format"), goal("reader", ["format"])]))),
+	);
+	await x.brief("format");
+	await x.merge("format", "b".repeat(40));
+	assert.ok(
+		(await x.build())?.items
+			.slice(0, 2)
+			.every((i) => i.parked && i.attempt === 1),
+	);
+	await x.brief("reader");
+	const head = "c".repeat(40);
+	await x.merge("reader", head);
+	for (const item of (await x.build())!.items.slice(0, 2)) {
+		assert.equal(item.attempt, 2);
+		assert.equal(item.worker?.base, head);
+	}
+});
+
+test("A-3: a revision plan can add a dependency to a held filer that did not cite the changed node", async (t) => {
+	const x = await start(t, ["writer"]);
+	await x.brief("writer");
+	await x.file("writer", "The R2 rule contradicts the export.");
+	assert.ok(
+		!(
+			"reject" in
+			(await x.classify(1, { classification: "mandate_wrong", nodes: ["R2"] }))
+		),
+	);
+	await x.answer("triage/", "build");
+	await x.must("design", {
+		kind: "publish_revision",
+		changes: {
+			nodes: [{ ...rule("R2"), rule: "Frame statistics like the book." }],
+		},
+		answers: [{ cause: "queue/1", nodes: ["R2"], reason: "One framing." }],
+		replies: [],
+	});
+	await x.answer("revision/", "approve");
+	const plan = await x.plan([
+		goal("writer", ["r2frame"]),
+		goal("r2frame"),
+		goal("probe", ["r2frame"]),
+	]);
+	assert.ok(!("reject" in plan), JSON.stringify(plan));
+	await x.brief("r2frame", "R2");
+	await x.merge("r2frame", "b".repeat(40));
+	assert.ok(
+		(await x.build())?.items[0]?.parked,
+		"its declared dependency merged, but the rest of the fix has not",
+	);
+	await x.brief("probe", "R2");
+	const head = "c".repeat(40);
+	await x.merge("probe", head);
+	assert.equal((await x.build())?.items[0]?.attempt, 2);
+	assert.equal((await x.build())?.items[0]?.worker?.base, head);
 });
 
 test("a synthetic cycle among held unfinished items opens one decision, not one per item", async (t) => {
