@@ -48,6 +48,7 @@ export const designV1 = {
 			| "bound"
 			| "drafting"
 			| "review"
+			| "landed"
 			| "closed"
 			| "cancelled",
 		audit: null as {

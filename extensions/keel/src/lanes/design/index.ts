@@ -90,6 +90,7 @@ type State = {
 		| "bound"
 		| "drafting"
 		| "review"
+		| "landed"
 		| "closed"
 		| "cancelled";
 	cancelRequested: boolean;
@@ -146,6 +147,11 @@ const cleanupNote = prose(
 	"../../prose/documents/cancel-cleanup.md",
 	["goal", "kept", "work"],
 );
+const landed = prose(
+	import.meta.dirname,
+	"../../prose/documents/cancel-landed.md",
+	[],
+);
 const goal = (s: State) =>
 	s.mandate?.intent ?? s.rounds.at(-1)?.draft.intent ?? s.reference;
 
@@ -166,6 +172,7 @@ export const design: Lane<State> = {
 	reduce(s, e, w) {
 		switch (e.kind) {
 			case "request_cancel":
+				if (s.phase === "landed") return { reject: landed({}).trim() };
 				if (
 					s.phase === "entry" ||
 					s.phase === "closed" ||
@@ -310,8 +317,12 @@ export const design: Lane<State> = {
 					},
 				};
 			}
+			case "landed":
+				return s.phase === "bound"
+					? { state: { ...s, phase: "landed", cancelRequested: false } }
+					: { state: s };
 			case "cancel":
-				return s.phase === "cancelled"
+				return s.phase === "cancelled" || s.phase === "landed"
 					? { state: s }
 					: {
 							state: {

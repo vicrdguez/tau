@@ -20,7 +20,7 @@ export type Round = {
 	answer: Answer | null;
 };
 const dir = import.meta.dirname + "/../../prose";
-const review = prose(dir, "documents/review.md", ["round", "body"]);
+const review = prose(dir, "documents/review.md", ["round", "changes", "body"]);
 const roundText = prose(dir, "documents/mandate-round.md", [
 	"reference",
 	"exists",
@@ -142,6 +142,8 @@ function body(a: Audit, reference: string, history: Round[]) {
 		riders: [],
 		considerations: [],
 	};
+	const summary: string[] = [];
+	const label = (n: Entry) => (n.group === "riders" ? `rider ${n.label}` : n.label);
 	for (const n of current) {
 		const old = previous.find((p) => p.label === n.label);
 		const changed =
@@ -151,23 +153,26 @@ function body(a: Audit, reference: string, history: Round[]) {
 				old.body !== n.body ||
 				old.probe !== n.probe ||
 				old.reference !== n.reference);
-		sections[n.group].push(
-			entryText(n, !old ? " (new)" : changed ? " (changed)" : ""),
-		);
+		const change = !old ? "new" : changed ? "changed" : null;
+		if (change) summary.push(`${label(n)} ${change}`);
+		sections[n.group].push(entryText(n, change ? ` (${change})` : ""));
 	}
-	return roundText({
-		reference,
-		exists: a.exists,
-		nodes: sections.nodes.join("\n\n"),
-		riders: sections.riders.join("\n\n") || "None.",
-		considerations: sections.considerations.join("\n\n"),
-		removed:
-			previous
-				.filter((p) => !current.some((n) => n.label === p.label))
-				.map((p) => entryText(p))
-				.join("\n\n") || "None.",
-		replies: repliesText(r, prev),
-	});
+	const removed = previous.filter((p) => !current.some((n) => n.label === p.label));
+	summary.push(...removed.map((n) => `${label(n)} removed`));
+	return {
+		changes: prev
+			? ` Since round ${history.length - 1}: ${summary.join(", ") || "no entries changed"}.`
+			: "",
+		body: roundText({
+			reference,
+			exists: a.exists,
+			nodes: sections.nodes.join("\n\n"),
+			riders: sections.riders.join("\n\n") || "None.",
+			considerations: sections.considerations.join("\n\n"),
+			removed: removed.map((p) => entryText(p)).join("\n\n") || "None.",
+			replies: repliesText(r, prev),
+		}),
+	};
 }
 export function reviewAsk(
 	a: Audit,
@@ -181,7 +186,7 @@ export function reviewAsk(
 		title: `Review Mandate: ${r.draft.intent.trim().split("\n", 1)[0]}`,
 		basis: review({
 			round: String(history.length),
-			body: body(a, reference, history),
+			...body(a, reference, history),
 		}),
 		choices: ["approve", "rework", "decline"],
 	};
@@ -203,7 +208,7 @@ export function designerInput(
 			direction,
 		});
 	return revise({
-		basis: body(a, reference, history),
+		basis: body(a, reference, history).body,
 		answer:
 			owed(history.at(-1))
 				.map((n) => annotation(n))
