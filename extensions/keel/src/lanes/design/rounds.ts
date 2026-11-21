@@ -4,7 +4,7 @@ import { type Audit, type Draft, draftError, nodes } from "./draft.ts";
 import { type Mandate, type Reply, repliesCover } from "./public.ts";
 
 type Fact = Extract<KernelEvent, { kind: "answered" }>;
-type Answer = {
+export type Answer = {
 	decision: string;
 	choice: string;
 	annotations: {
@@ -68,7 +68,7 @@ export function openRound(
 function passage(a: Answer["annotations"][number]) {
 	return a.excerpt === null ? "" : `\n> ${a.excerpt}`;
 }
-function annotation(a: Answer["annotations"][number], status = "") {
+export function annotation(a: Answer["annotations"][number], status = "") {
 	return `${a.n}. ${a.text}${a.range ? ` [${a.range.start}:${a.range.end}]` : ""}${status}${passage(a)}`;
 }
 function repliesText(r: Round, prev: Round | undefined) {
@@ -228,16 +228,7 @@ export function answered(
 	if (f.subject !== mainKey(history.length)) return null;
 	const ask = reviewAsk(a, reference, history);
 	if (!ask?.choices.includes(f.choice)) return null;
-	const answer: Answer = {
-		decision: f.decision,
-		choice: f.choice,
-		annotations: f.annotations.map(({ n, text, range }) => ({
-			n,
-			text,
-			range: range ?? null,
-			excerpt: range ? ask.basis.slice(range.start, range.end) : null,
-		})),
-	};
+	const answer = reviewAnswer(f, ask.basis);
 	return {
 		rounds: [...history.slice(0, -1), { ...history.at(-1)!, answer }],
 		phase:
@@ -248,6 +239,19 @@ export function answered(
 					: ("closed" as const),
 	};
 }
+export function reviewAnswer(f: Fact, basis: string): Answer {
+	return {
+		decision: f.decision,
+		choice: f.choice,
+		annotations: f.annotations.map(({ n, text, range }) => ({
+			n,
+			text,
+			range: range ?? null,
+			excerpt: range ? basis.slice(range.start, range.end) : null,
+		})),
+	};
+}
+export const approvalNotes = (a: Answer) => a.annotations.map((n) => n.text + passage(n));
 export function declineText(history: Round[]) {
 	return declined({
 		annotations:
