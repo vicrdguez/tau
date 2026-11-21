@@ -163,6 +163,7 @@ type V1 = {
 		unchanged: boolean;
 		status: "asking" | "accepted" | "rejected";
 		missing: string[];
+		followReference: string | null;
 		revisions: string;
 		findings: string;
 		owed: string;

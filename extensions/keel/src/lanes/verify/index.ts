@@ -252,6 +252,8 @@ function transition(prev: State, world: World) {
 	function landed(sha: Sha, unchanged: boolean) {
 		release();
 		const design = world.view("design") as {
+			ownerReviewed: boolean;
+			reference: string;
 			revisionSummary: string;
 			owed?: number[];
 		} | null;
@@ -278,6 +280,8 @@ function transition(prev: State, world: World) {
 			unchanged,
 			status: "asking",
 			missing: [],
+			followReference:
+				design?.ownerReviewed === false ? design.reference : null,
 			revisions: design?.revisionSummary ?? "",
 			findings: queue?.findingsFor?.(work) ?? "",
 			owed: queue?.owedChecks?.(encoded, returning) ?? "",

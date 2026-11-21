@@ -1,6 +1,6 @@
 ## Bound Mandate
 
-### Binding nodes
+{{reference}}### Binding nodes
 
 {{nodes}}
 

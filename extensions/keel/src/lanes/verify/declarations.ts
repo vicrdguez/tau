@@ -37,6 +37,7 @@ const evidenceDocument = prose(dir, "documents/handover-evidence.md", [
 	"intent",
 	"summary",
 	"verdict",
+	"mandate",
 	"rulings",
 	"notes",
 	"risk",
@@ -174,6 +175,9 @@ export function handoverEvidence(s: State): string {
 			.filter((v) => v.scope !== "item" && v.outcome === "pass")
 			.map((v) => v.text)
 			.join("\n"),
+		mandate: h.followReference
+			? `${renderMandate(s.mandate!, undefined, h.followReference).trim()}\n\n`
+			: "",
 		rulings: rulings([...info.rulings].sort((a, b) => b.rank - a.rank)),
 		notes:
 			s.verdicts

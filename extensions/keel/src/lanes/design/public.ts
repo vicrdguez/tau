@@ -103,6 +103,7 @@ const proof = prose(dir, "proof-command.md", ["argv", "timeout"]);
 export const proofText = ({ argv, timeoutMs }: Mandate["checks"][number]) =>
 	proof({ argv: JSON.stringify(argv), timeout: String(timeoutMs) }).trim();
 const boundMandate = prose(dir, "bound-mandate.md", [
+	"reference",
 	"nodes",
 	"delegated",
 	"considerations",
@@ -201,7 +202,11 @@ export function renderNode(
 }
 
 /** Render the complete bound document, or only the binding labels named by a brief. */
-export function renderMandate(m: Mandate, labels?: readonly string[]) {
+export function renderMandate(
+	m: Mandate,
+	labels?: readonly string[],
+	reference?: string,
+) {
 	const nodes = mandateNodes(m)
 		.filter((n) => !labels || labels.includes(n.label))
 		.map((n) => renderNode(n, "", [], labels ? "###" : "####"))
@@ -209,6 +214,7 @@ export function renderMandate(m: Mandate, labels?: readonly string[]) {
 	return labels
 		? nodes
 		: boundMandate({
+				reference: reference ? `Reference: ${reference}\n\n` : "",
 				nodes,
 				delegated:
 					m.delegated

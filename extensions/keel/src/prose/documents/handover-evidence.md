@@ -4,7 +4,7 @@ Intent: {{intent}}
 What landed: {{summary}}
 Verification: {{verdict}}
 
-Rulings, highest cost if wrong first:
+{{mandate}}Rulings, highest cost if wrong first:
 {{rulings}}
 
 Verifier notes:
