@@ -38,6 +38,7 @@ export const queueTools = [
 			blocking: opt(oneOf([true, false])),
 			source: opt(oneOf(["agent", "owner"])),
 			pattern: opt(text),
+			missingCheck: opt(oneOf([true, false])),
 			edgeCase: opt(obj({ failure: text, likelihood: text, cost: text })),
 		}),
 		terminate: ({ blocking }) => blocking === true,
@@ -77,6 +78,7 @@ export const queueTools = [
 				kind: "intake",
 				...intake,
 				requestedOwner: args.source === "owner",
+				overridePassed: args.missingCheck ?? false,
 			};
 		},
 	}),

@@ -12,6 +12,7 @@ Start a Keel conversation in a Git project and describe a change. For a bug, per
 | Verifier | Checks each published commit in a detached checkout, then checks the whole build. Names block threads and their evidence, and keeps lesser findings as notes. | `publish_verdict` |
 | Diagnoser | After the same block survives two **claimed** fixes, independently tests the shared premise before the owner is asked. | `publish_diagnosis` |
 | Investigator (one per project) | Reproduces or measures, checks the queue and plan for duplicates, and recommends a route. Does not design the fix. | `dispatch`, `report_investigation` |
+| Sweeper (one child per scheduled tick) | Reads a pinned repository revision, compares it with the playbook and reviewed history, and reports drift and principle proposals. | None; uses `read` and `bash` for inspection. |
 
 Bound agents can use the standing `file_finding` tool. Designers, verifiers, diagnosers and the investigator have `read` and `bash`. Workers also have `edit` and `write`. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. Item, full-set and landing reviews all show the changed `.keel/principles/` and `.keel/playbooks/` paths reported by Git. These should be unchanged unless an item under review was tasked with creating or changing them. A weakened check is a block.
 
@@ -42,14 +43,28 @@ Tell the work's designer what you found. The designer can file it on your behalf
 
 | Investigation result | What happens |
 | --- | --- |
-| Defect under the current Mandate | The coordinator adds discovered work without an owner decision. |
+| Defect under the current Mandate | The coordinator adds discovered work without an owner decision. A project finding without an active work gets ordinary `build`, `defer` or `drop` triage. |
 | No action | The investigator may close an observation that you did not file, that holds no filer, and that changes no shape. The reason appears at hand-over, or as a note if the hand-over has already been written. |
 | Determined by an approved reference | `build` adds it to the active plan or seeds new work under the reference. There is no Mandate approval. `defer` or `drop` keeps the record without starting work. |
 | Precedent-setting work | `build` seeds Ground and Mandate review. `defer` or `drop` starts nothing. |
 | Wrong Mandate | In an active build, classification holds items with briefs that cite affected nodes, except for unlikely edge cases. `build` holds those nodes for every class and opens or joins a revision in draft or review. A finding added during review supersedes the old review with the full evidence. Approval closes that revision to new findings. They open the next revision after the approved plan applies. `drop` or `defer` releases the finding's holds. After handoff, `build` starts follow-up design without holding landing. |
 | Unapproved pattern cited by a ruling | A worker uses `pattern: true` when `follows` names a project pattern. `bless` makes it a project reference. `revoke` seeds work to make the pattern fail structurally and migrate its callers. `defer` keeps the finding for later. |
 
-The investigator links evidence by naming an earlier finding with the same cause. If its decision is open, Keel supersedes that decision and shows every member's report, affected nodes, and any filer who could not continue. If the decision was answered or the finding closed, you get a new decision citing what happened before. No finding inherits an answer. A new filer linked to a defect already being fixed shares its hold without a decision. A later citation of a revoked pattern goes to rework. A later ruling on the pattern replaces the earlier ruling.
+The investigator links evidence by naming an earlier finding with the same cause. If its decision is open, Keel supersedes that decision and shows every member's report, affected nodes, and any filer who could not continue. If the decision was answered or the finding closed, you get a new decision citing what happened before. No finding inherits an answer. A new filer linked to a defect already being fixed shares its hold without a decision. A later citation of a revoked pattern goes to rework. A counterexample filed by you or the sweep reopens triage for a blessed pattern; it stays blessed until you revoke it. A later ruling on the pattern replaces the earlier ruling.
+
+### Owed checks
+
+When you reject a hand-over, name one missing check per annotation. An unannotated rejection asks again. You can also tell the work's designer that you are overruling a verified landing and name what should have stopped it. Keel files your words, the original hand-over and its commit directly for triage. Repeating the same check text keeps one outstanding obligation; later evidence can reopen its triage.
+
+`build` starts work to encode the check as a regression test, boundary rule or type. Use a principle for a judgment-only check. The verifier confirms the encoding on the full-set pass and on the prepared commit if trunk moved. A new, non-cancelled landing records the encoding commit and clears the obligation. Deferring, dropping, passing without a new landing, and unrelated work do not clear it. Every later hand-over lists the project's outstanding checks as of its landing.
+
+### Project sweep
+
+The sweep is off by default. Set `sweep_minutes` to a positive whole number. The first tick is armed when Keel learns the project directory from the first work; it continues whether or not any work is active. Once Keel knows the directory, changing the setting replaces the timer and clearing it stops the timer and any running sweep. A tick reads the then-current trunk (or the base before trunk exists) and the compact explorer index of owner-reviewed authority from earlier landings. It does not acquire the landing slot.
+
+The sweep looks for un-runnable verification playbook instructions, repeated workarounds and type escapes, callers depending on module internals, and decisions that disagree with the code. Findings use the same investigator and triage as other project findings. After 30 days, newly eligible deferred findings appear once in one triage decision. `build` on that digest starts one follow-up design; it does not silently revoke any pattern. `defer` or `drop` does not show that digest again.
+
+After a tick settles, including a failure, the next tick sleeps durably for the configured interval. Restart rejoins the original dispatch rather than creating another tick. Missed wall-clock intervals do not produce a backlog.
 
 ## Live plan
 
@@ -78,6 +93,8 @@ The frontmatter accepts a scalar description and inline or block lists of string
 
 The worker's index, automatic bindings and explicit pulls all use the principles from its item's prepared base. Other bound roles read from their own checkouts. A verifier receives every project description from the checkout it reviews. Keel binds `model-the-domain` when the designer shapes or revises a Mandate. A failed claimed fix adds `attack-the-premise` to the worker's rework input. A diagnosis gets both `attack-the-premise` and `fix-root-causes`.
 
+A verifier can link a principle it pulled to a failing thread. The block returns to Build as usual; the separate proposal to sharpen the description or bind the principle waits for triage. The sweep uses the last 30 landed worker items, their recorded pulls and deliveries, their ruling citations and the project principles available at their prepared bases. It proposes binding a project principle pulled by at least 90% of at least ten items of one kind, or removing one with no citations across at least twenty recorded opportunities. These proposals go to the owner; the sweep and investigator never edit policies.
+
 ## What the owner decides
 
 - **Ambiguity:** choose the first or second reading, optionally annotating the choice, or decline the work. Keel returns the chosen reading to the designer before a Mandate can bind.
@@ -102,10 +119,8 @@ Set four lane models in `provider/modelId` form. Each role and seat can independ
 | `design` | `designer`, `design_explorer`, `design_prototype`, `arena_seat_1`, `arena_seat_2`, `arena_seat_3`, `arena_judge`, `arena_challenger` |
 | `build` | `coordinator`, `worker`, `build_explorer` |
 | `verify` | `verifier`, `diagnoser` |
-| `queue` | `investigator`, `queue_explorer` |
+| `queue` | `investigator`, `queue_explorer`, `sweeper` |
 
 `base` defaults to `main`; `trunk` defaults to `trunk`. Use distinct short branch names outside Keel's namespace. `trunk` cannot be `main`. `max_workers` is a positive integer (default `3`); it bounds concurrent items in a build. `dispatch_rounds` limits tool rounds per child (default `64`), and `dispatch_minutes` sets the shared deadline per batch (default `20`). Both are positive integers.
 
-## Not built yet
-
-Turning a missing check into an owed check and running the scheduled drift sweep are later slices.
+`sweep_minutes` is optional; clear it to turn the sweep off. `sweeper` selects the inspecting model independently of `investigator`; it defaults to the `queue` lane model.

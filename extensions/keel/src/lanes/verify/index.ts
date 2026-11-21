@@ -31,9 +31,15 @@ import {
 	type Resume,
 	resumption,
 } from "../queue/public.ts";
-import { agentFor, agents, asks, effects } from "./declarations.ts";
+import {
+	agentFor,
+	agents,
+	asks,
+	effects,
+	handoverAsk,
+} from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
-import type { FindingNote, Publication } from "./public.ts";
+import type { FindingNote, PassedResult, Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
@@ -404,7 +410,7 @@ function transition(prev: State, world: World) {
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
 					if (e.choice === "reject") {
 						s.handover.missing = missing.map((a) => a.text);
-						const original = asks(prev)[0]!.basis;
+						const original = handoverAsk(prev)!.basis;
 						for (const a of missing)
 							file(
 								"owner",
@@ -902,7 +908,15 @@ export const verify: Lane<State> = {
 	agents,
 	asks,
 	effects,
-	view: (s) => ({ landed: s.handover?.sha ?? null }),
+	view: (s) => ({
+		landed: s.handover?.sha ?? null,
+		passedResult(): PassedResult | null {
+			const handover = handoverAsk(s);
+			return handover
+				? { sha: s.handover!.sha, evidence: handover.basis }
+				: null;
+		},
+	}),
 	reduce: (s, e, w) => transition(s, w).reduce(e as Event),
 	onFact: (s, e, w) => transition(s, w).onFact(e),
 };

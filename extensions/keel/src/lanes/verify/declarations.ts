@@ -159,54 +159,57 @@ export function effects(s: State): EffectDecl[] {
 					: { repo: s.repo!, op },
 		}));
 }
-export function asks(s: State): Ask[] {
-	if (s.cancelled || s.handover?.status !== "asking") return [];
+export function handoverAsk(s: State): Ask | null {
+	if (s.cancelled || !s.handover) return null;
 	const h = s.handover,
 		info = s.handoff!,
 		trunk = s.repo!.trunk;
-	return [
-		{
-			subject: subject("handover"),
-			title: title({
-				trunk,
-				sha: h.sha,
-				goal: s.mandate!.intent.trim().split("\n", 1)[0]!,
-			}).trim(),
-			choices: ["accept", "reject"],
-			basis: handover({
-				sha: h.sha,
-				trunk,
-				base: s.repo!.base,
-				result: h.unchanged ? unchanged : changed,
-				intent: s.mandate!.intent,
-				summary: info.summary,
-				verdict: s.verdicts
-					.filter((v) => v.scope !== "item" && v.outcome === "pass")
-					.map((v) => v.text)
-					.join("\n"),
-				rulings: rulings([...info.rulings].sort((a, b) => b.rank - a.rank)),
-				notes:
-					s.verdicts
-						.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
-						.join("\n") || "None.",
-				risk: info.risk,
-				directions: s.directions.join("\n") || "None.",
-				approvalReplies:
-					info.approvals
-						.map(({ revision, notes }) => {
-							const label =
-								revision === null
-									? "Mandate approval"
-									: `Revision ${revision} approval`;
-							return `#### ${label}\n\n${notes.map((n) => `${n.n}. ${n.text}\n   ${n.status}: ${n.reason}`).join("\n")}`;
-						})
-						.join("\n\n") || "None.",
+	return {
+		subject: subject("handover"),
+		title: title({
+			trunk,
+			sha: h.sha,
+			goal: s.mandate!.intent.trim().split("\n", 1)[0]!,
+		}).trim(),
+		choices: ["accept", "reject"],
+		basis: handover({
+			sha: h.sha,
+			trunk,
+			base: s.repo!.base,
+			result: h.unchanged ? unchanged : changed,
+			intent: s.mandate!.intent,
+			summary: info.summary,
+			verdict: s.verdicts
+				.filter((v) => v.scope !== "item" && v.outcome === "pass")
+				.map((v) => v.text)
+				.join("\n"),
+			rulings: rulings([...info.rulings].sort((a, b) => b.rank - a.rank)),
+			notes:
+				s.verdicts
+					.flatMap((v) => v.notes.map((n) => `${v.sha}: ${n}`))
+					.join("\n") || "None.",
+			risk: info.risk,
+			directions: s.directions.join("\n") || "None.",
+			approvalReplies:
+				info.approvals
+					.map(({ revision, notes }) => {
+						const label =
+							revision === null
+								? "Mandate approval"
+								: `Revision ${revision} approval`;
+						return `#### ${label}\n\n${notes.map((n) => `${n.n}. ${n.text}\n   ${n.status}: ${n.reason}`).join("\n")}`;
+					})
+					.join("\n\n") || "None.",
 
-				diagnoses: s.diagnoses.join("\n") || "None.",
-				revisions: h.revisions || "None.",
-				findings: h.findings || "None.",
-				owed: h.owed || "None.",
-			}),
-		},
-	];
+			diagnoses: s.diagnoses.join("\n") || "None.",
+			revisions: h.revisions || "None.",
+			findings: h.findings || "None.",
+			owed: h.owed || "None.",
+		}),
+	};
+}
+export function asks(s: State): Ask[] {
+	if (s.handover?.status !== "asking") return [];
+	const handover = handoverAsk(s);
+	return handover ? [handover] : [];
 }

@@ -12,7 +12,7 @@ import {
 } from "../../kernel/lane.ts";
 import { toBuild } from "../build/public.ts";
 import { mandateLabels, renderMandate } from "../design/public.ts";
-import { findingNote } from "../verify/public.ts";
+import { findingNote, type PassedResult } from "../verify/public.ts";
 import type { FindingDisposition, Intake } from "./public.ts";
 import {
 	cause,
@@ -166,9 +166,27 @@ function seed(
 	};
 }
 
+function owedTriage(q: Queue, f: Finding, world: World) {
+	f.investigation = {
+		classification: "determined",
+		nodes: [],
+		evidence: "The owner overruled the verified result.",
+		size: "not estimated",
+		cause: "encoding the missing check",
+		recommendation: "build",
+		reference: f.intake.text,
+		sameAs: null,
+	};
+	f.status = "triage";
+	f.group = f.id;
+	f.disposition = null;
+	f.deferredAt = null;
+	f.basis = triageBasis(q, f, [f], context(world, null));
+}
+
 export function intake(
 	q: Queue,
-	e: Intake & { requestedOwner?: boolean },
+	e: Intake & { requestedOwner?: boolean; overridePassed?: boolean },
 	world: World,
 ): Reduction<Queue> {
 	if (e.requestedOwner && e.source !== "owner")
@@ -176,6 +194,34 @@ export function intake(
 			reject: "Only the work's designer can file on behalf of the owner.",
 		};
 	if (!e.text.trim()) return { reject: "Name the finding." };
+	if (e.overridePassed) {
+		const passed =
+			e.work === null
+				? null
+				: (
+						world.view("verify", e.work) as {
+							passedResult?(): PassedResult | null;
+						} | null
+					)?.passedResult?.();
+		if (
+			e.source !== "owner" ||
+			!passed ||
+			e.blocking ||
+			e.pattern ||
+			e.edgeCase
+		)
+			return {
+				reject:
+					"Only the owner can name a missing check against this work's verified landing.",
+			};
+		e = {
+			...e,
+			sha: passed.sha,
+			nodes: [],
+			report: [e.report, passed.evidence].filter(Boolean).join("\n\n"),
+			missingCheck: true,
+		};
+	}
 	if (
 		e.edgeCase &&
 		(!e.edgeCase.failure.trim() ||
@@ -226,12 +272,34 @@ export function intake(
 		input.missingCheck &&
 		q.entries.find(
 			(f) =>
-				f.intake.missingCheck &&
-				!f.encodedAt &&
-				checkKey(f.intake.text) === checkKey(input.text),
+				f.intake.missingCheck && !f.encodedAt && f.intake.text === input.text,
 		);
-	if (sameCheck)
-		return { state: q, reply: `Already owed as finding #${sameCheck.id}.` };
+	if (sameCheck) {
+		const reply = `Already owed as finding #${sameCheck.id}.`;
+		if (
+			sameCheck.intake.sha === input.sha &&
+			sameCheck.intake.work === input.work
+		)
+			return { state: q, reply };
+		const evidence = `Also overruled ${input.sha ?? "an unpinned result"}:\n${input.report ?? ""}`;
+		if (sameCheck.intake.report?.includes(evidence)) return { state: q, reply };
+		const revised = {
+			...sameCheck,
+			intake: {
+				...sameCheck.intake,
+				report: [sameCheck.intake.report, evidence]
+					.filter(Boolean)
+					.join("\n\n"),
+			},
+		};
+		if (
+			revised.status === "triage" ||
+			revised.disposition === "dropped" ||
+			revised.disposition === "deferred"
+		)
+			owedTriage(q, revised, world);
+		return { state: update(q, sameCheck, revised), reply };
+	}
 	const serialized = JSON.stringify(input);
 	const prior = q.entries.findLast(
 		(f) => JSON.stringify(f.intake) === serialized,
@@ -252,21 +320,7 @@ export function intake(
 		deferredAt: null,
 		revisits: [],
 	};
-	if (input.missingCheck) {
-		f.investigation = {
-			classification: "determined",
-			nodes: [],
-			evidence: "The owner rejected the verified result.",
-			size: "not estimated",
-			cause: "encoding the missing check",
-			recommendation: "build",
-			reference: input.text,
-			sameAs: null,
-		};
-		f.status = "triage";
-		f.group = f.id;
-		f.basis = triageBasis(q, f, [f], { ...live, active: false });
-	}
+	if (input.missingCheck) owedTriage(q, f, world);
 	if (
 		precedent?.status === "revoked" &&
 		!counterexample &&
@@ -842,7 +896,6 @@ export function agents(q: Queue): AgentDecl[] {
 	];
 }
 
-const checkKey = (text: string) => text.trim();
 export function checks(q: Queue, select: (f: Finding) => boolean) {
 	return q.entries
 		.filter((f) => f.intake.missingCheck && select(f))
