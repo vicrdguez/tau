@@ -17,6 +17,7 @@ test("Keel registers its four recovery tasks and the real lane tools", () => {
 	for (const name of [
 		"ground",
 		"publish_mandate",
+		"publish_revision",
 		"principle",
 		"request_cancel",
 		"publish_plan",
@@ -68,6 +69,7 @@ test("the public workflow entry starts a designer with its own model and coding 
 		"ground",
 		"principle",
 		"publish_mandate",
+		"publish_revision",
 		"read",
 		"request_cancel",
 	]);

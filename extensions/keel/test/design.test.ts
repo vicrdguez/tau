@@ -320,7 +320,9 @@ test("Design keeps its version-one identity and unadopted initial state", () => 
 	assert.deepEqual(design.state.initial(), {
 		phase: "entry",
 		audit: null,
+		seed: null,
 		rounds: [],
+		revisions: [],
 		reference: "",
 		mandate: null,
 		readings: [],
