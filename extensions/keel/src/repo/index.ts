@@ -218,8 +218,8 @@ export function readPublishable(
 				base,
 				sha,
 				"--",
-				":(top,glob).keel/principles/**",
-				":(top,glob).keel/playbooks/**",
+				":(top,icase,literal).keel/principles",
+				":(top,icase,literal).keel/playbooks",
 			),
 		).sort();
 		const at = await g.head(worker.branch);
