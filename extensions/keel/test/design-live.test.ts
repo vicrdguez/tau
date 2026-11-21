@@ -272,7 +272,7 @@ test("a follow work's applied revision gives explorers only the approved changed
 	]);
 	assert.doesNotMatch(
 		JSON.stringify(priorWorks),
-		/Emit one raw line|Keep the report timestamp|verify-report/,
+		/Emit one raw line|Keep the report timestamp|verify-report|Validate before writing/,
 	);
 });
 
