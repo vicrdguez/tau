@@ -540,6 +540,50 @@ test("publish lists only committed changes in the project principles and playboo
 		`${principles}/removed.md`,
 	]);
 });
+test("publish reports added and changed policy directory symlinks without following their targets", async (t) => {
+	const f = await fixture(t);
+	await mkdir(join(f.root, ".keel"));
+	await mkdir(join(f.root, "docs"));
+	await writeFile(join(f.root, "docs/guide.md"), "owner policy\n");
+	await symlink("../docs", join(f.root, ".keel/playbooks"));
+	git(f.root, "add", ".keel", "docs");
+	git(f.root, "commit", "-m", "owner files");
+	const repo = await readRepo(nodeExec, f.root);
+	const worker = { ...f.worker, base: repo.baseHead };
+	is(await converge(nodeExec, repo, f.start), "started");
+	is(await converge(nodeExec, repo, worker), "worktree");
+	await symlink("../docs", join(worker.path, ".keel/principles"));
+	await rm(join(worker.path, ".keel/playbooks"));
+	await symlink("../docs/.", join(worker.path, ".keel/playbooks"));
+	await writeFile(join(worker.path, "docs/guide.md"), "new policy\n");
+	git(worker.path, "add", "-A");
+	git(
+		worker.path,
+		"commit",
+		"-m",
+		"add and change links and edit their target",
+	);
+	const result = await readPublishable(nodeExec, repo, worker);
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.changedPolicyFiles, [
+		".keel/playbooks",
+		".keel/principles",
+	]);
+});
+test("publish reports policy paths regardless of case, without matching neighboring paths", async (t) => {
+	const f = await fixture(t);
+	await f.item();
+	const files = [".KEEL/PlayBooks/guide.md", ".KEEL/PRINCIPLES/nested/rule.md"];
+	for (const path of [...files, ".KEEL/Principles-old/rule.md"]) {
+		await mkdir(dirname(join(f.worker.path, path)), { recursive: true });
+		await writeFile(join(f.worker.path, path), "guide\n");
+	}
+	git(f.worker.path, "add", "-A");
+	git(f.worker.path, "commit", "-m", "add policy and a neighboring file");
+	const result = await f.publish();
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.changedPolicyFiles, [...files].sort());
+});
 test("publish lists both in-scope rename paths and only the in-scope side of crossing renames", async (t) => {
 	const f = await fixture(t);
 	const principles = ".keel/principles";
