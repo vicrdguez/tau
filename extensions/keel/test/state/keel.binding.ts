@@ -5,6 +5,7 @@ import type { AddressV1, Check, Exact } from "./fixture.ts";
 
 export type V1 = {
 	binding: (AddressV1 & { key: AgentKey; role: string }) | null;
+	projectPrinciples: { readonly name: string; readonly body: string }[] | null;
 };
 export type CurrentMatchesV1 = Check<
 	Exact<V1, ReturnType<typeof BindingState.initial>>
@@ -17,4 +18,5 @@ export const current = {
 		key: agentKey("worker"),
 		role: "worker",
 	},
+	projectPrinciples: [{ name: "money", body: "Pinned source" }],
 } satisfies V1;

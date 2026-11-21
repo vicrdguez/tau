@@ -1,8 +1,10 @@
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import { join, matchesGlob } from "node:path";
+import { join } from "node:path";
 import { prose } from "tau";
 import type { RenderInput } from "../kernel/reconcile.ts";
 import type { ProjectPrincipleFile } from "../repo/index.ts";
+import { ROLES } from "../roles/index.ts";
+import { overlapsFence } from "./fences.ts";
 
 type Principle = {
 	name: string;
@@ -45,7 +47,7 @@ function parse(file: string, name: string, source: string): Principle {
 		body: m[2]!.trim(),
 	};
 	let list: string[] | undefined;
-	for (const line of m[1]!.split("\n")) {
+	for (const line of m[1]!.split(/\r?\n/u)) {
 		if (!line.trim() || line.trimStart().startsWith("#")) continue;
 		const item = /^\s*-\s+(.+)$/.exec(line);
 		if (list && item) {
@@ -76,6 +78,9 @@ function parse(file: string, name: string, source: string): Principle {
 	}
 	if (!p.description || !p.body)
 		throw new Error(`A principle needs a description and a body: ${file}`);
+	for (const role of p.roles)
+		if (!Object.hasOwn(ROLES, role))
+			throw new Error(`Unknown role ${JSON.stringify(role)}`);
 	return p;
 }
 function readDirectory(
@@ -124,8 +129,8 @@ function project(
 	cwd: string | null | undefined,
 	pinned?: readonly ProjectPrincipleFile[],
 ) {
-	const local = cwd
-		? readDirectory(join(cwd, ".keel/principles"), true, pinned)
+	const local = cwd || pinned
+		? readDirectory(join(cwd ?? "", ".keel/principles"), true, pinned)
 		: { principles: [], errors: [] };
 	for (const p of local.principles)
 		if (keel.some((k) => k.name === p.name)) p.name = `project/${p.name}`;
@@ -137,16 +142,22 @@ const descriptions = (ps: Principle[]) =>
 export function indexFor(
 	cwd: string | null | undefined,
 	tools: readonly { name: string }[],
+	pinned?: readonly ProjectPrincipleFile[],
 ) {
 	if (!tools.some((t) => t.name === "principle")) return undefined;
-	const local = project(cwd);
+	const local = project(cwd, pinned);
 	return [descriptions([...keel, ...local.principles]), ...local.errors].join(
 		"\n",
 	);
 }
-export function bodyOf(cwd: string | null | undefined, name: string) {
-	return [...keel, ...project(cwd).principles].find((p) => p.name === name)
-		?.body;
+export function bodyOf(
+	cwd: string | null | undefined,
+	name: string,
+	pinned?: readonly ProjectPrincipleFile[],
+) {
+	return [...keel, ...project(cwd, pinned).principles].find(
+		(p) => p.name === name,
+	)?.body;
 }
 
 const table = [
@@ -179,7 +190,7 @@ export const render: RenderInput = (
 		(p) =>
 			p.roles.includes(role) ||
 			p.paths.some((pattern) =>
-				paths.some((path) => matchesGlob(path, pattern)),
+				paths.some((path) => overlapsFence(path, pattern)),
 			),
 	);
 	const triggered: Principle[] = [];

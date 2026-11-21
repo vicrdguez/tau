@@ -15,7 +15,6 @@ import { type RoleName, storedRole } from "../roles/index.ts";
 import {
 	type AgentKey,
 	agentKey,
-	slotKey,
 	type Token,
 	type WorkId,
 	workId,
@@ -24,7 +23,7 @@ import type { Delivery, LaneEvent, Result } from "./lane.ts";
 import { type Address, BindingState, ReceiptState } from "./records.ts";
 import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
-import { ledger } from "./storage.ts";
+import { activeSlot, ledger } from "./storage.ts";
 
 type Self = Readonly<
 	Address & {
@@ -205,14 +204,12 @@ async function activeBinding(
 ) {
 	if (!binding || !roles.includes(storedRole(binding.role)))
 		return { reject: `This role cannot call ${name}` } as const;
-	const slot = (await ledger(tx, binding.work)).agents[
-		slotKey(binding.lane, binding.key)
-	];
-	if (
-		slot?.status !== "active" ||
-		slot.conversation !== conversation ||
-		slot.role !== binding.role
-	)
+	const slot = activeSlot(
+		await ledger(tx, binding.work),
+		binding,
+		conversation,
+	);
+	if (!slot)
 		return {
 			reject: "This conversation is not the active bound agent",
 		} as const;

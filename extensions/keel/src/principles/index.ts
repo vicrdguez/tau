@@ -5,8 +5,14 @@ import {
 	type Extension,
 } from "tau/durable";
 import { obj, str } from "tau/schema";
-import { ReceiptState } from "../kernel/records.ts";
+import {
+	BindingState,
+	ProjectState,
+	ReceiptState,
+	WorkState,
+} from "../kernel/records.ts";
 import { stateDoc } from "../kernel/state.ts";
+import { activeSlot } from "../kernel/storage.ts";
 import type { CheckCitations } from "../kernel/tool.ts";
 import { bodyOf, indexFor, render } from "./catalog.ts";
 
@@ -35,7 +41,10 @@ const tool = defineTool({
 				isError: saved.isError,
 				output: [{ type: "text", text: saved.reply! }],
 			};
-		const body = bodyOf((await api.agent(ctx)).cwd, name);
+		const pin = (
+			await api.snapshot(stateDoc(BindingState), api.conversationId, ctx)
+		)?.projectPrinciples;
+		const body = bodyOf((await api.agent(ctx)).cwd, name, pin ?? undefined);
 		const reply = body ?? `No principle named ${name} in this checkout.`;
 		return api.commit(async (tx) => {
 			Object.assign(await tx.doc(receipt, api.taskId), {
@@ -55,7 +64,22 @@ const tool = defineTool({
 export const principleTools = [{ roles, tool }];
 const section: NonNullable<Extension["sections"]>[number] = {
 	key: "keel-principles",
-	render: ({ agent }) => indexFor(agent.cwd, agent.tools),
+	async render({ agent, conversationId, read }, ctx) {
+		const state = await read.snapshot(
+			stateDoc(BindingState),
+			conversationId,
+			ctx,
+		);
+		const binding = state?.binding;
+		if (!binding) return undefined;
+		const ledger =
+			binding.work === null
+				? (await read.snapshot(stateDoc(ProjectState), ctx))?.ledger
+				: await read.snapshot(stateDoc(WorkState), binding.work, ctx);
+		return activeSlot(ledger, binding, conversationId)
+			? indexFor(agent.cwd, agent.tools, state.projectPrinciples ?? undefined)
+			: undefined;
+	},
 };
 export const principleSections = [{ roles, section }];
 

@@ -51,8 +51,6 @@ export type Expectation = {
 	/** Facts for the composition root's input policy, never inferred from input text. */
 	situation?: string;
 	paths?: readonly string[];
-	/** Project bindings pinned by the worktree effect. Other inputs read the current checkout. */
-	projectPrinciples?: readonly ProjectPrincipleFile[];
 	/** Null: no delivery. Only the anchor designer may answer without preceding tagged input. */
 	input: (() => string) | null;
 };
@@ -60,6 +58,8 @@ export type AgentDecl = {
 	key: AgentKey;
 	role: RoleName;
 	cwd: string | null;
+	/** Project policy pinned when this conversation is created. Omit to read the checkout live. */
+	projectPrinciples?: readonly ProjectPrincipleFile[];
 	paused: boolean;
 	expects: readonly Expectation[];
 };

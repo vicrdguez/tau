@@ -1,5 +1,6 @@
 import type { DecisionId } from "tau";
 import type { ConversationId, TaskId } from "tau/durable";
+import type { ProjectPrincipleFile } from "../repo/index.ts";
 import type { AgentKey, Token, WorkId } from "./ids.ts";
 import { defineState } from "./state.ts";
 
@@ -37,6 +38,7 @@ export type ProjectState = {
 export type WorkState = Ledger;
 export type BindingState = {
 	binding: (Address & { key: AgentKey; role: string }) | null;
+	projectPrinciples: ProjectPrincipleFile[] | null;
 };
 export type ReceiptState = {
 	reply: string | null;
@@ -68,7 +70,7 @@ export const BindingState = defineState<BindingState>({
 	kind: "keel.binding",
 	version: 1,
 	scope: "conversation",
-	initial: () => ({ binding: null }),
+	initial: () => ({ binding: null, projectPrinciples: null }),
 });
 export const ReceiptState = defineState<ReceiptState>({
 	kind: "keel.receipt",

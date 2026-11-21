@@ -89,6 +89,8 @@ export async function reconcile(
 				key: agent.key,
 				role: agent.role,
 			};
+			binding.projectPrinciples =
+				agent.projectPrinciples?.map((file) => ({ ...file })) ?? null;
 			if (work === null) p.anchor ??= conversation;
 			slots.agents[key] = {
 				conversation,
@@ -128,7 +130,9 @@ export async function reconcile(
 						cwd: slot.cwd,
 						situation: exp.situation,
 						paths: exp.paths,
-						projectPrinciples: exp.projectPrinciples,
+						projectPrinciples:
+							(await tx.doc(stateDoc(BindingState), slot.conversation))
+								.projectPrinciples ?? undefined,
 					},
 					text,
 				) ?? { text };
