@@ -115,6 +115,20 @@ test("path bindings cover fenced directories, their parents and normalized desce
 	assert.match(input("services/payments/risk"), /Limit rule/);
 	assert.doesNotMatch(input("services/payments/risky"), /Limit rule/);
 });
+test("a principle path pattern with a leading ./ binds to matching fences", async (t) => {
+	const { cwd, put } = await checkout(t);
+	await put(
+		"ledger",
+		"Review rounding.",
+		'paths: ["./src/ledger/**"]\n',
+		"Apply the ledger rule.",
+	);
+	const input = (path: string) =>
+		principleInputs.render({ role: "worker", cwd, paths: [path] }, "Act.").text;
+	for (const fence of ["src", "src/ledger", "./src/ledger/post.ts"])
+		assert.match(input(fence), /Apply the ledger rule/, fence);
+	assert.doesNotMatch(input("src/ledger-old"), /Apply the ledger rule/);
+});
 test("CRLF project frontmatter delivers its description, roles, paths and body", async (t) => {
 	const { cwd } = await checkout(t);
 	await writeFile(
