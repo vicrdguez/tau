@@ -23,6 +23,16 @@ import {
 	type DispatchResult,
 } from "../src/dispatch/index.ts";
 
+async function stopped(signal: AbortSignal | undefined): Promise<never> {
+	assert.ok(signal);
+	signal.throwIfAborted();
+	return new Promise((_, reject) =>
+		signal.addEventListener("abort", () => reject(signal.reason), {
+			once: true,
+		}),
+	);
+}
+
 const jobs = [
 	{ seat: "slow", question: "first question" },
 	{ seat: "quick", question: "second question" },
@@ -54,7 +64,10 @@ async function setup(t: TestContext, timeoutMs?: number) {
 				seat === "slow" ? slow : seat === "quick" ? quick : undefined;
 			return (
 				provider && {
-					model: provider.getModel(),
+					model: {
+						provider: provider.getModel().provider,
+						modelId: provider.getModel().id,
+					},
 					extensions: [probeExtension],
 					tools: [recursionProbe],
 					instructions: `Instructions for ${seat}`,
@@ -75,7 +88,11 @@ async function setup(t: TestContext, timeoutMs?: number) {
 	);
 	t.after(() => harness.close(ctx));
 	const root = await harness.root(ctx, {
-		agent: { model: parent.getModel(), extensions: [extension], maxTurns: 9 },
+		agent: {
+			model: { provider: "parent", modelId: parent.getModel().id },
+			extensions: [extension],
+			maxTurns: 9,
+		},
 	});
 	harness.resume();
 	const start = async (input: DispatchJob[] = jobs) => {
@@ -116,9 +133,10 @@ test("toy extension injects seat models and closed tools; join keeps job order d
 	const completion: string[] = [];
 	x.slow.setResponses([
 		async (context) => {
-			assert.match(context.systemPrompt ?? "", /Instructions for slow/);
+			const system = context.messages.filter((m) => m.role === "system");
+			assert.match(JSON.stringify(system), /Instructions for slow/);
 			assert.deepEqual(
-				context.tools?.map(({ name }) => name),
+				system.flatMap((m) => m.toolsAdded?.map(({ name }) => name) ?? []),
 				["recursion_probe"],
 			);
 			await delay(75);
@@ -160,7 +178,7 @@ for (const fails of ["error", "timeout"] as const) {
 						stopReason: "error",
 						errorMessage: "provider refused",
 					})
-				: () => new Promise(() => {}),
+				: (_, options) => stopped(options?.signal),
 		]);
 		x.quick.setResponses([fauxAssistantMessage("sibling answer")]);
 		await x.start();
@@ -180,15 +198,18 @@ test("aborting the caller stops an owned child while it waits for a model respon
 	timeout: 3000,
 }, async (t) => {
 	const x = await setup(t);
-	const started = Promise.withResolvers<void>();
+	let markStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		markStarted = resolve;
+	});
 	x.slow.setResponses([
-		() => {
-			started.resolve();
-			return new Promise(() => {});
+		(_, options) => {
+			markStarted();
+			return stopped(options?.signal);
 		},
 	]);
 	await x.start([jobs[0]!]);
-	await started.promise;
+	await started;
 	await x.root.abort(ctx);
 	const [child] = await x.owned();
 	assert.ok(child);
