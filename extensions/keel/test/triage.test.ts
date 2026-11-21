@@ -281,6 +281,23 @@ test("a new duplicate reopens a deferred finding as a new decision with both rep
 	assert.equal(q.answer("build", next.subject)[0]?.event.kind, "plan_finding");
 });
 
+test("an identical re-filing after defer is investigated once and can reopen the original", () => {
+	const q = queue();
+	q.file();
+	q.send(q.investigation());
+	const first = q.ask()[0]!.subject;
+	q.answer("defer");
+	q.file();
+	q.file();
+	assert.match(
+		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		/Investigate finding #2/,
+	);
+	q.send(q.investigation(2, "duplicate", { duplicateOf: 1, cause: "" }));
+	assert.notEqual(q.ask()[0]?.subject, first);
+	assert.equal(q.agents()[0]?.expects.length, 0);
+});
+
 test("the investigator can close a non-blocking observation with a reason but not a blocked filer", () => {
 	const q = queue();
 	q.file({ source: "verifier", text: "Other readers unchanged" });
