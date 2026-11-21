@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { openNodeSqliteStorage } from "tau/durable";
-import { fauxAssistantMessage, type FauxResponseStep } from "tau/testing";
+import { type FauxResponseStep, fauxAssistantMessage } from "tau/testing";
 import { probeStore, started } from "./fixtures/dispatch-probe.ts";
 import { dispatchPlanV1 } from "./state/dispatch.plan.ts";
 

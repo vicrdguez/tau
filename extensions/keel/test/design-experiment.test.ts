@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { effectKey } from "../src/kernel/ids.ts";
 import {
 	type Experiment,
+	experimentDecisions,
 	experimentEffect,
 	experimentEvidence,
 	experimentInput,
-	experimentDecisions,
 	finishExperiment,
 	recordExperiment,
 	startExperiment,

@@ -145,8 +145,10 @@ export function createKernel(config: {
 				let record: ReturnType<typeof readRecord> | undefined;
 				return {
 					...dispatchBounds(opts),
-					resolve: async (_tx, _caller, job) =>
-						dispatch.resolve(await (record ??= readRecord()), job),
+					resolve: async (_tx, _caller, job) => {
+						record ??= readRecord();
+						return dispatch.resolve(await record, job);
+					},
 				};
 			}),
 		});

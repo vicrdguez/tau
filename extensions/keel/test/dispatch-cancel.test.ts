@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { decision, eventLog } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
-import { fauxAnswer, type FauxResponseStep } from "tau/testing";
+import { type FauxResponseStep, fauxAnswer } from "tau/testing";
 import { ProjectState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { arenaFrame } from "./fixtures/arena-script.ts";
