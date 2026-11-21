@@ -31,7 +31,6 @@ const repo = {
 	trunkHead: "base",
 };
 const mandate = {
-	reviewed: false,
 	delegated: [],
 	encodeRequired: false,
 	approvalNotes: [],

@@ -9,7 +9,6 @@ import { drive } from "./fixtures/drive.ts";
 
 const mandate: Mandate = {
 	delegated: [],
-	reviewed: false,
 	encodeRequired: false,
 	approvalNotes: [] as string[],
 	intent: "repair pricing",
@@ -50,7 +49,7 @@ const clean = {
 	base: repo.trunkHead,
 	changedPolicyFiles: [],
 };
-function setup(max_workers = 1, reviewed = false) {
+function setup(max_workers = 1) {
 	const world: World = {
 		work,
 		root,
@@ -89,7 +88,7 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 		const done = (result: JsonObject) =>
 			send({ kind: "effect_done", key: effect().key, result });
-		function start(bound: Mandate = { ...mandate, reviewed }) {
+		function start(bound: Mandate = mandate) {
 			send({
 				kind: "bound",
 				mandate: bound,
@@ -185,7 +184,6 @@ test("plans refuse unsafe or duplicate IDs, empty plans, missing dependencies an
 
 const reviewed: Mandate = {
 	...mandate,
-	reviewed: true,
 	encodeRequired: true,
 	approvalNotes: ["Cover cash ties", "Keep the integer seam"],
 	delegated: [{ label: "tick-order", text: "Choose tick order locally" }],
