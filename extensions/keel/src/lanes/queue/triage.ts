@@ -528,12 +528,21 @@ export function classify(
 			!live.active
 		)
 			return { reject: "Link only the same in-scope defect in this build." };
+		const shared = `queue/${earlier.group}`;
+		if (f.intake.blocking) {
+			const required = new Set(live.plannedFor?.(shared));
+			for (const id of required)
+				for (const dep of live.plan.find((item) => item.id === id)?.deps ?? [])
+					required.add(dep);
+			if (required.has(f.intake.item!))
+				return {
+					reject: `Item ${f.intake.item} is part of the fix for ${shared} or a dependency of it. Report this defect without linking so it gets its own fix.`,
+				};
+		}
 		return {
 			state: update(q, f, { ...found, status: "defect", group: earlier.group }),
 			// Move the filer to the shared cause before releasing its provisional hold.
-			send: f.intake.blocking
-				? [hold(found, [], `queue/${earlier.group}`), release(found)]
-				: [],
+			send: f.intake.blocking ? [hold(found, [], shared), release(found)] : [],
 		};
 	}
 	if (!earlier && work !== null && i.classification === "defect_in_scope") {

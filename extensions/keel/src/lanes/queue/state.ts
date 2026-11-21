@@ -39,6 +39,7 @@ export type PlanItem = {
 export type QueueBuildView = {
 	phase: string;
 	plan: PlanItem[];
+	plannedFor?(cause: string): string[];
 	itemOf(agent: string): string | null;
 };
 export function context(world: World, work: WorkId | null) {
@@ -55,6 +56,7 @@ export function context(world: World, work: WorkId | null) {
 	return {
 		active: build?.phase === "active",
 		plan: build?.plan ?? [],
+		plannedFor: build?.plannedFor,
 		goal: (design?.goal ?? design?.mandate?.intent)?.split("\n", 1)[0] ?? null,
 		mandate: design?.mandate ?? null,
 		reference: design?.reference ?? null,

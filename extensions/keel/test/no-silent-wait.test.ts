@@ -34,7 +34,11 @@ const goal = (id: string, deps: string[] = []) => ({
 	deps,
 });
 
-async function start(t: TestContext, ids = ["writer", "stats"]) {
+async function start(
+	t: TestContext,
+	ids = ["writer", "stats"],
+	deps: Record<string, string[]> = {},
+) {
 	const s = await openScriptedWorkflow(
 		process.cwd(),
 		new MemoryStorage(),
@@ -173,7 +177,7 @@ async function start(t: TestContext, ids = ["writer", "stats"]) {
 		},
 	});
 	await done("start:", { kind: "started", base: sha });
-	assert.ok(!("reject" in (await plan(ids.map((id) => goal(id))))));
+	assert.ok(!("reject" in (await plan(ids.map((id) => goal(id, deps[id]))))));
 	return {
 		work,
 		send,
@@ -203,13 +207,13 @@ test("X1: a late hold on a fix dependency leads to one decision; resume gives th
 	await x.commit(async (tx) =>
 		x.options.set(tx, { ...(await x.options.get(tx)), sweep_minutes: 60 }),
 	);
-	await x.file("stats", "PARSER: the same defect stops the statistics reader");
-	assert.deepEqual(
-		await x.asks(),
-		[],
-		"the investigator is still expected to act",
-	);
-	assert.ok(!("reject" in (await x.classify(2, { sameAs: 1 }))));
+	// Replay the hold that a pre-refusal link delivered to Build.
+	await x.must("build", {
+		kind: "queue_hold",
+		item: "stats",
+		nodes: [],
+		cause: "queue/1",
+	});
 	assert.equal((await x.asks()).length, 1);
 	const { d, text } = await x.readAsk("finding/");
 	assert.deepEqual(d.choices, ["resume", "cancel"]);
@@ -239,29 +243,54 @@ test("X2: a fix blocked on its own finding leads to one decision", async (t) => 
 	assert.ok(!("reject" in (await x.classify(1))));
 	assert.ok(!("reject" in (await x.plan([goal("fix")]))));
 	await x.brief("fix");
-	await x.file("fix", "The same parser defect blocks the fix");
-	assert.ok(!("reject" in (await x.classify(2, { sameAs: 1 }))));
+	// Replay the hold delivered by the formerly accepted self-link.
+	await x.must("build", {
+		kind: "queue_hold",
+		item: "fix",
+		nodes: [],
+		cause: "queue/1",
+	});
 	assert.equal((await x.asks()).length, 1);
 	assert.match((await x.readAsk("finding/")).text, /fix.*Parser defect/);
 });
 
 for (const filer of ["direct", "transitive", "fix"] as const) {
 	test(`A-1: an investigator cannot link the ${filer} filer to its own fix`, async (t) => {
-		const x = await start(t, filer === "fix" ? ["writer"] : ["writer", "stats"]);
+		const x = await start(
+			t,
+			filer === "fix"
+				? ["writer"]
+				: filer === "transitive"
+					? ["writer", "stats", "reader"]
+					: undefined,
+			{ reader: ["stats"] },
+		);
 		await x.brief("writer");
 		if (filer !== "fix") await x.brief("stats", "R2");
 		await x.file("writer", "The parser loses its escape.");
 		assert.ok(!("reject" in (await x.classify(1))));
-		const items = filer === "transitive"
-			? [goal("reader", ["stats"]), goal("fix", ["reader"])]
-			: [goal("fix", filer === "direct" ? ["stats"] : [])];
+		const items =
+			filer === "transitive"
+				? [goal("fix", ["reader"])]
+				: [goal("fix", filer === "direct" ? ["stats"] : [])];
 		assert.ok(!("reject" in (await x.plan(items))));
 		if (filer === "fix") await x.brief("fix");
 		const item = filer === "fix" ? "fix" : "stats";
 		await x.file(item, "The same defect would block the fix if linked.");
+		assert.deepEqual(
+			await x.asks(),
+			[],
+			"the investigator is still expected to act",
+		);
 		const linked = await x.classify(2, { sameAs: 1 });
-		assert.match("reject" in linked ? linked.reject : "", new RegExp(`${item}.*fix.*without linking`, "i"));
-		assert.ok(!("reject" in (await x.classify(2))), "the investigator can report a separate defect");
+		assert.match(
+			"reject" in linked ? linked.reject : "",
+			new RegExp(`${item}.*fix.*without linking`, "i"),
+		);
+		assert.ok(
+			!("reject" in (await x.classify(2))),
+			"the investigator can report a separate defect",
+		);
 		assert.ok(!("reject" in (await x.plan([goal("different-fix")]))));
 		assert.equal((await x.build())?.coordinator.item, "different-fix");
 	});

@@ -250,6 +250,8 @@ export function buildView(s: Build) {
 			rulings.map((ruling) => ({ item: id, ...ruling })),
 		),
 		head: s.head,
+		plannedFor: (cause: string) =>
+			s.findings.find((f) => f.cause === cause)?.items ?? [],
 		itemOf(agent: string) {
 			return (
 				s.items.find((i) => i.worker && workerKey(i) === agent)?.id ?? null
