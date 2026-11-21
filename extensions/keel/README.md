@@ -20,7 +20,7 @@ Bound agents can use the standing `file_finding` tool. Designers, verifiers, dia
 The designer reports what exists and labels gaps and contradictions without declaring them defects. The review shows the proposed rulings, the done predicate, each seam's callers, caller code before signatures, ownership and allowed dependencies, rules and their falsifying probes, anti-criteria, timed proofs, tradeoffs and alternatives. Each rider has a label, an origin and a proposed disposition: bind or leave open to agents.
 
 - **Review:** `approve` approves the Mandate as shown, including the proposed rider dispositions and nodes that cite references. `rework` sends your numbered annotations back to the designer. Annotate a rider the same way you annotate a seam or rule. Every annotation needs a reply (acted on, considered or dismissed, with a reason). `decline` ends the work without building and records annotations still owed as not pursued.
-- **Another round:** the review opens with the labels that changed, were added, or were removed. The entries are marked in the text; removed entries show their previous content. Answers to older rounds cannot authorize a different draft. Every revision, answer and numbered reply remains in the record.
+- **Another round:** the review opens with the labels that changed, were added, or were removed. Changed entries include their previous content, and removed entries show separately. Answers to older rounds cannot authorize a different draft. Every revision, answer and numbered reply remains in the record.
 - **Build:** approval makes the proposed binding riders binding nodes and delegates the open ones. Your approval annotations go to the first plan for a numbered reply, and you see the replies at hand-over. A reviewed Mandate with seams or rules requires Encode first: the scaffold, dependency boundaries and rule checks. Every later item depends on Encode. Briefs cite binding nodes, never delegated riders.
 
 ## Findings and triage
@@ -39,13 +39,13 @@ The investigator can group findings with the same cause and decision. A duplicat
 
 ## Live plan
 
-Items begin as goals and dependencies. The coordinator briefs ready items against the current build head, up to `max_workers`, and each item uses its own checkout. Only a merged dependency makes a dependent item ready. Review can proceed in parallel, but mergers into the build branch are serialized.
+Items begin as goals and dependencies. The coordinator briefs ready items against the current build head, up to `max_workers`, and each item uses its own checkout. Only a merged dependency makes a dependent item ready. Review can proceed in parallel, but merges into the build branch are serialized.
 
 An unresolved Mandate node hold prevents full-set handoff, even if the affected item already merged. When you approve a mid-build Mandate revision, the coordinator can add, edit, reorder, or drop unstarted items. The revision and plan edits become active in the same commit. Unaffected items keep moving. A verified item is a record; correcting it takes a new item. A held item gets the changed authority and resumes only after its dependencies merge and its last hold clears.
 
 ## Principles
 
-All active roles can call `principle({name})` once they have an active binding. While the entry designer is unbound during Ground it sees no principle index. Once bound, the index lists names and descriptions, first Keel's and then the project's, in filename order. A ruling's `follows` names its reference; `principles` lists the principles it cites. Merely seeing a description, or someone else's pull, does not authorize a citation. Pulls, input deliveries and citations are recorded per conversation.
+Designers, coordinators, workers, verifiers and diagnosers can call `principle({name})` once they have an active binding. While the entry designer is unbound during Ground it sees no principle index. Once bound, the index lists names and descriptions, first Keel's and then the project's, in filename order. A ruling's `follows` names its reference; `principles` lists the principles it cites. Merely seeing a description, or someone else's pull, does not authorize a citation. Pulls, input deliveries and citations are recorded per conversation.
 
 Add one Markdown file per principle under `.keel/principles/`. Give it a one-line description and a body. Optional roles or matching paths deliver the full body automatically. A fence is a literal repository-relative file or directory path, one per line, without spaces or globs. Use `.` for the whole repository. For example, `src`, `src/ledger` and `./src/ledger/post.ts` all match `src/ledger/**`. Fences do not limit what an agent can pull by name. For example:
 
