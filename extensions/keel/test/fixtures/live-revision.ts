@@ -111,7 +111,11 @@ export async function openLiveRevision(
 	if (first)
 		await harness.commit(
 			async (tx) =>
-				options.set(tx, { ...(await options.get(tx)), max_workers: 2 }),
+				options.set(tx, {
+					...(await options.get(tx)),
+					max_workers: 2,
+					queue_explorer: `explorer-fixture/${s.explorer.getModel().id}`,
+				}),
 			ctx,
 		);
 	const project = () => harness.snapshot(stateDoc(ProjectState), ctx);
@@ -277,7 +281,30 @@ export async function openLiveRevision(
 			pass("Initial check recorded."),
 			...Array.from({ length: 7 }, () => point),
 		]);
+		const explorerResult =
+			"The current writer and reader use the bound wire seam.";
+		s.explorer.setResponses([
+			(context) => {
+				const evidence = JSON.stringify(context);
+				assert.match(evidence, /write_book value/);
+				assert.match(evidence, /Write independent statistics/);
+				return fauxAssistantMessage(explorerResult);
+			},
+		]);
 		s.queueProvider.setResponses([
+			s.turn(
+				"investigator",
+				"dispatch",
+				{
+					jobs: [
+						{
+							seat: "queue_explorer",
+							question: "What authority governs the writer?",
+						},
+					],
+				},
+				report,
+			),
 			(...args) => {
 				const worker = git(cwd, "rev-parse", `keel/${work}/item/writer-1`);
 				investigationPrompt.resolve();
@@ -299,6 +326,7 @@ export async function openLiveRevision(
 					report,
 					finding,
 					"wire",
+					{ tool: "dispatch", text: explorerResult },
 				)(...args);
 			},
 		]);

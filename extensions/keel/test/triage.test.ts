@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { LaneEvent, Message, World } from "../src/kernel/lane.ts";
 import { queueLane } from "../src/lanes/queue/index.ts";
+import { explorerDispatch } from "../src/roles/dispatch.ts";
 import { drive } from "./fixtures/drive.ts";
 
 const plan = [
@@ -512,6 +513,54 @@ test("a blessed pattern is an approved reference across works; revoke seeds stru
 		}
 	}
 });
+test("explorers distinguish a revoked pattern from approved authority, and only the investigator shares its live context", async () => {
+	const q = queue();
+	for (const [i, [pattern, choice]] of (
+		[
+			["keep-cent", "bless"],
+			["lose-cent", "revoke"],
+		] as const
+	).entries()) {
+		q.file({ pattern });
+		q.send(
+			q.investigation(i + 1, "unapproved_pattern", { recommendation: choice }),
+		);
+		q.answer(choice);
+	}
+	q.file({ text: "A new investigation" });
+	for (const role of [
+		"designer",
+		"coordinator",
+		"worker",
+		"investigator",
+	] as const) {
+		const explorer = await explorerDispatch.resolve(
+			{
+				role,
+				cwd: "/checkout",
+				options: activeWorld.options,
+				view: (name) => (name === "queue" ? q.view() : null),
+			},
+			{
+				seat:
+					role === "designer"
+						? "design_explorer"
+						: role === "investigator"
+							? "queue_explorer"
+							: "build_explorer",
+				question: "Which rounding pattern is authoritative?",
+			},
+		);
+		assert.ok(explorer);
+		const text = explorer.instructions ?? "";
+		assert.match(text, /"name": "keep-cent"[^}]*"status": "blessed"/);
+		assert.match(text, /"name": "lose-cent"[^}]*"status": "revoked"/);
+		if (role === "investigator")
+			assert.match(text, /Compare both ledger balances/);
+		else assert.doesNotMatch(text, /Compare both ledger balances/);
+	}
+});
+
 test("blessing a pattern withdraws other open decisions and investigations for that pattern", () => {
 	const q = queue();
 	for (const text of ["First ruling", "Another ruling", "Third ruling"])

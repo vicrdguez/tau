@@ -202,8 +202,14 @@ test("a queue precedent seed survives a stopped Ground and enters audited Mandat
 	x.act({ kind: "ground", route: "precedent", reference, audit });
 	assert.match(x.input(), /shell writer/);
 	assert.ok(x.input().includes(seed.text));
+	assert.deepEqual(x.asks(), []);
+	assert.ok(
+		"reject" in
+			x.send({ ...synthesis, kind: "publish_mandate", draft, replies: [] }),
+	);
 	x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
 	assert.deepEqual(x.asks()[0]?.choices, reviewChoices);
+	assert.ok(x.asks()[0]?.basis.includes(seed.text));
 	assert.equal(x.mandate(), null);
 });
 
