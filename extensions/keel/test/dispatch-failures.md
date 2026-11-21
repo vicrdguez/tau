@@ -48,6 +48,13 @@ The installed-API probe was committed before the dispatcher (`00e32e8`). The sam
 - A failed effect or unmatched batch remains inconclusive evidence without redispatch.
 - Real prototypes write separate scratch files and add node-linked comparison and winning rider evidence to review.
 
+## Explorer history
+
+- A cancelled work's reviewed Mandate and recorded rulings do not reach explorers.
+- A declined review and rulings from that work do not reach explorers.
+- A follow work's revision is not authority before application; afterward only approved changed nodes, not the original Mandate, reach explorers.
+- The newest three eligible works keep full evidence; older works get a goal and one line per node instead of full Mandates and rulings.
+
 ## Scenario 2
 
 - Two Ground explorers read the real project; candidates receive identical prompts; judge, grafts, three riders and challenge appear in review; two annotation answers precede approval and the three-item dependent landing.

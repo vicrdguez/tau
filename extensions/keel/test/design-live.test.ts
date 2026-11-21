@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
+import { explorerDispatch } from "../src/roles/dispatch.ts";
 import {
 	challengeReview,
 	crossFamilyOptions,
@@ -154,8 +155,163 @@ function run(facts = world) {
 		turn,
 		input: () => turn()?.input?.() ?? "",
 		mandate: () => state.mandate!,
+		view: () => design.view(state),
 	};
 }
+
+async function explorerHistory(
+	works: ReturnType<typeof run>[],
+	current?: ReturnType<typeof run>,
+) {
+	const ruling = {
+		item: "writer",
+		what: "Validate before writing.",
+		why: "Preserve bytes on failure.",
+		cost: "Lost data.",
+		rank: 1,
+		follows: "R1",
+		principles: [],
+	};
+	const view = (x?: ReturnType<typeof run>) => (name: string) =>
+		name === "design" ? (x?.view() ?? null) : x ? { rulings: [ruling] } : null;
+	const seat = await explorerDispatch.resolve(
+		{
+			role: "designer",
+			cwd: world.root,
+			options: world.options,
+			view: view(current),
+			priorWorks: works.map((x, i) => ({
+				work: (i + 2) as WorkId,
+				view: view(x),
+			})),
+		},
+		{ seat: "design_explorer", question: "What did the owner approve?" },
+	);
+	assert.ok(seat?.instructions);
+	return JSON.parse(
+		seat.instructions.slice(seat.instructions.indexOf("\n{")),
+	) as {
+		design: unknown;
+		rulings: unknown[];
+		priorWorks: {
+			work: number;
+			mandate?: unknown;
+			revisionNodes?: unknown;
+			rulings: unknown[];
+		}[];
+		earlierWorks: {
+			work: number;
+			goal: string;
+			nodes: { label: string; line: string }[];
+		}[];
+	};
+}
+
+function historicalReview(choice: "approve" | "decline", goal = small.intent) {
+	const x = run();
+	x.act({ kind: "ground", route: "precedent", reference, audit });
+	x.publishMandate({
+		kind: "publish_mandate",
+		draft: { ...draft, intent: goal },
+		replies: [],
+	});
+	x.answer(x.asks()[0]!.subject, choice);
+	return x;
+}
+
+test("explorers receive neither a cancelled work's reviewed Mandate nor its recorded rulings", async () => {
+	const x = historicalReview("approve");
+	assert.equal((await explorerHistory([x])).priorWorks.length, 1);
+	x.act({ kind: "cancel" });
+	assert.ok(
+		x.mandate(),
+		"cancellation keeps the historical Mandate in the lane",
+	);
+	const record = await explorerHistory([x], x);
+	assert.deepEqual(record.priorWorks, []);
+	assert.deepEqual(record.rulings, []);
+	assert.equal(record.design, null);
+	assert.doesNotMatch(
+		JSON.stringify(record),
+		/Validate before writing|Restore report exports/,
+	);
+});
+
+test("explorers receive neither a declined review nor rulings from that work", async () => {
+	const x = historicalReview("decline");
+	const record = await explorerHistory([x], x);
+	assert.deepEqual(record.priorWorks, []);
+	assert.deepEqual(record.rulings, []);
+	assert.equal(record.design, null);
+	assert.doesNotMatch(
+		JSON.stringify(record),
+		/Validate before writing|Restore report exports/,
+	);
+});
+
+test("a follow work's applied revision gives explorers only the approved changed nodes, not its Mandate", async () => {
+	const x = pending();
+	x.act(publish);
+	const [ask] = x.asks();
+	assert.match(ask!.basis, /Emit one escaped line/);
+	assert.doesNotMatch(ask!.basis, /Keep the report timestamp/);
+	assert.deepEqual((await explorerHistory([x])).priorWorks, []);
+	x.answer(ask!.subject, "approve");
+	assert.deepEqual((await explorerHistory([x])).priorWorks, []);
+	x.act({ kind: "revision_activated", causes: request.causes });
+	const { priorWorks } = await explorerHistory([x]);
+	assert.equal(priorWorks.length, 1);
+	assert.equal(priorWorks[0]!.mandate, undefined);
+	assert.deepEqual(priorWorks[0]!.revisionNodes, [
+		{
+			label: "R1",
+			section: "Rule",
+			body: correction.rule,
+			probe: correction.probe,
+		},
+	]);
+	assert.doesNotMatch(
+		JSON.stringify(priorWorks),
+		/Emit one raw line|Keep the report timestamp|verify-report/,
+	);
+});
+
+test("explorers get full evidence for the newest three eligible works and a one-line-per-node index for older works", async () => {
+	const reviewed = Array.from({ length: 4 }, (_, i) =>
+		historicalReview(
+			"approve",
+			`Report work ${i + 1}\nAdditional goal detail.`,
+		),
+	);
+	const record = await explorerHistory([
+		...reviewed,
+		historicalReview("decline"),
+	]);
+	assert.deepEqual(
+		record.priorWorks.map((w) => w.work),
+		[3, 4, 5],
+	);
+	assert.ok(
+		record.priorWorks.every((w) => w.mandate && w.rulings.length === 1),
+	);
+	const [older] = record.earlierWorks;
+	assert.equal(record.earlierWorks.length, 1);
+	assert.ok(older);
+	assert.equal(older.work, 2);
+	assert.equal(older.goal, "Report work 1");
+	assert.deepEqual(
+		older.nodes.find((n) => n.label === "R1"),
+		{
+			label: "R1",
+			line: "Emit one raw line.",
+		},
+	);
+	assert.ok(older.nodes.every((n) => !n.line.includes("\n")));
+	assert.doesNotMatch(
+		JSON.stringify(older),
+		/Additional goal detail|Validate before writing|Compare bytes/,
+	);
+});
 
 function pending() {
 	const x = run();
