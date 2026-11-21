@@ -194,7 +194,6 @@ export async function openScenario(
 							timeoutMs: 5000,
 						},
 					],
-					protectedPaths: [],
 				},
 			},
 			prompt,
@@ -209,7 +208,7 @@ export async function openScenario(
 			item: "repair",
 			goal,
 			evidence: "Compare bytes including newline.",
-			fences: "Change only book.",
+			fences: "book",
 			nodes: ["format"],
 		});
 		call(

@@ -14,7 +14,6 @@ const mandate: Mandate = {
 	approvalNotes: [] as string[],
 	intent: "repair pricing",
 	nodes: [{ label: "price", rule: "round once", probe: "0.05" }],
-	protectedPaths: ["tests/**"],
 	checks: [{ id: "prove", argv: ["make", "test"], timeoutMs: 5000 }],
 };
 const work = workId(32 as ConversationId);
@@ -33,7 +32,7 @@ const brief = {
 	item: "fix",
 	goal: "price safely",
 	evidence: "works at ties",
-	fences: "pricing only",
+	fences: "src/pricing.ts",
 	nodes: ["price"],
 };
 const ruling = {
@@ -49,16 +48,8 @@ const clean = {
 	kind: "ok",
 	sha,
 	base: repo.trunkHead,
-	changes: [],
-	touched: [],
-	trunk: null,
+	changedPolicyFiles: [],
 };
-const changed = (path: string, kind: string) => ({
-	path,
-	kind,
-	before: "old",
-	after: "new",
-});
 function setup(max_workers = 1, reviewed = false) {
 	const world: World = {
 		work,
@@ -146,7 +137,6 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 		return {
 			world,
-			view: () => lane.view(s),
 			start,
 			plan,
 			prepare,
@@ -164,26 +154,6 @@ function setup(max_workers = 1, reviewed = false) {
 		};
 	});
 }
-
-test("a worker revises a protected change returned from the merge candidate instead of fixing a failed integration", () => {
-	const b = setup();
-	b.working();
-	b.pub();
-	b.send({
-		kind: "integration",
-		protectedCandidate: true,
-		item: "fix",
-		head: repo.trunkHead,
-		evidence: "modified: tests/rounding",
-		direction: "Keep the existing oracle.",
-		threads: [],
-	});
-	const input = b.request("worker").text;
-	assert.match(input, /protected change/i);
-	assert.match(input, /tests\/rounding/);
-	assert.match(input, /Keep the existing oracle/);
-	assert.doesNotMatch(input, /integration[^\n]*fail/i);
-});
 
 test("Build v1 discovers the repo and starts the build before opening planning", () => {
 	const b = setup();
@@ -298,7 +268,8 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.match(report, /fractional cents fail/);
 	b.send({ kind: "merged", item: "fix", head: merged });
 	b.done({ kind: "removed" });
-	b.send({ kind: "handoff", summary: "port ready", risk: "none" });
+	const handoff = b.send({ kind: "handoff", summary: "port ready", risk: "none" });
+	assert.deepEqual(handoff.send?.[0]?.event.approvalReplies, replies);
 	b.send({
 		kind: "rework",
 		item: "full",
@@ -395,109 +366,24 @@ test("dirty and unrelated work cannot publish, and the tool offers no SHA argume
 	]);
 });
 
-test("a protected path holds an ordinary item; direction reaches the worker but does not waive protection", () => {
+test("principle and playbook changes go to the verifier without a publication hold", () => {
 	const b = setup();
 	b.working();
-	const touched = {
-		...clean,
-		base: merged,
-		touched: ["tests/round"],
-		changes: [changed("tests/round", "modified")],
-	};
-	const filed = b.pub(touched).send!;
-	assert.equal(filed.length, 1);
-	const f = filed[0]!;
-	assert.deepEqual(
-		[f.lane, f.work, f.event.kind, f.event.item, f.event.lane, f.event.work],
-		["queue", null, "file", "fix", "build", work],
-	);
-	assert.match(String(f.event.evidence), /tests\/round/);
-	assert.equal(f.event.goal, mandate.intent);
-	assert.equal(f.event.allow, true);
-	assert.equal(b.agent("worker").paused, true);
-	b.send({
-		kind: "resume",
-		item: "fix",
-		cause: "old",
-		direction: "go",
-		evidence: "",
-	});
-	assert.equal(b.agent("worker").paused, true);
-	b.send({
-		kind: "resume",
-		item: "fix",
-		cause: f.event.cause!,
-		direction: "restore fixture",
-		evidence: f.event.evidence!,
-	});
-	assert.match(b.request("worker").text, /restore fixture/);
-	assert.doesNotMatch(b.request("worker").text, /Your worktree is ready/);
-	assert.match(b.request("worker").text, /tests\/round/);
-	const again = b.pub(touched).send![0]!;
-	assert.equal(again.lane, "queue");
-	assert.notEqual(again.event.cause, f.event.cause);
-	const approved = b.send({
-		kind: "allow",
-		item: "fix",
-		cause: again.event.cause!,
-		direction: "inspect edges",
-		evidence: again.event.evidence!,
-	}).send![0]!;
-	assert.equal(approved.lane, "verify");
-	assert.equal(approved.event.allowed, true);
-	assert.equal(approved.event.itemKind, "build");
-	assert.equal(approved.event.base, merged);
-	assert.equal(approved.event.sha, sha);
-	assert.deepEqual(approved.event.protectedChanges, touched.changes);
-	assert.doesNotMatch(String(approved.event.brief), /inspect edges/);
-	assert.match(String(approved.event.direction), /inspect edges/);
-	assert.equal(b.agent("worker").expects.length, 0);
-	b.send({
-		kind: "rework",
-		item: "fix",
-		evidence: "rounding",
-		threads: ["edge"],
-	});
-	assert.doesNotMatch(
-		b.request("worker").text,
-		/restore fixture|inspect edges/,
-	);
-	assert.equal(
-		b.pub(touched).send![0]!.lane,
-		"queue",
-		"approval is not sticky",
-	);
+	const changedPolicyFiles = [".keel/principles/round.md", ".keel/playbooks/check.md"];
+	const result = b.pub({ ...clean, changedPolicyFiles });
+	assert.equal(result.send?.length, 1);
+	assert.equal(result.send?.[0]?.lane, "verify");
+	assert.deepEqual(result.send?.[0]?.event.changedPolicyFiles, changedPolicyFiles);
+	assert.equal(b.agent("worker").paused, false);
 });
 
-test("ordinary additions pass; only reviewed Encode can edit checks; policy changes cannot be waived", () => {
-	for (const [path, kind, itemKind, reviewed, expected] of [
-		["tests/new", "added", "build", false, "verify"],
-		["tests/old", "deleted", "encode", false, "queue"],
-		["tests/old", "renamed", "encode", true, "verify"],
-		[".keel/playbooks/verify.md", "added", "encode", true, "queue"],
-		[".keel", "added", "build", false, "queue"],
-	] as const) {
-		const b = setup(1, reviewed);
-		b.working(itemKind);
-		const changes = [changed(path, kind)];
-		const msg = b.pub({ ...clean, touched: [path], changes }).send![0]!;
-		assert.equal(msg.lane, expected);
-		if (expected === "verify") {
-			assert.equal(msg.event.allowed, false);
-			assert.deepEqual(msg.event.protectedChanges, changes);
-		} else if (path === ".keel" || path.startsWith(".keel/")) {
-			assert.notEqual(msg.event.allow, true);
-			const result = b.tryEvent({
-				kind: "allow",
-				cause: msg.event.cause!,
-				item: "fix",
-				direction: "",
-				evidence: "",
-			});
-			assert.ok("reject" in result || !result.send?.length);
-			assert.equal(b.agent("worker").paused, true);
-		} else assert.equal(msg.event.allow, true);
-	}
+test("a prose fence is refused before any worktree is prepared", () => {
+	const b = setup();
+	b.plan();
+	const result = b.tryEvent({ kind: "brief", ...brief, fences: "book.sh and book-check.sh" });
+	assert.ok("reject" in result);
+	assert.match(result.reject, /fence.*repository.relative path/i);
+	assert.deepEqual(b.effects(), []);
 });
 
 test("worker input passes the item's path fences and triggers a premise check only for a survived fix", () => {
@@ -506,7 +392,7 @@ test("worker input passes the item's path fences and triggers a premise check on
 	b.send({
 		kind: "brief",
 		...brief,
-		fences: "src/money/tick.ts\n\n tests/tie.ts ",
+		fences: "./src/money/./tick.ts\n\n tests/tie.ts ",
 	});
 	const policy = [
 		{
@@ -1225,13 +1111,6 @@ test("full-set or trunk returns request a new correction on the merged head, not
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
 		assert.match(b.request("worker").text, /precision/);
-		const view = b.view() as {
-			publicationOf(key: string): { inheritedTrunk: string | null };
-		};
-		assert.equal(
-			view.publicationOf(b.agent("worker").key).inheritedTrunk,
-			kind === "integration" ? sha : null,
-		);
 		assert.deepEqual(
 			b.pub(undefined, ["precision"]).send![0]!.event.addresses,
 			["precision"],

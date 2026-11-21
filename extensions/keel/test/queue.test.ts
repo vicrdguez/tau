@@ -127,42 +127,6 @@ test("item resume carries the evidence and direction, resets only that item, and
 	assert.ok(q.asks()[0]!.basis.includes(file(a).evidence));
 });
 
-test("only waivable protected changes offer allow; the answer authorizes that one finding, not all holds", () => {
-	const q = project(queueLane);
-	const f = { ...file(b, "build", "protected/1"), allow: true };
-	q.send(f);
-	q.send(file(b, "build", "worker_stalled"));
-	const [ask] = q.asks();
-	assert.ok(ask);
-	assert.deepEqual(ask.choices, ["allow", "resume", "cancel"]);
-	assert.match(ask.basis, /allow.*publication/i);
-	const messages = q.send(
-		answer(ask.subject, "allow", ["Existing proof checked."]),
-	);
-	assert.deepEqual(
-		messages.find((m) => m.event.kind === "allow"),
-		{
-			lane: "build",
-			work: b,
-			event: {
-				kind: "allow",
-				item: f.item,
-				cause: f.cause,
-				evidence: f.evidence,
-				direction: "1. Existing proof checked.",
-			},
-		},
-	);
-	assert.ok(
-		messages.some(
-			(m) => m.lane === "verify" && m.event.kind === "finding_direction",
-		),
-	);
-	assert.equal(q.asks().length, 1);
-	assert.deepEqual(q.send(answer(q.asks()[0]!.subject, "allow")), []);
-	assert.equal(q.asks().length, 1);
-});
-
 test("a designer-confirmed cancellation withdraws outstanding findings and notifies every work lane", () => {
 	const q = project(queueLane);
 	q.send(file(a));

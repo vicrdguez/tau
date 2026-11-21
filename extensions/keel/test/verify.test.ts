@@ -38,7 +38,6 @@ const mandate = {
 	intent: "Balance every ledger.",
 	nodes: [{ label: "sums", rule: "Sums match", probe: "compare totals" }],
 	checks: [{ id: "totals", argv: ["run", "proof"], timeoutMs: 10 }],
-	protectedPaths: [],
 };
 const rulings = [
 	{
@@ -106,11 +105,8 @@ function flow() {
 			item,
 			head,
 			base: "worker-base",
-			itemKind: "build",
 			paths: ["ledger/amounts.ts"],
-			protectedChanges: [],
-			allowed: false,
-			trunk: null,
+			changedPolicyFiles: [],
 			mandate,
 			...extra,
 			repo,
@@ -139,15 +135,18 @@ function flow() {
 			blocks: [],
 			notes: ["monitor latency"],
 		});
-	const merged = () => {
+	const mergedBeforeConflict = () => {
 		publish();
 		checkout();
 		pass();
 		clean();
+	};
+	const merged = () => {
+		mergedBeforeConflict();
 		done("merge_item", { kind: "merged", sha: "merged", checks: [] });
 		clean();
 	};
-	const handoff = () =>
+	const handoff = (extra: Record<string, LaneEvent[string]> = {}) =>
 		apply({
 			kind: "handoff",
 			repo,
@@ -157,6 +156,8 @@ function flow() {
 			rulings,
 			summary: "fixed totals",
 			risk: "low volume only",
+			approvalReplies: [],
+			...extra,
 		});
 	const full = () => {
 		merged();
@@ -203,6 +204,7 @@ function flow() {
 		fail,
 		pass,
 		merged,
+		mergedBeforeConflict,
 		handoff,
 		full,
 		take,
@@ -841,156 +843,45 @@ test("cancel withdraws waiting slot and ignores a late grant; an already running
 	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
 	assert.equal(y.asks().length, 0);
 });
-const change = (path: string) => ({
-	path,
-	kind: "modified",
-	before: "old",
-	after: "new",
-});
-const protectedResult = (path: string) => ({
-	kind: "protected",
-	sha: "candidate",
-	touched: [path],
-	protectedChanges: [change(path)],
-});
-function pendingMerge() {
+test("after a merge conflict, a worker's revised publication gets a fresh review", () => {
 	const x = flow();
-	x.publish("worker", [], "bug", "intervening-merge", {
-		protectedChanges: [change("tests/balance")],
-		allowed: true,
-		trunk: "inherited",
-	});
-	x.checkout();
-	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /tests\/balance/);
-	assert.match(input, /owner allowed/i);
-	x.pass();
-	x.clean();
-	return x;
-}
-test("review the worker's revised publication, not an authorized merge candidate, after a merge conflict", () => {
-	const x = pendingMerge();
-	x.done("merge_item", {
-		kind: "conflict",
-		paths: ["ledger"],
-		against: "base",
-	});
+	x.mergedBeforeConflict();
+	x.done("merge_item", { kind: "conflict", paths: ["ledger"], against: "base" });
 	x.clean();
 	x.publish("corrected");
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
 	assert.match(input, /worker revised/i);
 	assert.match(input, /corrected/);
-	assert.doesNotMatch(
-		input,
-		/owner-authorized protected change|authorized merge candidate/i,
-	);
 });
 
-test("guard the merge before proofs or ref advance; allowing a merge-only change reviews its pinned candidate before retry", () => {
-	const x = pendingMerge();
-	const merge = x.effect("merge_item");
-	assert.deepEqual(merge.op.protection, {
-		trunk: "inherited",
-		reviewedEncode: false,
-		allowedChanges: [change("tests/balance")],
-		allowedCandidate: null,
-	});
-	assert.deepEqual(merge.op.protectedGlobs, mandate.protectedPaths);
-	const file = x.done("merge_item", protectedResult("tests/other")).send?.[0]
-		?.event;
-	assert.ok(file);
-	assert.equal(file.allow, true);
-	assert.equal(file.goal, mandate.intent);
-	assert.deepEqual(x.effects(), []);
-	x.apply({ ...resume(file), kind: "allow" });
-	assert.equal(x.effect("checkout").op.sha, "candidate");
-	x.checkout();
-	const candidateInput = x.agent().expects[0]!.input!();
-	assert.match(candidateInput, /tests\/other/);
-	assert.match(candidateInput, /review this merge candidate/i);
-	assert.doesNotMatch(
-		candidateInput,
-		/integration failure|failed integration/i,
-	);
-	assert.match(x.agent().expects[0]!.input!(), /owner allowed/i);
-	assert.ok(!x.effects().length);
-	x.pass();
-	x.clean();
-	const retry = x.effect("merge_item");
-	assert.notEqual(retry.key, merge.key);
-	assert.equal(retry.op.item, "worker");
-	assert.equal(retry.op.key, merge.op.key);
-	assert.equal(
-		(retry.op.protection as LaneEvent).allowedCandidate,
-		"candidate",
-	);
-});
-test("policy files cannot be waived at merge even for Encode; resume returns evidence to worker, not a CAS", () => {
+test("the item reviewer sees Git's changed policy files and the item-task exception", () => {
 	const x = flow();
-	x.publish("encoded", [], "bug", "base", {
-		itemKind: "encode",
-		mandate: { ...mandate, reviewed: true },
-	});
-	x.checkout();
-	x.pass();
-	x.clean();
-	assert.equal(
-		(x.effect("merge_item").op.protection as LaneEvent).reviewedEncode,
-		true,
-	);
-	const f = x.done("merge_item", protectedResult(".keel/policy")).send?.[0]
-		?.event;
-	assert.ok(f && !f.allow);
-	const result = x.apply(resume(f));
-	const back = result.send?.find((m) => m.lane === "build")?.event;
-	assert.equal(back?.kind, "integration");
-	assert.equal(back?.protectedCandidate, true);
-	assert.match(String(back?.evidence), /\.keel\/policy/);
-	assert.match(String(back?.direction), /test the premise/);
-	assert.doesNotMatch(String(back?.evidence), /test the premise/);
-	x.clean();
-	assert.deepEqual(x.effects(), []);
-});
-test("item verifier distinguishes an ordinary protected addition from a waiver in the same publication", () => {
-	const x = flow();
-	x.publish("worker", [], "bug", "base", {
-		allowed: true,
-		protectedChanges: [
-			change("tests/balance"),
-			{ ...change("tests/new"), kind: "added" },
-		],
+	x.publish("one", [], "bug", "base", {
+		changedPolicyFiles: [".keel/principles/round.md", ".keel/playbooks/check.md"],
 	});
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /tests\/balance[^\n]*owner allowed/i);
-	assert.match(input, /tests\/new[^\n]*no waiver (?:needed|required)/i);
+	assert.match(input, /\.keel\/principles\/round\.md/);
+	assert.match(input, /\.keel\/playbooks\/check\.md/);
+	assert.match(input, /unchanged unless[^.]*task/i);
 });
-test("full verifier sees the protected files each merge actually changed, distinguishing an owner waiver from an ordinary addition", () => {
-	const x = pendingMerge();
-	const added = { ...change("tests/new"), kind: "added" };
-	x.done("merge_item", {
-		kind: "merged",
-		sha: "merged",
-		checks: [],
-		protectedChanges: [change("tests/balance"), added],
-	});
-	x.clean();
-	x.handoff();
+
+test("the verifier reads the Mandate as a document including the proof", () => {
+	const x = flow();
+	x.publish();
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /tests\/balance[^\n]*owner allowed/i);
-	assert.match(input, /tests\/new[^\n]*no waiver (?:needed|required)/i);
+	assert.match(input, /## (?:Bound )?Mandate/i);
+	assert.match(input, /Sums match/);
+	assert.match(input, /compare totals/);
+	assert.ok(input.includes('["run","proof"]'));
+	assert.doesNotMatch(input, /"intent":|"nodes":/);
 });
 test("a second stopped turn receives the new direction, not a replay of instructions already delivered", () => {
 	const x = flow();
-	x.publish("one", [], "bug", "base", {
-		allowed: true,
-		protectedChanges: [change("tests/check")],
-		direction: "Waiver instruction: inspect this test",
-	});
+	x.publish();
 	x.checkout();
-	assert.match(x.agent().expects[0]!.input!(), /Waiver instruction/);
 	function stop() {
 		const a = x.agent();
 		const f = x.apply({
@@ -1005,45 +896,37 @@ test("a second stopped turn receives the new direction, not a replay of instruct
 	}
 	x.apply({ ...resume(stop()), direction: "inspect rounding" });
 	assert.match(x.agent().expects[0]!.input!(), /inspect rounding/);
-	assert.doesNotMatch(x.agent().expects[0]!.input!(), /Waiver instruction/);
 	x.apply({ ...resume(stop()), direction: "inspect carries" });
 	const next = x.agent().expects[0]!.input!();
 	assert.match(next, /inspect carries/);
 	assert.doesNotMatch(next, /inspect rounding/);
 });
-test("hand-over lists unannotated publication and merge permissions even when the candidate supersedes the publication", () => {
-	const x = pendingMerge();
-	const changes = [
-		change("tests/other"),
-		{ ...change("tests/new"), kind: "added" },
+test("the hand-over pairs numbered approval replies with the owner's notes", () => {
+	const x = flow();
+	x.merged();
+	const replies = [
+		{ n: 2, status: "considered", reason: "The boundary already has an oracle." },
+		{ n: 1, status: "acted_on", reason: "Added the zero balance check." },
 	];
-	const f = x.done("merge_item", {
-		...protectedResult("tests/other"),
-		protectedChanges: changes,
-	}).send?.[0]?.event;
-	assert.ok(f);
-	x.apply({ ...resume(f), kind: "allow", direction: "" });
-	x.checkout();
-	x.pass();
-	x.clean();
-	x.done("merge_item", {
-		kind: "merged",
-		sha: "merged",
-		checks: [],
-		protectedChanges: changes,
+	x.handoff({
+		mandate: { ...mandate, approvalNotes: ["Cover the zero balance.", "Consider another oracle."] },
+		approvalReplies: replies,
 	});
-	x.clean();
-	x.handoff();
 	x.checkout();
 	x.pass();
 	x.clean();
 	x.prepare();
 	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	x.done("land", { kind: "landed", sha: "prepared" });
-	const basis = x.asks()[0]!.basis;
-	assert.match(basis, /bug[^\n]*worker[^\n]*modified: tests\/balance/);
-	assert.match(basis, /bug[^\n]*candidate[^\n]*modified: tests\/other/);
-	assert.doesNotMatch(basis, /tests\/new/);
+	const ask = x.asks()[0]!;
+	assert.match(ask.basis, /1\. Cover the zero balance\.[\s\S]*acted_on: Added the zero balance check\./);
+	assert.match(ask.basis, /2\. Consider another oracle\.[\s\S]*considered: The boundary already has an oracle\./);
+});
+test("the hand-over title names the goal", () => {
+	const x = flow();
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	assert.ok(x.asks()[0]!.title.includes(mandate.intent));
 });
 test("hand-over retains the chosen ambiguity reading and numbered annotations from Ground", () => {
 	const x = flow();
