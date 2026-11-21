@@ -251,11 +251,22 @@ test("a held publication signals Verify exactly once per named cause and only re
 	b.publish("item");
 	const verify = (event: LaneEvent) => [{ lane: "verify", work, event }];
 	const signal = (cause: string) =>
-		verify({ kind: "queue_hold", cause, item: "item", evidence: "evidence attached to this cause" });
+		verify({
+			kind: "queue_hold",
+			cause,
+			item: "item",
+			evidence: "evidence attached to this cause",
+		});
 	assert.deepEqual(b.send(hold("queue/1", "item")), signal("queue/1"));
 	assert.deepEqual(b.send(hold("queue/1", null, ["ledger"])), []);
-	assert.deepEqual(b.send(hold("queue/2", null, ["ledger"])), signal("queue/2"));
-	assert.deepEqual(b.send(release("queue/1")), verify({ kind: "queue_release", cause: "queue/1", direction: "Carry on" }));
+	assert.deepEqual(
+		b.send(hold("queue/2", null, ["ledger"])),
+		signal("queue/2"),
+	);
+	assert.deepEqual(
+		b.send(release("queue/1")),
+		verify({ kind: "queue_release", cause: "queue/1", direction: "Carry on" }),
+	);
 	assert.equal(b.worker("item")?.paused, true);
 	assert.deepEqual(b.send(release("queue/1")), []);
 });
@@ -443,7 +454,9 @@ test("a held unverified publication is superseded before release; its original w
 		[{ ...original, deps: ["dependency"] }, goal("dependency")],
 		reply,
 	);
-	const update = activation.findIndex((m) => m.event.kind === "mandate_revised");
+	const update = activation.findIndex(
+		(m) => m.event.kind === "mandate_revised",
+	);
 	assert.deepEqual(activation[update]?.event.items, ["pending"]);
 	const unhold = activation.findIndex((m) => m.event.kind === "queue_release");
 	assert.ok(unhold < 0 || update < unhold);

@@ -56,7 +56,11 @@ test("build two dependents concurrently from the first merge, merge serially, an
 		bothWorkers.resolve();
 		await harness.close(ctx);
 	});
-	await harness.commit(async (tx) => options.set(tx, { ...(await options.get(tx)), max_workers: 2 }), ctx);
+	await harness.commit(
+		async (tx) =>
+			options.set(tx, { ...(await options.get(tx)), max_workers: 2 }),
+		ctx,
+	);
 	const build = `keel/${s.root.id}/build`;
 	const intent = "Restore the book and add both independent indexes";
 	const items = [
@@ -69,15 +73,20 @@ test("build two dependents concurrently from the first merge, merge serially, an
 			deps: ["book"],
 		},
 	];
+	const turn = (...params: Parameters<typeof s.turn>) => {
+		const answer = s.turn(...params);
+		assert.equal(typeof answer, "function");
+		return answer;
+	};
 	const brief = (id: string) =>
-		s.turn("coordinator", "brief_item", {
+		turn("coordinator", "brief_item", {
 			item: id,
 			goal: `Write the ${id} content`,
 			evidence: `Read ${id}`,
 			fences: id,
 			nodes: ["format"],
 		});
-	const verdict = s.turn("verifier", "publish_verdict", {
+	const verdict = turn("verifier", "publish_verdict", {
 		outcome: "pass",
 		blocks: [],
 		notes: [],
@@ -93,7 +102,9 @@ test("build two dependents concurrently from the first merge, merge serially, an
 		const last = context.messages.at(-1);
 		switch (model.id) {
 			case "coordinator": {
-				const item = items.find(({ id }) => latest.includes(`Item ${id} (build) is ready`));
+				const item = items.find(({ id }) =>
+					latest.includes(`Item ${id} (build) is ready`),
+				);
 				if (briefed.length < 2) {
 					assert.ok(item && item.id !== "book");
 					assert.equal(
@@ -107,7 +118,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 					return brief(item.id)(...args);
 				}
 				assert.equal(merges.length, 3);
-				return s.turn("coordinator", "handoff_build", {
+				return turn("coordinator", "handoff_build", {
 					summary: intent,
 					risk: "No other formats changed",
 				})(...args);
@@ -120,7 +131,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 				if (last?.role === "toolResult") {
 					assert.equal(last.toolName, "bash");
 					assert.equal(last.isError, false);
-					return s.turn("worker", "publish_build", {
+					return turn("worker", "publish_build", {
 						summary: `Added ${id}`,
 						addresses: [],
 					})(...args);
@@ -133,7 +144,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 				workers.add(id);
 				if (workers.size === 2) bothWorkers.resolve();
 				await bothWorkers.promise;
-				return s.turn("worker", "bash", {
+				return turn("worker", "bash", {
 					command: `test "$(git rev-parse HEAD)" = ${merges[0]} && grep -qx restored book && printf '${id}\\n' > ${id} && git add ${id} && git commit -m 'add ${id} index'`,
 				})(...args);
 			}
