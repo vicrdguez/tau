@@ -184,14 +184,18 @@ test("one annotatable Mandate names the goal and reviews all nodes and rider dis
 	assert.deepEqual(main!.choices, ["approve", "rework", "decline"]);
 	const basis = main!.basis;
 	assert.match(basis, /approv\w*[^\n]*nodes[^\n]*even[^\n]*reference/i);
-	assert.match(basis, /### P1: Proof \(new\)/i);
+	assert.match(basis, /^### P1: Proof$/im);
 	assert.match(
 		basis,
-		/## Riders[\s\S]*A: Rider \(new\)[\s\S]*Origin: evidence[\s\S]*Disposition: bind/,
+		/## Riders[\s\S]*A: Rider[\s\S]*Origin: evidence[\s\S]*Disposition: bind/,
 	);
 	assert.match(
 		basis,
-		/B: Rider \(new\)[\s\S]*Origin: incidental[\s\S]*Disposition: open/,
+		/B: Rider[\s\S]*Origin: incidental[\s\S]*Disposition: open/,
+	);
+	assert.doesNotMatch(
+		basis,
+		/\(new\)|previous round|last round|preceding round/i,
 	);
 	for (const value of [
 		audit.exists,
@@ -330,7 +334,8 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 	const basis = x.asks()[0]!.basis;
 	for (const n of annotations) assert.ok(basis.includes(n.text));
 	assert.ok(basis.includes(reply(1).reason));
-	assert.match(basis, /1\. Prefer native\. \[1:4\]\n> /);
+	assert.match(basis, /1\. Prefer native\.\n> /);
+	assert.doesNotMatch(basis, /\[1:4\]|\[2:5\]/);
 	const before = x.state();
 	x.answer("mandate/1", "approve");
 	assert.deepEqual(x.state(), before);
@@ -395,6 +400,66 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	x.answer("mandate/2", "approve");
 	assert.ok(mandate.mandateLabels(x.state().mandate!).includes("R2"));
 });
+test("a changed rider and proof include their complete previous content", () => {
+	const x = review();
+	x.answer("mandate/1", "rework");
+	x.publish({
+		...draft,
+		riders: draft.riders.map((r) =>
+			r.label === "B" ? { ...r, disposition: "bind" } : r,
+		),
+		checks: [{ ...draft.checks[0]!, timeoutMs: 120 }],
+	});
+	const entries = x.asks()[0]!.basis.split(/^### /m);
+	const rider = entries.find((s) => s.startsWith("B: Rider"))!;
+	const proof = entries.find((s) => s.startsWith("P1: Proof"))!;
+	assert.match(
+		rider,
+		/Disposition: bind[\s\S]*^#### Previously$[\s\S]*Sort imports\.[\s\S]*Origin: incidental[\s\S]*Disposition: open/m,
+	);
+	assert.match(
+		proof,
+		/Timeout: 120 ms[\s\S]*^#### Previously$[\s\S]*\["check","same IR"\][\s\S]*Timeout: 90 ms[\s\S]*Reference: Proof ADR/m,
+	);
+});
+
+test("the reply quotes the exact multiline owner passage and keeps only stored offsets", () => {
+	const x = review();
+	const basis = x.asks()[0]!.basis;
+	const passage = `Current callers: ${seam.callersNow}\n\nFuture callers: ${seam.callersLater}`;
+	const start = basis.indexOf(passage);
+	assert.ok(start >= 0);
+	const range = { start, end: start + passage.length };
+	x.answer("mandate/1", "rework", [
+		{ n: 1, text: "Also include the CLI.", range },
+	]);
+	x.publish(draft, [reply(1)]);
+	assert.deepEqual(x.state().rounds[0]?.answer?.annotations[0]?.range, range);
+	const rendered = x.asks()[0]!.basis;
+	assert.ok(
+		rendered.includes(
+			`> Current callers: ${seam.callersNow}\n> \n> Future callers: ${seam.callersLater}`,
+		),
+	);
+	assert.ok(!rendered.includes(`[${range.start}:${range.end}]`));
+});
+
+test("revision input includes the current draft and owed annotations but not earlier replies", () => {
+	const x = review();
+	x.answer("mandate/1", "rework", [note(1, "Earlier resolved question.")]);
+	x.publish({ ...draft, never: "No duplicate parser." }, [
+		{ ...reply(1), reason: "Explanation already delivered." },
+	]);
+	x.answer("mandate/2", "rework", [note(1, "Tell me about the API now.")]);
+	const input = x.input();
+	assert.match(input, /No duplicate parser\./);
+	assert.match(input, /Tell me about the API now\./);
+	assert.doesNotMatch(
+		input,
+		/Earlier resolved question|Explanation already delivered|Replies to the preceding round/,
+	);
+});
+
 test("decline records every still-owed annotation, not already answered notes, and withdraws all work", () => {
 	const x = review();
 	x.answer("mandate/1", "rework", [note(1, "Already addressed.")]);
