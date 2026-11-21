@@ -129,9 +129,10 @@ function project(
 	cwd: string | null | undefined,
 	pinned?: readonly ProjectPrincipleFile[],
 ) {
-	const local = cwd || pinned
-		? readDirectory(join(cwd ?? "", ".keel/principles"), true, pinned)
-		: { principles: [], errors: [] };
+	const local =
+		cwd || pinned
+			? readDirectory(join(cwd ?? "", ".keel/principles"), true, pinned)
+			: { principles: [], errors: [] };
 	for (const p of local.principles)
 		if (keel.some((k) => k.name === p.name)) p.name = `project/${p.name}`;
 	return local;

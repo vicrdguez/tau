@@ -161,7 +161,11 @@ export function asks(s: State): Ask[] {
 	return [
 		{
 			subject: subject("handover"),
-			title: title({ trunk, sha: h.sha, goal: s.mandate!.intent }).trim(),
+			title: title({
+				trunk,
+				sha: h.sha,
+				goal: s.mandate!.intent.trim().split("\n", 1)[0]!,
+			}).trim(),
 			choices: ["accept", "reject"],
 			basis: handover({
 				sha: h.sha,
