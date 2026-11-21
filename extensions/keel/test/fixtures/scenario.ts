@@ -49,8 +49,13 @@ export async function openScriptedWorkflow(
 	registry.install(k.extension);
 	const roles = ["designer", "coordinator", "worker", "verifier"];
 	const provider = fauxProvider({ models: roles.map((id) => ({ id })) });
+	const queueProvider = fauxProvider({
+		provider: "queue-fixture",
+		models: [{ id: "investigator" }],
+	});
 	const models = createModels();
 	models.setProvider(provider.provider);
+	models.setProvider(queueProvider.provider);
 	const store = await openStore(
 		storage,
 		{
@@ -77,7 +82,7 @@ export async function openScriptedWorkflow(
 					build: "faux/coordinator",
 					worker: "faux/worker",
 					verify: "faux/verifier",
-					queue: "faux/designer",
+					queue: "queue-fixture/investigator",
 				}),
 			ctx,
 		);
@@ -144,7 +149,7 @@ export async function openScriptedWorkflow(
 		}
 		assert.deepEqual(errors, []);
 	}
-	return { store, root, provider, turn, settle };
+	return { store, root, provider, queueProvider, turn, settle };
 }
 
 export async function openScenario(
@@ -155,12 +160,8 @@ export async function openScenario(
 ) {
 	const first = phase === "rework" || phase === "through-publish";
 	const rework = phase === "rework";
-	const { store, root, provider, turn, settle } = await openScriptedWorkflow(
-		cwd,
-		storage,
-		first,
-		runner,
-	);
+	const { store, root, provider, queueProvider, turn, settle } =
+		await openScriptedWorkflow(cwd, storage, first, runner);
 	const { harness } = store;
 	const script: FauxResponseStep[] = [];
 	const call = (...args: Parameters<typeof turn>) => script.push(turn(...args));
@@ -273,6 +274,29 @@ export async function openScenario(
 		});
 	}
 	provider.setResponses(script);
+	if (rework || phase === "through-land") {
+		queueProvider.setResponses([
+			turn(
+				"investigator",
+				"report_investigation",
+				{
+					finding: 1,
+					classification: "determined",
+					evidence:
+						"The published bytes match; the observation concerns the approved book format.",
+					size: "small",
+					cause: "book readers",
+					recommendation: "defer",
+					reference: "Owner's approved format",
+					nodes: ["format"],
+					batchWith: [],
+				},
+				note,
+				"The published bytes match.",
+				"format",
+			),
+		]);
+	}
 	async function assertHistory(expected: {
 		publishes: number;
 		reviews: number;
@@ -354,9 +378,48 @@ export async function openScenario(
 				.snapshot(stateDoc(ProjectState), ctx)
 				.then((p) => Object.values(p?.asks ?? {}));
 		const open = await asks();
-		assert.equal(open.length, 1, "just the hand-over is open");
-		const [handOver] = open;
+		assert.equal(
+			open.length,
+			2,
+			"the verifier note and the hand-over are independent",
+		);
+		const handOver = open.find((ask) => ask.lane === "verify");
+		const triage = open.find((ask) => ask.lane === "queue");
 		assert.ok(handOver);
+		assert.ok(triage);
+		const finding = await harness.commit(
+			(tx) => decision(tx, triage.decision),
+			ctx,
+		);
+		assert.equal(finding?.status, "open");
+		assert.deepEqual(finding?.choices, ["build", "defer", "drop"]);
+		const investigated = await harness.commit(
+			(tx) => tx.entry(finding!.basis),
+			ctx,
+		);
+		assert.match(
+			JSON.stringify(investigated?.data),
+			/No other readers changed/,
+		);
+		assert.match(
+			JSON.stringify(investigated?.data),
+			/observation concerns the approved book format/,
+		);
+		assert.equal(
+			(
+				await fauxAnswer(store, finding!.id, {
+					basis: finding!.basis,
+					choice: "defer",
+					annotations: [],
+				})
+			).kind,
+			"answered",
+		);
+		await settle();
+		assert.deepEqual(
+			(await asks()).map((ask) => ask.decision),
+			[handOver.decision],
+		);
 		const d = await harness.commit(
 			(tx) => decision(tx, handOver.decision),
 			ctx,

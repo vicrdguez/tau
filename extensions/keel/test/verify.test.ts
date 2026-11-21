@@ -213,6 +213,196 @@ function flow() {
 		asks,
 	};
 }
+const findingHold = (cause: string, item = "bug") => ({
+	kind: "queue_hold",
+	item,
+	cause,
+	evidence: "The rounding boundary may be wrong.",
+});
+const revised = (items: string[] = ["bug"]) => ({
+	kind: "mandate_revised",
+	items,
+	mandate: {
+		...mandate,
+		checks: [{ id: "rounding", argv: ["probe", "rounding"], timeoutMs: 13 }],
+	},
+	evidence: "Use the revised ledger boundary.",
+});
+
+test("verifier notes file their own evidence against the tested commit and nodes without holding it", () => {
+	const x = flow();
+	x.publish("note-head", [], "bug", "base", { nodes: ["sums"] });
+	x.checkout();
+	const check = x.pass();
+	const filings = check.send?.filter((m) => m.lane === "queue") ?? [];
+	assert.equal(filings.length, 1);
+	assert.equal(filings[0]?.work, null);
+	const filing = filings[0]!.event;
+	assert.deepEqual(
+		[
+			filing.kind,
+			filing.source,
+			filing.item,
+			filing.sha,
+			filing.nodes,
+			filing.blocking,
+		],
+		["intake", "verifier", "bug", "note-head", ["sums"], false],
+	);
+	assert.equal(filing.text, "monitor latency");
+	assert.match(String(filing.report), /totals now balance/);
+	x.clean();
+	assert.equal(x.effect("merge_item").op.item, "note-head");
+});
+
+test("an unannotated hand-over rejection stays open and files nothing", () => {
+	const x = flow();
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const [open] = x.asks();
+	const result = x.apply({
+		kind: "answered",
+		subject: open!.subject,
+		choice: "reject",
+		annotations: [{ n: 1, text: "  " }],
+	});
+	assert.deepEqual(result.send, []);
+	assert.equal(x.asks()[0]?.subject, open?.subject);
+});
+
+test("a classified item hold gates verifier tools and keeps siblings running until the last cause drops", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	const first = x.agent();
+	x.publish("sibling-head", [], "sibling");
+	x.checkout();
+	x.apply(findingHold("first"));
+	x.apply(findingHold("second"));
+	assert.deepEqual(
+		x.agents().map((a) => a.key),
+		["verify/sibling"],
+	);
+	assert.ok(
+		"reject" in
+			verify.reduce(
+				x.state(),
+				{
+					kind: "verdict",
+					agent: first.key,
+					outcome: "pass",
+					text: "old evidence",
+					blocks: [],
+					notes: [],
+				},
+				world,
+			),
+	);
+	const stalled = x.apply({
+		kind: "agent_stalled",
+		agent: first.key,
+		tokens: [first.expects[0]!.token],
+		cause: "stopped",
+		lastWords: "stale",
+	});
+	assert.deepEqual(stalled.send, []);
+	x.apply({ kind: "queue_release", cause: "first" });
+	assert.deepEqual(
+		x.agents().map((a) => a.key),
+		["verify/sibling"],
+	);
+	x.apply({
+		kind: "queue_release",
+		cause: "second",
+		direction: "Before proceeding, inspect the test.",
+	});
+	const resumed = x.agents().find((a) => a.key === first.key)!;
+	assert.notEqual(resumed.expects[0]?.token, first.expects[0]?.token);
+	assert.match(resumed.expects[0]!.input!(), /inspect the test/);
+});
+
+test("a held unclaimed checkout does not start; drop restores its immutable plan", () => {
+	const x = flow();
+	x.publish();
+	const first = x.effect("checkout");
+	x.apply(findingHold("boundary"));
+	assert.deepEqual(x.effects(), []);
+	x.apply({ kind: "queue_release", cause: "boundary" });
+	assert.deepEqual(x.effect("checkout"), first);
+});
+
+test("a held unclaimed merge yields the slot; dropping the hold re-pins to the sibling's merged head", () => {
+	const x = flow();
+	x.mergedBeforeConflict();
+	const old = x.effect("merge_item");
+	x.apply(findingHold("boundary"));
+	assert.deepEqual(x.effects(), []);
+	x.publish("sibling-head", [], "sibling");
+	x.checkout();
+	x.pass();
+	x.clean();
+	assert.equal(x.effect("merge_item").op.item, "sibling-head");
+	x.done("merge_item", { kind: "merged", sha: "sibling-merged", checks: [] });
+	x.clean();
+	x.apply({ kind: "queue_release", cause: "boundary" });
+	const next = x.effect("merge_item");
+	assert.notEqual(old.key, next.key);
+	assert.equal(next.op.expected, "sibling-merged");
+});
+
+test("a revision returns obsolete publications after a claimed checkout settles, and removes the original target", () => {
+	const x = flow();
+	x.publish();
+	const pending = x.effect("checkout");
+	x.running.add(pending.key);
+	x.apply(findingHold("boundary"));
+	const changed = x.apply(revised());
+	assert.ok(!changed.send?.some((m) => m.event.kind === "rework"));
+	assert.ok(
+		!x.effects().some((e) => (e.spec.op as LaneEvent).kind === "remove"),
+	);
+	x.running.delete(pending.key);
+	const done = x.apply({
+		kind: "effect_done",
+		key: pending.key,
+		result: { kind: "checkout", playbook: null },
+	});
+	assert.equal(x.agents().length, 0);
+	assert.deepEqual(x.effect("remove").op.target, pending.op);
+	assert.match(
+		String(done.send?.find((m) => m.lane === "build")?.event.evidence),
+		/revised ledger boundary/,
+	);
+});
+
+test("a revision repins a queued merge's proof but records a claimed merge without rewriting it", () => {
+	for (const claimed of [false, true]) {
+		const x = flow();
+		x.mergedBeforeConflict();
+		const first = x.effect("merge_item");
+		if (claimed) x.running.add(first.key);
+		x.apply(revised(claimed ? ["bug"] : []));
+		const next = x.effect("merge_item");
+		if (claimed) assert.deepEqual(next, first);
+		else {
+			assert.notEqual(next.key, first.key);
+			assert.deepEqual(next.op.checks, revised().mandate.checks);
+		}
+		x.running.delete(first.key);
+		const done = x.done("merge_item", {
+			kind: "merged",
+			sha: "merged",
+			checks: [],
+		});
+		assert.deepEqual(
+			done.send?.filter((m) => m.lane === "build").map((m) => m.event.kind),
+			["merged"],
+		);
+		assert.equal((x.effect("remove").op.target as LaneEvent).key, next.op.key);
+		assert.deepEqual(x.apply(revised()).send, []);
+	}
+});
+
 const resume = (file: LaneEvent) => ({
 	kind: "resume",
 	cause: file.cause!,
@@ -1167,7 +1357,17 @@ for (const choice of ["reject", "accept"])
 		assert.deepEqual(closed.send?.map((m) => [m.lane, m.event.kind]).sort(), [
 			["build", "closed"],
 			["design", "closed"],
+			...(choice === "reject" ? [["queue", "intake"]] : []),
 		]);
+		const filing = closed.send?.find((m) => m.lane === "queue");
+		if (choice === "reject") {
+			assert.equal(filing?.work, null);
+			assert.equal(filing?.event.source, "owner");
+			assert.equal(filing?.event.sha, "prepared");
+			assert.equal(filing?.event.blocking, false);
+			assert.match(String(filing?.event.text), /missing overflow probe/);
+			assert.match(String(filing?.event.report), /fixed totals/);
+		}
 		assert.equal(x.asks().length, 0);
 		if (choice === "reject")
 			assert.match(JSON.stringify(x.state()), /missing overflow probe/);
