@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { extension } from "../src/index.ts";
 
 const synthesis =
-	"draft.intent draft.done draft.seams.label draft.seams.callersNow draft.seams.callersLater draft.seams.usage draft.seams.signature draft.seams.owner draft.seams.dependencies draft.nodes.label draft.nodes.rule draft.nodes.probe draft.never draft.tradeoffs draft.alternatives draft.settlements.label draft.settlements.ruling draft.checks.id draft.checks.argv draft.checks.timeoutMs draft.riders.label draft.riders.text draft.riders.origin draft.riders.disposition draft.references.label draft.references.source grafts.seat grafts.label grafts.text outcomes.source outcomes.n outcomes.kind outcomes.label outcomes.reason";
+	"draft.intent draft.done draft.seams.label draft.seams.callersNow draft.seams.callersLater draft.seams.usage draft.seams.signature draft.seams.owner draft.seams.dependencies draft.nodes.label draft.nodes.rule draft.nodes.probe draft.never draft.tradeoffs draft.alternatives draft.settlements.label draft.settlements.ruling draft.checks.id draft.checks.argv draft.checks.timeoutMs draft.riders.label draft.riders.text draft.riders.origin draft.riders.disposition draft.references.label draft.references.source grafts.seat grafts.label grafts.text outcomes.source outcomes.n outcomes.label outcomes.reason";
 
 // These are model-authored facts, never repository identities. Check every
 // registered tool (including nested Mandate and item records), not TS cast syntax.
