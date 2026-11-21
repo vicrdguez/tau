@@ -124,7 +124,11 @@ function setup(
 		};
 		const merge = (item: string) => {
 			const routes = send({ kind: "merged", item, head: tip });
-			done({ kind: "removed" });
+			const cleanup = effects().find(
+				(e) => (e.spec.op as LaneEvent)?.kind === "remove",
+			);
+			assert.ok(cleanup);
+			done({ kind: "removed" }, cleanup.key);
 			return routes;
 		};
 		send({ kind: "bound", mandate: initial });
