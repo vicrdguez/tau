@@ -5,6 +5,7 @@ import {
 	type EffectDecl,
 	type KernelEvent,
 	type Lane,
+	type Message,
 	type Reduction,
 	type StaticFacts,
 	type World,
@@ -30,6 +31,8 @@ import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import {
 	addDirection,
 	addQueueHold,
+	bindFixes,
+	type FindingFix,
 	applyRevision,
 	releaseQueueHold,
 } from "./live-plan.ts";
@@ -56,7 +59,7 @@ export { buildTools } from "./tools.ts";
 type Event =
 	| BuildUpdate
 	| Resume
-	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
+	| { kind: "plan"; items: Goal[]; replies?: Reply[]; fixes?: FindingFix[] }
 	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
 	| { kind: "handoff"; summary: string; risk: string }
 	| {
@@ -107,6 +110,10 @@ function schedule(s: Build, w: World) {
 		)
 			continue;
 		i.parked = false;
+		if (i.refreshAfterFix) {
+			i.refreshAfterFix = false;
+			prepare(s, i, w);
+		}
 		i.seq = ++s.seq;
 		slots--;
 	}
@@ -486,10 +493,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			schedule(s, w);
 			return { state, send };
 		}
-		case "plan_finding":
+		case "plan_finding": {
+			const hold = s.queueHolds.find((h) => h.cause === e.cause);
+			if (hold) hold.evidence = e.text;
 			s.findings.push({ ...e, cause: e.cause ?? null });
 			yieldCoordinator(s);
 			break;
+		}
 		case "propose_revision":
 			if (s.revision)
 				return { reject: "A Mandate revision is already being planned." };
@@ -517,7 +527,8 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				return activation;
 			}
 			const reject = validatePlan(s, e.items, replies);
-			if (reject) return { reject };
+			const fixError = reject ?? bindFixes(s, e.items, e.fixes ?? []);
+			if (fixError) return { reject: fixError };
 			if (!s.items.length) s.approvalReplies = replies;
 			s.items.push(...e.items.map(newItem));
 			s.findings.splice(0, c.findings);
@@ -638,7 +649,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
 			addDirection(i, e.direction ?? "");
-			i.input = e.reason === "mandate_revision" ? "superseded" : e.kind;
+			i.input =
+				e.reason === "mandate_revision"
+					? "superseded"
+					: e.reason === "defect_fixed"
+						? "resume"
+						: e.kind;
+			if (e.reason === "defect_fixed") i.parked = i.refreshAfterFix = true;
 			i.stage = "building";
 			i.verified = false;
 			i.evidence = e.evidence;
@@ -660,7 +677,43 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			s.head = i.mergedHead = e.head;
 			i.stage = "cleaning";
 			i.retry = 0;
-			const send = settleMovedPreparations(s, w);
+			const send: Message[] = [];
+			for (const h of s.queueHolds.filter((h) => h.fix === i.id)) {
+				for (const item of s.items.filter((item) =>
+					h.items.includes(item.id),
+				)) {
+					if (item.stage === "published")
+						send.push({
+							lane: "verify",
+							work: w.work,
+							event: {
+								kind: "defect_fixed",
+								item: item.id,
+								evidence: h.evidence,
+							},
+						});
+					else if (item.stage === "building") item.refreshAfterFix = true;
+				}
+				send.push(
+					...releaseQueueHold(
+						s,
+						h.cause,
+						`Fix ${i.id} merged. Start from the new build head.`,
+						w,
+					),
+				);
+				send.push({
+					lane: "queue",
+					work: null,
+					event: {
+						kind: "defect_merged",
+						work: w.work,
+						cause: h.cause,
+						item: i.id,
+					},
+				});
+			}
+			send.push(...settleMovedPreparations(s, w));
 			schedule(s, w);
 			return { state, send };
 		}

@@ -95,6 +95,21 @@ export const queueLane = defineLane(
 					? withTriage(state, result)
 					: { reject: result.reject };
 			}
+			if (event.kind === "defect_merged")
+				return withTriage(state, {
+					state: {
+						...state.triage,
+						entries: state.triage.entries.map((f) =>
+							f.intake.work === event.work && `queue/${f.id}` === event.cause
+								? {
+										...f,
+										status: "settled",
+										disposition: `fixed by ${event.item}`,
+									}
+								: f,
+						),
+					},
+				});
 			if (event.kind === "revision_disposition") {
 				const causes = event.causes as string[];
 				const disposition = String(event.disposition);

@@ -42,6 +42,7 @@ export function addQueueHold(
 			nodes: [],
 			evidence: "",
 			forwarded: [],
+			fix: null,
 		};
 		s.queueHolds.push(h);
 	}
@@ -108,6 +109,33 @@ export function releaseQueueHold(
 		: [];
 }
 
+export type FindingFix = { cause: string; item: string };
+export function bindFixes(s: Build, goals: Goal[], fixes: FindingFix[]) {
+	const due = s.findings
+		.slice(0, s.coordinator.findings)
+		.flatMap((f) =>
+			s.queueHolds.filter((h) => h.cause === f.cause && h.fix === null),
+		);
+	const byId = new Map([...s.items, ...goals].map((g) => [g.id, g]));
+	if (
+		new Set(fixes.map((f) => f.cause)).size !== due.length ||
+		fixes.length !== due.length
+	)
+		return "Name one new item to fix each held defect using fixes.";
+	for (const h of due) {
+		const id = fixes.find((f) => f.cause === h.cause)?.item;
+		if (!id || !goals.some((g) => g.id === id))
+			return `Name a new fix item for ${h.cause}.`;
+		const blocked = new Set(h.items);
+		const dependsOnBlocked = (id: string): boolean =>
+			blocked.has(id) || (byId.get(id)?.deps ?? []).some(dependsOnBlocked);
+		if (dependsOnBlocked(id))
+			return `Fix ${h.cause} without depending on its blocked item.`;
+		h.fix = id;
+	}
+	return null;
+}
+
 export const record = (i: Item) =>
 	i.verified || i.stage === "cleaning" || i.stage === "merged";
 
@@ -137,6 +165,10 @@ function revisionPlan(
 			return `Keep the dependencies of ${i.id}. Only a held, affected item that has not been verified can change dependencies.`;
 		if (affected && record(i) && !newGoals.some((g) => g.deps.includes(i.id)))
 			return `Add a new correction that depends on verified item ${i.id}; keep its record intact.`;
+	}
+	for (const h of s.queueHolds) {
+		if (h.fix && !byId.has(h.fix))
+			return `Keep item ${h.fix} until it fixes ${h.cause}.`;
 	}
 	const encode =
 		s.items.find((i) => i.kind === "encode" && i.stage !== "planned") ??

@@ -32,11 +32,13 @@ export const buildTools = [
 				}),
 			),
 			replies: opt(repliesSchema),
+			fixes: opt(arr(obj({ cause: text, item: text }))),
 		}),
-		event: ({ items, replies }) => ({
+		event: ({ items, replies, fixes }) => ({
 			kind: "plan",
 			items,
 			replies: replies ?? [],
+			fixes: fixes ?? [],
 		}),
 	}),
 	defineLaneTool({

@@ -10,4 +10,4 @@ Bound Mandate:
 {{mandate}}
 
 {{direction}}
-Call `publish_plan` with only the new items. Keel will ask for each brief when the item is ready.
+Call `publish_plan` with only the new items. For each held defect, use `fixes` to pair its `cause` with the new item that fixes it. A fix item cannot depend on the blocked item. Keel will ask for each brief when the item is ready.

@@ -24,6 +24,7 @@ export type Item = Goal & {
 	/** Cited by a candidate brief that could not start this item. */
 	awaitingNodes: string[];
 	parked: boolean;
+	refreshAfterFix: boolean;
 	verified: boolean;
 	stage:
 		| "planned"
@@ -70,6 +71,7 @@ export type Build = {
 		nodes: string[];
 		evidence: string;
 		forwarded: string[];
+		fix: string | null;
 	}[];
 	repo: RepoInfo | null;
 	branches: { base: string; trunk: string } | null;
@@ -177,6 +179,7 @@ export function newItem(goal: Goal): Item {
 		stage: "planned",
 		awaitingNodes: [],
 		parked: false,
+		refreshAfterFix: false,
 		verified: false,
 		brief: null,
 		worker: null,

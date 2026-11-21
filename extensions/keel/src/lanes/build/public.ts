@@ -17,6 +17,7 @@ export type RevisionProposal = {
 	nodes: string[];
 	text?: string;
 };
+export type SupersedeReason = "mandate_revision" | "defect_fixed";
 export type BuildUpdate =
 	| { kind: "bound"; mandate: Mandate }
 	| { kind: "item_verified"; item: string }
@@ -38,7 +39,7 @@ export type BuildUpdate =
 			head: Sha;
 			inheritedTrunk?: Sha;
 			direction?: string;
-			reason?: "mandate_revision";
+			reason?: SupersedeReason;
 			threads: string[];
 			evidence: string;
 	  }

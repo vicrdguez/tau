@@ -90,7 +90,10 @@ type V1 = {
 		brief: string;
 		paths: string[];
 		nodes: string[];
-		obsolete: string | null;
+		obsolete: {
+			evidence: string;
+			reason: "mandate_revision" | "defect_fixed";
+		} | null;
 		rulings: RulingV1[];
 		addresses: string[];
 		phase:

@@ -68,6 +68,7 @@ type V1 = {
 		nodes: string[];
 		evidence: string;
 		forwarded: string[];
+		fix: string | null;
 	}[];
 	repo: RepoV1 | null;
 	branches: { base: string; trunk: string } | null;
@@ -108,6 +109,7 @@ type V1 = {
 		deps: string[];
 		awaitingNodes: string[];
 		parked: boolean;
+		refreshAfterFix: boolean;
 		verified: boolean;
 		stage:
 			| "planned"

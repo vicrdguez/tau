@@ -57,6 +57,7 @@ type Event =
 	| { kind: "slot_granted" | "cancel" }
 	| { kind: "reset_counts"; item: string }
 	| { kind: "queue_hold"; item: string; cause: string }
+	| { kind: "defect_fixed"; item: string; evidence: string }
 	| { kind: "queue_release"; cause: string; direction?: string }
 	| {
 			kind: "mandate_revised";
@@ -170,7 +171,7 @@ function transition(prev: State, world: World) {
 		evidence: string,
 		threads: string[],
 		inheritedTrunk?: Sha,
-		reason?: "mandate_revision",
+		reason?: import("../build/public.ts").SupersedeReason,
 	) {
 		c.phase = "returned";
 		if (c.scope !== "item") release();
@@ -294,12 +295,12 @@ function transition(prev: State, world: World) {
 		back(
 			c,
 			"rework",
-			c.obsolete!,
+			c.obsolete!.evidence,
 			s.verdicts
 				.findLast((v) => v.item === c.item)
 				?.blocks.map((b) => b.thread) ?? [],
 			undefined,
-			"mandate_revision",
+			c.obsolete!.reason,
 		);
 		c.obsolete = null;
 	}
@@ -450,7 +451,7 @@ function transition(prev: State, world: World) {
 					clearIntegration(j);
 					if (r.kind === "conflict" || r.kind === "checks_failed") {
 						if (c.obsolete) {
-							c.obsolete += `\n${JSON.stringify(r, null, 2)}`;
+							c.obsolete.evidence += `\n${JSON.stringify(r, null, 2)}`;
 							returnObsolete(c);
 							break;
 						}
@@ -577,6 +578,14 @@ function transition(prev: State, world: World) {
 				}
 				break;
 			}
+			case "defect_fixed": {
+				const c = find(e.item);
+				if (!c || c.phase === "merged" || c.phase === "returned") break;
+				withdrawMerge(c.item);
+				c.obsolete = { evidence: e.evidence, reason: "defect_fixed" };
+				returnObsolete(c);
+				break;
+			}
 			case "mandate_revised": {
 				const proofChanged =
 					JSON.stringify(e.mandate.checks) !==
@@ -592,7 +601,7 @@ function transition(prev: State, world: World) {
 					const affected = e.items.includes(c.item);
 					if (proofChanged || affected) withdrawMerge(c.item);
 					if (!affected) continue;
-					c.obsolete = e.evidence;
+					c.obsolete = { evidence: e.evidence, reason: "mandate_revision" };
 					returnObsolete(c);
 				}
 				break;

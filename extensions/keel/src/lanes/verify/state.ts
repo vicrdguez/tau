@@ -19,7 +19,10 @@ export type Review = {
 	brief: string;
 	paths: string[];
 	nodes: string[];
-	obsolete: string | null;
+	obsolete: {
+		evidence: string;
+		reason: "mandate_revision" | "defect_fixed";
+	} | null;
 	rulings: Ruling[];
 	addresses: string[];
 	phase:
