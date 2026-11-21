@@ -94,6 +94,26 @@ test("precedent-setting work: two explorers, two candidates, judge and challenge
 	assert.match(git(root, "show", "trunk:book-report.sh"), /read_book book/);
 });
 
+test("scenario 2 puts the new and replaced bases at the top of the switched review, even when the Mandate entries are unchanged", async (t) => {
+	const { root } = await fixture(t);
+	await seedBookPolicy(root);
+	const s = await openReview(root, new MemoryStorage(), true);
+	t.after(() => s.harness.close(ctx));
+	await s.start();
+	const first = (await s.review("mandate/1")).text;
+	await s.switchBase();
+	const second = (await s.review("mandate/2")).text;
+	if (process.env.KEEL_DISPATCH_FIX_RENDERS) {
+		await writeFile("/tmp/keel-dispatch-fix-round1.md", first);
+		await writeFile("/tmp/keel-dispatch-fix-round2.md", second);
+	}
+	assert.doesNotMatch(first.split("\n## Mandate", 1)[0]!, /Base switched/);
+	assert.match(
+		second.split("\n## Mandate", 1)[0]!,
+		/Round 2\. Base switched to `arena_seat_2`, replacing `arena_seat_1`\. Since round 1: no entries changed\./,
+	);
+});
+
 test("declining the completed arena leaves six settled children and no build or open decisions", {
 	timeout: 5000,
 }, async (t) => {

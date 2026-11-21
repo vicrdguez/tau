@@ -31,6 +31,10 @@ The installed-API probe was committed before the dispatcher (`00e32e8`). The sam
 - Decline from review or a failed dispatch withdraws all design declarations and does not bind.
 - A stopped designer resumes the same turn under a new token without redispatch.
 - Cancelling a pending arena withdraws the plan and a late effect cannot start the next stage.
+- A candidate's own unasked decisions, including a judge omission, appear beside the judge's list for each candidate source.
+- A labelled outcome shows the node's actual text or the rider's actual text and disposition.
+- A judge's Markdown reason is quoted under its score and cannot introduce a review heading.
+- The unasked-decisions heading names all source types; Ground context and design considerations are outside the Mandate.
 - Declining a completed arena in Tau leaves six settled child conversations, no tasks, no decision and no build.
 
 ## Experiments
@@ -57,4 +61,5 @@ The installed-API probe was committed before the dispatcher (`00e32e8`). The sam
 
 ## Scenario 2
 
+- A base switch names both new and replaced candidates at the top even when no Mandate entries changed.
 - Two Ground explorers read the real project; candidates receive identical prompts; judge, grafts, three riders and challenge appear in review; two annotation answers precede approval and the three-item dependent landing.

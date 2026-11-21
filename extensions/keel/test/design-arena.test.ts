@@ -627,7 +627,9 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 	assert.deepEqual(heads, [
 		"Mandate",
 		"Riders",
-		"What the base decided that the question did not ask",
+		"Ground context",
+		"Design considerations",
+		"Unasked decisions from the base, graft sources and experiments",
 		"Challenger's objections",
 		"Evidence (does not bind)",
 	]);
@@ -649,6 +651,73 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 		assert.ok(decision.basis.includes(part), part);
 	assert.deepEqual(design.effects(review, world), []);
 	assert.equal(input(review), "");
+});
+
+function beforeEvidence(basis: string) {
+	return basis.split("\n## Evidence (does not bind)", 1)[0]!;
+}
+
+test("review shows each source's own unasked decisions beside the judge's list, including a decision the judge dropped", () => {
+	const extra = "Keep an append-only audit log for rejected orders.";
+	const s = complete(candidateTurn(), {
+		...candidates,
+		[seats[0]!]: `${candidate(seats[0]!)}\n\n${extra}\n\n## Unrelated heading\nDo not copy this into the decision list.`,
+	});
+	const review = step(
+		answeringTurn(challengeTurn(synthesisTurn(s))),
+		answerChallenger,
+	).state;
+	const decisions = beforeEvidence(ask(review).basis).split(
+		"\n### arena_seat_1\n",
+	)[1]!;
+	assert.match(
+		decisions,
+		/Default of arena_seat_1[\s\S]*Keep an append-only audit log[\s\S]*Judge's independent observation of arena_seat_1/,
+	);
+	assert.match(
+		decisions,
+		/Default of arena_seat_2[\s\S]*Judge's independent observation of arena_seat_2/,
+	);
+	assert.doesNotMatch(decisions, /Do not copy this/);
+});
+
+test("review pairs each labelled outcome with node text or rider text and disposition", () => {
+	const mapped = {
+		...publish,
+		outcomes: [
+			{ source: seats[0]!, n: 1, kind: "rider", label: "R2" },
+			publish.outcomes[1]!,
+		],
+	};
+	const review = step(
+		answeringTurn(challengeTurn(synthesisTurn(), mapped)),
+		answerChallenger,
+	).state;
+	const basis = beforeEvidence(ask(review).basis);
+	assert.match(
+		basis,
+		/Rider `R2`[^\n]*\n[\s\S]*Expose a rejected-order count\.[\s\S]*Disposition: open/,
+	);
+	assert.match(
+		basis,
+		/Node `L1`[^\n]*\n[\s\S]*Check before placing\.[\s\S]*Place an over-limit order\./,
+	);
+});
+
+test("judge reasons with headings are quoted under their score, not inserted as review headings", () => {
+	const report = judge.replace(
+		"Judge's score for arena_seat_1",
+		"## Rationale\\nIndependent evidence.",
+	);
+	const review = step(
+		answeringTurn(
+			challengeTurn(complete(judgeTurn(), { arena_judge: report })),
+		),
+		answerChallenger,
+	).state;
+	const basis = ask(review).basis;
+	assert.match(basis, /^> ## Rationale\n> Independent evidence\.$/m);
+	assert.doesNotMatch(basis, /^## Rationale$/m);
 });
 
 test("the owner's candidate choice pins the next synthesis base, retains the earlier round, and asks again before binding", () => {

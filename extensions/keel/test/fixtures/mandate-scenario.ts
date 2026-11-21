@@ -191,6 +191,7 @@ export async function openReview(
 	review(subject: string): Promise<Review>;
 	subjects(): Promise<string[]>;
 	rework(): Promise<void>;
+	switchBase(): Promise<void>;
 	scriptRevision(): void;
 	settle(): Promise<void>;
 	reworkRider(): Promise<void>;
@@ -385,6 +386,30 @@ export async function openReview(
 			objection,
 			dispositions[0]!.reason,
 			...riders.map((rider) => rider.text),
+		]);
+	}
+	async function switchBase() {
+		challenge();
+		provider.setResponses([
+			turn("designer", "publish_mandate", {
+				draft,
+				base: seats[1],
+				grafts: [],
+				outcomes: [
+					{ source: seats[1], n: 1, kind: "rider", label: "indentation" },
+				],
+				replies: [
+					{
+						n: 1,
+						status: "considered",
+						reason: "The new base uses the same shell interface.",
+					},
+				],
+			}),
+			respond(),
+		]);
+		await answer("mandate/1", `base:${seats[1]}`, [
+			[readSeam.usage, "Take seat 2 as the base."],
 		]);
 	}
 	function scriptRevision() {
@@ -624,6 +649,7 @@ export async function openReview(
 		review,
 		subjects,
 		rework,
+		switchBase,
 		scriptRevision,
 		settle,
 		reworkRider,
