@@ -55,6 +55,7 @@ const proposal = {
 	mandate: revised,
 	causes: ["queue/1"],
 	nodes: ["ledger"],
+	changes: "ledger: rule, falsifying probe",
 	text: "Correct the ledger crossing",
 };
 function setup(
@@ -357,6 +358,7 @@ test("revision activation and the edited plan take effect together, retaining a 
 	b.send(hold("queue/1", null, ["ledger"]));
 	assert.deepEqual(b.send(proposal), []);
 	assert.match(b.coord()?.input?.() ?? "", /New ledger crossing/);
+	assert.match(b.coord()?.input?.() ?? "", /ledger: rule, falsifying probe/);
 	assert.match(b.coord()?.input?.() ?? "", /1\. Test tie values/);
 	const other = b.publish("other")[0]?.event;
 	assert.deepEqual(other?.mandate, mandate);
