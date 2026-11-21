@@ -18,6 +18,7 @@ const revisionNotes = [
 	"Choose the current guide explicitly.",
 ];
 const approvalNote = "Exercise the boundary before migrating book.";
+const approvalReply = "Run the book contract check before migrating.";
 const riderNote = "Preserve the old book when given an empty line.";
 const redesigned = "Reject empty input before opening the path.";
 const projectName = "book-integrity";
@@ -56,13 +57,24 @@ const writeSeam = {
 	dependencies: "POSIX builtins",
 };
 const riders = [
-	{ label: "stdout", text: "Read to standard output.", origin: "evidence" },
+	{
+		label: "stdout",
+		text: "Read to standard output.",
+		origin: "evidence",
+		disposition: "bind",
+	},
 	{
 		label: "indentation",
 		text: "Use tabs inside shell functions.",
 		origin: "incidental",
+		disposition: "open",
 	},
-	{ label: "empty-input", text: "Reject empty input.", origin: "seeded" },
+	{
+		label: "empty-input",
+		text: "Reject empty input.",
+		origin: "seeded",
+		disposition: "bind",
+	},
 ];
 const draft = {
 	intent: prompt,
@@ -93,7 +105,6 @@ const draft = {
 			timeoutMs: 5000,
 		},
 	],
-	protectedPaths: ["book-check.sh"],
 	riders,
 	references: [],
 };
@@ -133,7 +144,9 @@ cat > book.sh <<'SH'
 read_book() { cat "$1"; }
 write_book() { [ -n "$2" ] && printf '%s\n' "$2" > "$1"; }
 SH
-git add book.sh book-check.sh && sh book-check.sh && git commit -m 'encode book contract'`;
+mkdir -p .keel/playbooks
+printf 'Run sh book-check.sh before migrating.\n' > .keel/playbooks/book.md
+git add book.sh book-check.sh .keel/playbooks/book.md && sh book-check.sh && git commit -m 'encode book contract'`;
 
 export async function seedBookPolicy(cwd: string) {
 	await writeFile(join(cwd, "book-check.sh"), "test -f book\n");
@@ -169,7 +182,7 @@ export async function openReview(
 	rework(): Promise<void>;
 	scriptRevision(): void;
 	settle(): Promise<void>;
-	disposeRiders(): Promise<void>;
+	reworkRider(): Promise<void>;
 	approveAndBuild(): Promise<void>;
 }> {
 	const { store, root, provider, turn, settle } = await openScriptedWorkflow(
@@ -237,12 +250,7 @@ export async function openReview(
 		]);
 		await root.submit({ type: "input", content: prompt }, ctx);
 		await settle();
-		assert.deepEqual(await subjects(), [
-			"mandate/1",
-			"rider/1/empty-input",
-			"rider/1/indentation",
-			"rider/1/stdout",
-		]);
+		assert.deepEqual(await subjects(), ["mandate/1"]);
 		const { text } = await review("mandate/1");
 		expectAll(text, [
 			gap,
@@ -275,10 +283,8 @@ export async function openReview(
 			[readSeam.callersLater, revisionNotes[0]!],
 			[conflict, revisionNotes[1]!],
 		]);
-	async function disposeRiders() {
+	async function reworkRider() {
 		expectAll((await review("mandate/2")).text, [laterReader, settlement]);
-		await answer("rider/2/stdout", "accept");
-		await answer("rider/2/indentation", "leave_open");
 		provider.setResponses([
 			turn(
 				"designer",
@@ -290,13 +296,11 @@ export async function openReview(
 				riderNote,
 			),
 		]);
-		await answer("rider/2/empty-input", "design", [
-			[riders[2]!.text, riderNote],
-		]);
+		await answer("mandate/2", "rework", [[riders[2]!.text, riderNote]]);
 		assert.deepEqual(
 			await subjects(),
 			["mandate/3"],
-			"unchanged rider dispositions survive",
+			"only the new Mandate round is open",
 		);
 		expectAll((await review("mandate/3")).text, [redesigned]);
 		assert.equal(
@@ -306,12 +310,13 @@ export async function openReview(
 		);
 	}
 	async function approveAndBuild() {
-		const encode = "Encode both shell seams and the protected contract check.";
+		const encode =
+			"Encode both shell seams and the contract check, and write the book playbook.";
 		const migrate = "Write the repaired book using the approved writer.";
 		const check = "! git symbolic-ref -q HEAD && sh book-check.sh";
 		const bytes = `${check} && printf 'repaired\\n' | cmp - book`;
-		const verify = (command: string, text: string) => [
-			turn("verifier", "bash", { command }, description),
+		const verify = (command: string, text: string, ...facts: string[]) => [
+			turn("verifier", "bash", { command }, description, ...facts),
 			turn("verifier", "publish_verdict", {
 				outcome: "pass",
 				text,
@@ -332,7 +337,7 @@ export async function openReview(
 						{
 							n: 1,
 							status: "acted_on",
-							reason: "Run the protected check before migrating.",
+							reason: approvalReply,
 						},
 					],
 				},
@@ -342,7 +347,7 @@ export async function openReview(
 				item: "encode",
 				goal: encode,
 				evidence: "Run sh book-check.sh.",
-				fences: "book.sh and book-check.sh",
+				fences: "book.sh\nbook-check.sh\n.keel/playbooks/book.md",
 				nodes: ["read-book", "write-book", "empty-input", "stdout"],
 			}),
 			turn("worker", "principle", { name: projectName }, "empty-input"),
@@ -363,7 +368,11 @@ export async function openReview(
 				command: encodeCommand,
 			}),
 			turn("worker", "publish_build", { summary: encode, addresses: [] }),
-			...verify(check, "Shell contract passes on the Encode publication."),
+			...verify(
+				check,
+				"Shell contract passes on the Encode publication.",
+				".keel/playbooks/book.md",
+			),
 			turn("coordinator", "brief_item", {
 				item: "migrate",
 				goal: migrate,
@@ -398,6 +407,8 @@ export async function openReview(
 			ruling,
 			migrate,
 			"The integrated shell contract and migrated bytes match.",
+			approvalNote,
+			approvalReply,
 		]);
 		await answer("handover", "accept");
 		assert.deepEqual(await subjects(), []);
@@ -411,7 +422,7 @@ export async function openReview(
 		rework,
 		scriptRevision,
 		settle,
-		disposeRiders,
+		reworkRider,
 		approveAndBuild,
 	};
 }

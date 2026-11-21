@@ -79,7 +79,7 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 	await s.accept(trunk);
 });
 
-test("reviewed Mandate: rework both annotated nodes, dispose each rider, redesign and approve, then Encode, migrate, verify, land and hand over", async (t) => {
+test("reviewed Mandate: rework annotated nodes and a rider, approve once, then Encode, migrate, verify, land and hand over", async (t) => {
 	const { root } = await fixture(t);
 	const base = await seedBookPolicy(root);
 	const s = await openReview(root, new MemoryStorage(), true);
@@ -87,23 +87,20 @@ test("reviewed Mandate: rework both annotated nodes, dispose each rider, redesig
 	await s.start();
 	s.scriptRevision();
 	await s.rework();
-	await s.disposeRiders();
+	await s.reworkRider();
 	await s.approveAndBuild();
 	await assertLanded(root, base, `keel/${s.root.id}/build`, []);
 });
 
-test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening stale riders or starting a build", async (t) => {
+test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening the answered round or starting a build", async (t) => {
 	const { root } = await fixture(t);
 	await seedBookPolicy(root);
 	const file = join(root, ".git", "keel.sqlite");
 	const first = await openReview(root, await openNodeSqliteStorage(file), true);
-	const [review, rider] = await (async () => {
+	const review = await (async () => {
 		try {
 			await first.start();
-			return await Promise.all([
-				first.review("mandate/1"),
-				first.review("rider/1/empty-input"),
-			]);
+			return await first.review("mandate/1");
 		} finally {
 			await first.harness.close(ctx);
 		}
@@ -134,19 +131,9 @@ test("SQLite SIGKILL after rework commits: recover the owed revision exactly onc
 		stored.annotations.map((n) => n.text),
 		["Name the future reader.", "Choose the current guide explicitly."],
 	);
-	assert.equal(
-		(await s.harness.commit((tx) => decision(tx, rider.decision.id), ctx))
-			?.status,
-		"withdrawn",
-	);
 	s.scriptRevision();
 	await s.settle();
-	assert.deepEqual(await s.subjects(), [
-		"mandate/2",
-		"rider/2/empty-input",
-		"rider/2/indentation",
-		"rider/2/stdout",
-	]);
+	assert.deepEqual(await s.subjects(), ["mandate/2"]);
 	const text = (await s.review("mandate/2")).text;
 	assert.ok(text.includes("The reporting CLI."));
 	const results = (await s.root.entries({}, 100, undefined, ctx)).items

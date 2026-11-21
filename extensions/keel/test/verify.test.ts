@@ -846,7 +846,11 @@ test("cancel withdraws waiting slot and ignores a late grant; an already running
 test("after a merge conflict, a worker's revised publication gets a fresh review", () => {
 	const x = flow();
 	x.mergedBeforeConflict();
-	x.done("merge_item", { kind: "conflict", paths: ["ledger"], against: "base" });
+	x.done("merge_item", {
+		kind: "conflict",
+		paths: ["ledger"],
+		against: "base",
+	});
 	x.clean();
 	x.publish("corrected");
 	x.checkout();
@@ -858,7 +862,10 @@ test("after a merge conflict, a worker's revised publication gets a fresh review
 test("the item reviewer sees Git's changed policy files and the item-task exception", () => {
 	const x = flow();
 	x.publish("one", [], "bug", "base", {
-		changedPolicyFiles: [".keel/principles/round.md", ".keel/playbooks/check.md"],
+		changedPolicyFiles: [
+			".keel/principles/round.md",
+			".keel/playbooks/check.md",
+		],
 	});
 	x.checkout();
 	const input = x.agent().expects[0]!.input!();
@@ -905,11 +912,18 @@ test("the hand-over pairs numbered approval replies with the owner's notes", () 
 	const x = flow();
 	x.merged();
 	const replies = [
-		{ n: 2, status: "considered", reason: "The boundary already has an oracle." },
+		{
+			n: 2,
+			status: "considered",
+			reason: "The boundary already has an oracle.",
+		},
 		{ n: 1, status: "acted_on", reason: "Added the zero balance check." },
 	];
 	x.handoff({
-		mandate: { ...mandate, approvalNotes: ["Cover the zero balance.", "Consider another oracle."] },
+		mandate: {
+			...mandate,
+			approvalNotes: ["Cover the zero balance.", "Consider another oracle."],
+		},
 		approvalReplies: replies,
 	});
 	x.checkout();
@@ -919,8 +933,14 @@ test("the hand-over pairs numbered approval replies with the owner's notes", () 
 	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	x.done("land", { kind: "landed", sha: "prepared" });
 	const ask = x.asks()[0]!;
-	assert.match(ask.basis, /1\. Cover the zero balance\.[\s\S]*acted_on: Added the zero balance check\./);
-	assert.match(ask.basis, /2\. Consider another oracle\.[\s\S]*considered: The boundary already has an oracle\./);
+	assert.match(
+		ask.basis,
+		/1\. Cover the zero balance\.[\s\S]*acted_on: Added the zero balance check\./,
+	);
+	assert.match(
+		ask.basis,
+		/2\. Consider another oracle\.[\s\S]*considered: The boundary already has an oracle\./,
+	);
 });
 test("the hand-over title names the goal", () => {
 	const x = flow();

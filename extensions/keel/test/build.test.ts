@@ -268,7 +268,11 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.match(report, /fractional cents fail/);
 	b.send({ kind: "merged", item: "fix", head: merged });
 	b.done({ kind: "removed" });
-	const handoff = b.send({ kind: "handoff", summary: "port ready", risk: "none" });
+	const handoff = b.send({
+		kind: "handoff",
+		summary: "port ready",
+		risk: "none",
+	});
 	assert.deepEqual(handoff.send?.[0]?.event.approvalReplies, replies);
 	b.send({
 		kind: "rework",
@@ -369,18 +373,28 @@ test("dirty and unrelated work cannot publish, and the tool offers no SHA argume
 test("principle and playbook changes go to the verifier without a publication hold", () => {
 	const b = setup();
 	b.working();
-	const changedPolicyFiles = [".keel/principles/round.md", ".keel/playbooks/check.md"];
+	const changedPolicyFiles = [
+		".keel/principles/round.md",
+		".keel/playbooks/check.md",
+	];
 	const result = b.pub({ ...clean, changedPolicyFiles });
 	assert.equal(result.send?.length, 1);
 	assert.equal(result.send?.[0]?.lane, "verify");
-	assert.deepEqual(result.send?.[0]?.event.changedPolicyFiles, changedPolicyFiles);
+	assert.deepEqual(
+		result.send?.[0]?.event.changedPolicyFiles,
+		changedPolicyFiles,
+	);
 	assert.equal(b.agent("worker").paused, false);
 });
 
 test("a prose fence is refused before any worktree is prepared", () => {
 	const b = setup();
 	b.plan();
-	const result = b.tryEvent({ kind: "brief", ...brief, fences: "book.sh and book-check.sh" });
+	const result = b.tryEvent({
+		kind: "brief",
+		...brief,
+		fences: "book.sh and book-check.sh",
+	});
 	assert.ok("reject" in result);
 	assert.match(result.reject, /fence.*repository.relative path/i);
 	assert.deepEqual(b.effects(), []);
