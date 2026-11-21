@@ -1,9 +1,9 @@
-Decide what to do about {{cause}}.
+Decide what to do about {{topic}}.
 
 Work: {{work}}
 
 {{choices}}
 
-{{nodes}}
-
 {{findings}}
+
+{{nodes}}

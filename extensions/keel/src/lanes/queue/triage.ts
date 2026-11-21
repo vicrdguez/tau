@@ -52,7 +52,7 @@ const owedDocument = prose(documents, "owed-check.md", [
 	"outcome",
 ]);
 const triageDocument = prose(documents, "triage.md", [
-	"cause",
+	"topic",
 	"work",
 	"choices",
 	"findings",
@@ -772,14 +772,20 @@ function triageBasis(
 ) {
 	const i = first.investigation!;
 	const nodes = reportedNodes(related);
+	const wrong = i.classification === "mandate_wrong";
+	const cause = distinct(related.map((f) => f.investigation!.cause)).join("; ");
+	const choices = first.revisit
+		? "Build starts new work with design and Mandate review. Defer and drop both close this list without scheduling work or listing these findings again."
+		: wrong && !live.active
+			? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
+			: actions(i.classification);
 	return triageDocument({
-		cause: distinct(related.map((f) => f.investigation!.cause)).join("; "),
+		topic: wrong ? `a wrong Mandate: ${cause}` : cause,
 		work: first.goal ?? "the project queue",
-		choices: first.revisit
-			? "Build starts new work with design and Mandate review. Defer and drop both close this list without scheduling work or listing these findings again."
-			: i.classification === "mandate_wrong" && !live.active
-				? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
-				: actions(i.classification),
+		choices:
+			wrong && live.active && related.some((f) => f.intake.blocking)
+				? `${choices} Both defer and drop send the blocked item back to the same obstacle.`
+				: choices,
 		findings: [
 			first.intake.pattern &&
 				q.patterns.find(
