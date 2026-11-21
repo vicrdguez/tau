@@ -18,7 +18,12 @@ import {
 } from "../../repo/index.ts";
 import { toBuild } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
-import { fileHolding, type Resume, resumption } from "../queue/public.ts";
+import {
+	fileHolding,
+	fileIntake,
+	type Resume,
+	resumption,
+} from "../queue/public.ts";
 import { agentFor, agents, asks, effects } from "./declarations.ts";
 import { verifyFixture } from "./fixture.ts";
 import type { Publication } from "./public.ts";
@@ -96,11 +101,8 @@ function transition(prev: State, world: World) {
 		report: string,
 		nodes: string[],
 	) {
-		send.push({
-			lane: "queue",
-			work: null,
-			event: {
-				kind: "intake",
+		send.push(
+			fileIntake({
 				work,
 				source,
 				sha,
@@ -111,8 +113,8 @@ function transition(prev: State, world: World) {
 				edgeCase: null,
 				pattern: null,
 				blocking: false,
-			},
-		});
+			}),
+		);
 	}
 	const key = (name: string) => `verify/${work}/${name}/${++s.seq}`;
 	const find = (item: string) => s.checks.find((c) => c.item === item);
@@ -183,6 +185,20 @@ function transition(prev: State, world: World) {
 			}),
 		);
 		c.direction = "";
+	}
+	function resumeReview(c: Review) {
+		if (held(s, c.item)) return;
+		if (c.phase === "nonconvergent") {
+			const prefix = `${c.item} @ ${c.sha}: `;
+			const diagnosis = s.diagnoses.findLast((d) => d.startsWith(prefix))!;
+			const verdict = s.verdicts.findLast((v) => v.item === c.item)!;
+			back(
+				c,
+				"rework",
+				diagnosis.slice(prefix.length),
+				verdict.blocks.map((b) => b.thread),
+			);
+		} else if (c.phase === "verify" || c.phase === "diagnose") c.turn = ++s.seq;
 	}
 	function mergeReady() {
 		if (s.cancelled || s.jobs.some((j) => j.op.kind === "merge_item")) return;
@@ -538,10 +554,11 @@ function transition(prev: State, world: World) {
 				s.queueHolds = s.queueHolds.filter((h) => h.cause !== e.cause);
 				for (const item of items) {
 					const c = find(item);
-					if (!c || (c.phase !== "verify" && c.phase !== "diagnose")) continue;
+					if (!c || !["verify", "diagnose", "nonconvergent"].includes(c.phase))
+						continue;
 					if (e.direction)
 						c.direction = [c.direction, e.direction].filter(Boolean).join("\n");
-					if (!held(s, item)) c.turn = ++s.seq;
+					resumeReview(c);
 				}
 				break;
 			}
@@ -681,6 +698,8 @@ function transition(prev: State, world: World) {
 				if (e.outcome === "pass") {
 					retire(c);
 					c.phase = c.scope === "item" ? "ready" : "passed";
+					if (c.scope === "item")
+						send.push(toBuild(work, { kind: "item_verified", item: c.item }));
 					break;
 				}
 				for (const id of ids) {
@@ -747,20 +766,11 @@ function transition(prev: State, world: World) {
 				c.direction = [c.direction, returning ? "" : h.evidence, e.direction]
 					.filter(Boolean)
 					.join("\n");
-				c.turn = ++s.seq;
 				if (h.job) {
 					const j = s.jobs.find((j) => j.key === h.job)!;
 					j.key = key("retry");
 				}
-				if (c.phase === "nonconvergent" && !held(s, c.item))
-					back(
-						c,
-						"rework",
-						h.evidence,
-						s.verdicts
-							.findLast((v) => v.item === c.item)!
-							.blocks.map((b) => b.thread),
-					);
+				resumeReview(c);
 				break;
 			}
 		}
