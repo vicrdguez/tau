@@ -33,7 +33,7 @@ Tell the work's designer what you found. The designer can file it on your behalf
 | Determined by an approved reference | `build` adds it to the active plan or seeds new work under the reference. There is no Mandate approval. `defer` or `drop` keeps the record without starting work. |
 | Precedent-setting work | `build` seeds Ground and Mandate review. `defer` or `drop` starts nothing. |
 | Wrong Mandate | Classification immediately holds items with briefs that cite affected nodes. `build` requests a revision of that work's Mandate. `drop` or `defer` releases the finding's holds without changing the Mandate. |
-| Unapproved pattern cited by a ruling | `bless` makes it a project reference. `revoke` seeds work to make the pattern fail structurally and migrate its callers. `defer` keeps the finding for later. |
+| Unapproved pattern cited by a ruling | A worker uses `pattern: true` when `follows` names a project pattern. `bless` makes it a project reference. `revoke` seeds work to make the pattern fail structurally and migrate its callers. `defer` keeps the finding for later. |
 
 The investigator can group findings with the same cause and decision. A duplicate links to its original. A replacement decision cannot be answered using an old basis.
 

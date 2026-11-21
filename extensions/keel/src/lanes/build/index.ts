@@ -18,7 +18,12 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { mandateLabels, type Reply } from "../design/public.ts";
-import { fileHolding, type Resume, resumption } from "../queue/public.ts";
+import {
+	fileHolding,
+	fileIntake,
+	type Resume,
+	resumption,
+} from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
@@ -54,7 +59,13 @@ type Event =
 	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
 	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
 	| { kind: "handoff"; summary: string; risk: string }
-	| { kind: "ruling"; agent: string; ruling: Ruling }
+	| {
+			kind: "ruling";
+			agent: string;
+			ruling: Ruling;
+			pattern: boolean;
+			sha: Sha | null;
+	  }
 	| {
 			kind: "publish";
 			agent: string;
@@ -548,8 +559,28 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			if (i?.stage !== "building" || parked(s, i))
 				return { reject: "No active worker item." };
 			if (e.kind === "ruling") {
+				const pattern = e.ruling.follows.trim();
+				if (e.pattern && !pattern)
+					return { reject: "Name the pattern in follows." };
 				i.rulings.push(e.ruling);
-				return { state };
+				if (!e.pattern) return { state };
+				return {
+					state,
+					send: [
+						fileIntake({
+							work: w.work,
+							source: "worker",
+							item: i.id,
+							sha: e.sha,
+							text: e.ruling.what,
+							report: `Reason: ${e.ruling.why}\nCost if wrong: ${e.ruling.cost}`,
+							nodes: i.brief!.nodes,
+							pattern,
+							edgeCase: null,
+							blocking: false,
+						}),
+					],
+				};
 			}
 			const f = e.facts;
 			if (f.kind === "dirty")

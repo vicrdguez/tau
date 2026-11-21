@@ -1,6 +1,10 @@
 import { arr, int, obj, oneOf, opt, str } from "tau/schema";
 import { defineLaneTool } from "../../kernel/lane.ts";
-import { nodeExec, readPublishable } from "../../repo/index.ts";
+import {
+	nodeExec,
+	readCheckoutHead,
+	readPublishable,
+} from "../../repo/index.ts";
 import { repliesSchema } from "../design/public.ts";
 import type { buildView } from "./state.ts";
 
@@ -59,7 +63,7 @@ export const buildTools = [
 		...worker,
 		name: "record_ruling",
 		description:
-			"Record your decision, reason, cost if wrong and reference. Rank higher costs with higher integers. Cite principles by their delivered names.",
+			"Record your decision, reason, cost if wrong and reference. Set pattern when follows names a project pattern. Rank higher costs with higher integers. Cite principles by their delivered names.",
 		parameters: obj({
 			what: text,
 			why: text,
@@ -67,14 +71,19 @@ export const buildTools = [
 			rank: int({ minimum: 0 }),
 			follows: text,
 			principles: opt(texts),
+			pattern: opt(oneOf([true, false])),
 		}),
 		citations: ({ principles }) => principles ?? [],
 		gate: "standing",
 		terminate: false,
-		event: ({ principles, ...ruling }, _, self) => ({
+		observe: async ({ pattern }, self) =>
+			pattern && self.cwd ? await readCheckoutHead(nodeExec, self.cwd) : null,
+		event: ({ principles, pattern, ...ruling }, sha, self) => ({
 			kind: "ruling",
 			agent: self.agent,
 			ruling: { ...ruling, principles: principles ?? [] },
+			pattern: pattern ?? false,
+			sha,
 		}),
 	}),
 	defineLaneTool({
