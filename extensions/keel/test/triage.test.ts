@@ -132,6 +132,11 @@ function queue(world: World = activeWorld) {
 					findingsFor(work: number): string;
 					owedChecks(except?: number[]): string;
 					patternRulings: { name: string; status: string }[];
+					priorFindings: {
+						text: string;
+						report: string | null;
+						disposition: string;
+					}[];
 				},
 		};
 	});
@@ -295,6 +300,44 @@ test("the project sweep is off by default; when enabled its interruptible effect
 	);
 	assert.notEqual(q.effects()[0]?.key, tick!.key);
 	assert.deepEqual(q.ask(), []);
+});
+
+test("sweep history carries dropped and deferred drift evidence, not ordinary findings or the synthetic revisit", () => {
+	const facts = {
+		...activeWorld,
+		options: { ...activeWorld.options, sweep_minutes: 1 },
+	};
+	const q = queue(facts);
+	q.send({ kind: "sweep_configured" });
+	const tick = () =>
+		q.send({
+			kind: "effect_done",
+			key: q.effects()[0]!.key,
+			result: { findings: [] },
+		});
+	q.file({ source: "owner", text: "Ordinary owner finding" });
+	q.send(q.investigation(1));
+	q.answer("defer");
+	for (const [i, disposition] of ["drop", "defer"].entries()) {
+		q.file({
+			source: "sweeper",
+			work: null,
+			text: `Drift ${i}`,
+			report: `Evidence ${i}`,
+		});
+		q.send(q.investigation(i + 2, "sets_precedent", { nodes: [] }));
+		q.answer(disposition);
+	}
+	facts.now += 31 * 86_400_000;
+	tick();
+	assert.match(q.ask()[0]!.title, /long-deferred findings/);
+	assert.deepEqual(
+		q.view().priorFindings.map((f) => [f.text, f.report, f.disposition]),
+		[
+			["Drift 0", "Evidence 0", "dropped"],
+			["Drift 1", "Evidence 1", "deferred"],
+		],
+	);
 });
 
 test("a sweep files a project defect or reference mismatch without a hold; build seeds new work", () => {

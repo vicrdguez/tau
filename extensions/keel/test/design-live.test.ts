@@ -159,6 +159,27 @@ function run(facts = world) {
 	};
 }
 
+test("successful Ground on any route and a queue seed tell the project it is configured", () => {
+	for (const event of [
+		follow,
+		{ kind: "ground", route: "precedent", reference, audit },
+		{ kind: "ground", route: "ambiguous", reference, readings: ["A", "B"] },
+		seed,
+	]) {
+		const x = run();
+		const result = x.act(event);
+		assert.ok(
+			result.send?.some(
+				(m) =>
+					m.lane === "queue" &&
+					m.work === null &&
+					m.event.kind === "sweep_configured",
+			),
+			JSON.stringify(event),
+		);
+	}
+});
+
 test("an ordinary follow seed does not ask the designer to encode an owed check", () => {
 	const x = run();
 	x.act(seed);

@@ -13,3 +13,9 @@
 - A 30-day revisit repeats an owed check or misstates what defer and drop do.
 - An ordinary follow seed tells the designer how to encode a check it was not assigned.
 - An item reviewer sees owed checks; the full-set or landing input omits what to verify.
+- Ground or a queue seed fails to tell the project to arm the sweep when work starts.
+- A fenced or prose-wrapped JSON array fails to file drift.
+- A sweeper sees no earlier findings, no dropped or deferred dispositions, or no instruction to compare evidence.
+- The sweep files a finding without its pinned revision.
+- The sweep omits samples from works that actually landed, or treats an unreviewed Mandate as authority.
+- Done or stopped ticks leave receipts in the project ledger with nothing left to recover.
