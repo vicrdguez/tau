@@ -487,6 +487,47 @@ test("a held unverified publication is superseded before release; its original w
 	]);
 });
 
+test("a stalled worker resumes with both the revision instructions and the owner's new direction", () => {
+	const item = goal("ledger");
+	const b = setup([item]);
+	b.brief(item.id);
+	b.ready();
+	b.send(hold("queue/1", null, ["ledger"]));
+	b.send(proposal);
+	b.plan([item], reply);
+	const worker = b.worker(item.id)!;
+	const filed = b.send({
+		kind: "agent_stalled",
+		agent: worker.key,
+		cause: "stopped",
+		tokens: [worker.expects[0]!.token],
+		lastWords: "need direction",
+	})[0]!.event;
+	b.send({ ...filed, kind: "resume", direction: "Start with negatives." });
+	const input = b.worker(item.id)!.expects[0]!.input!();
+	assert.match(input, /Correct the ledger crossing/);
+	assert.match(input, /Start with negatives/);
+});
+
+test("a worker whose publication is superseded is told the Mandate changed, not that verification found a defect", () => {
+	const b = setup([goal("ledger")]);
+	b.brief("ledger");
+	b.ready();
+	b.publish("ledger");
+	b.send({
+		kind: "rework",
+		item: "ledger",
+		head: base,
+		evidence: "The ledger crossing changed.",
+		threads: [],
+		reason: "mandate_revision",
+	});
+	const input = b.worker("ledger")!.expects[0]!.input!();
+	assert.match(input, /^The Mandate changed/);
+	assert.match(input, /The ledger crossing changed/);
+	assert.doesNotMatch(input, /Verification found a defect/);
+});
+
 test("a hold on an already merged node blocks handoff until its disposition", () => {
 	const b = setup([goal("done")]);
 	b.brief("done");

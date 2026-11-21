@@ -404,6 +404,10 @@ test("a revision returns obsolete publications after a claimed checkout settles,
 	});
 	assert.equal(x.agents().length, 0);
 	assert.deepEqual(x.effect("remove").op.target, pending.op);
+	assert.equal(
+		done.send?.find((m) => m.lane === "build")?.event.reason,
+		"mandate_revision",
+	);
 	assert.match(
 		String(done.send?.find((m) => m.lane === "build")?.event.evidence),
 		/revised ledger boundary/,

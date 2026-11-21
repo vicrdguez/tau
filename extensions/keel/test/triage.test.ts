@@ -403,8 +403,13 @@ test("investigator stop is left to the owner; resume declares a fresh input for 
 	});
 	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
 	assert.match(q.ask()[0]!.basis, /waiting for evidence/);
+	const basis = q.ask()[0]!.basis;
 	q.answer("resume");
 	const exp = q.agents()[0]?.expects[0];
-	assert.ok(exp?.input?.().includes(filing.text));
+	const input = exp?.input?.() ?? "";
+	assert.ok(input.includes(filing.text));
+	assert.match(input, /Use the ledger boundary\./);
+	assert.match(input, /Compare both ledger balances/);
+	assert.match(basis, /Cancel drops the finding/);
 	assert.notEqual(exp?.token, tok);
 });
