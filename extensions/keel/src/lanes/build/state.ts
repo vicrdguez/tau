@@ -6,7 +6,7 @@ import type {
 	Worker,
 } from "../../repo/index.ts";
 import { type Mandate, type Reply, repliesCover } from "../design/public.ts";
-import type { Ruling } from "./public.ts";
+import type { PlanFinding, RevisionProposal, Ruling } from "./public.ts";
 
 export type Goal = {
 	id: string;
@@ -21,6 +21,10 @@ export type Brief = {
 	nodes: string[];
 };
 export type Item = Goal & {
+	/** Cited by a candidate brief that could not start this item. */
+	awaitingNodes: string[];
+	parked: boolean;
+	verified: boolean;
 	stage:
 		| "planned"
 		| "preparing"
@@ -58,6 +62,15 @@ export type Build = {
 		| "cancelled";
 	mandate: Mandate | null;
 	approvalReplies: Reply[];
+	revision: (RevisionProposal & { text: string }) | null;
+	findings: (Omit<PlanFinding, "cause"> & { cause: string | null })[];
+	queueHolds: {
+		cause: string;
+		items: string[];
+		nodes: string[];
+		evidence: string;
+		forwarded: string[];
+	}[];
 	repo: RepoInfo | null;
 	branches: { base: string; trunk: string } | null;
 	base: Sha | null;
@@ -79,6 +92,8 @@ export type Build = {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
+		findings: number;
+		revising: boolean;
 		pendingDirection: string;
 		reason: {
 			inheritedTrunk: Sha | null;
@@ -106,6 +121,9 @@ export const buildDoc = defineState({
 		phase: "idle",
 		mandate: null,
 		approvalReplies: [],
+		revision: null,
+		findings: [],
+		queueHolds: [],
 		repo: null,
 		branches: null,
 		base: null,
@@ -122,6 +140,8 @@ export const buildDoc = defineState({
 			tool: null,
 			item: null,
 			seq: 0,
+			findings: 0,
+			revising: false,
 			reason: null,
 			pendingDirection: "",
 			direction: "",
@@ -131,12 +151,68 @@ export const buildDoc = defineState({
 	}),
 });
 
-export const held = (s: Build, id: string | null) =>
+export const repoHeld = (s: Build, id: string | null) =>
 	s.holds.some((h) => h.item === id);
+export const affects = (i: Item, nodes: readonly string[]) =>
+	nodes.some((n) => (i.brief?.nodes ?? i.awaitingNodes).includes(n));
+export const queueMatches = (h: Build["queueHolds"][number], i: Item) =>
+	h.items.includes(i.id) || affects(i, h.nodes);
+export const queueHeld = (s: Build, i: Item) =>
+	s.queueHolds.some((h) => queueMatches(h, i));
+export const held = (s: Build, id: string | null) => {
+	if (repoHeld(s, id)) return true;
+	if (id === null) return false;
+	const item = s.items.find((i) => i.id === id);
+	return !!item && queueHeld(s, item);
+};
+export const parked = (s: Build, i: Item) => i.parked || held(s, i.id);
+export const depsReady = (s: Build, i: Item) =>
+	i.deps.every((id) =>
+		s.items.some((d) => d.id === id && d.stage === "merged"),
+	);
 export const workerKey = (i: Item) => `worker/${i.id}/${i.attempt}`;
+export function newItem(goal: Goal): Item {
+	return {
+		...goal,
+		stage: "planned",
+		awaitingNodes: [],
+		parked: false,
+		verified: false,
+		brief: null,
+		worker: null,
+		projectPrinciples: [],
+		attempt: 0,
+		seq: 0,
+		retry: 0,
+		mergedHead: null,
+		input: "brief",
+		evidence: "",
+		threads: [],
+		direction: "",
+		rulings: [],
+		publication: null,
+	};
+}
 
 export function buildView(s: Build) {
 	return {
+		phase: s.phase,
+		plan: s.items.map(({ id, kind, goal, deps, stage, brief }) => ({
+			id,
+			kind,
+			goal,
+			deps,
+			stage,
+			nodes: brief?.nodes ?? [],
+			brief,
+		})),
+		mandate: s.mandate,
+		head: s.head,
+		itemOf(agent: string) {
+			return (
+				s.items.find((i) => i.worker && workerKey(i) === agent)?.id ?? null
+			);
+		},
 		publicationOf(agent: string) {
 			const worker = s.items.find((i) => workerKey(i) === agent)?.worker;
 			if (!worker || !s.repo) throw Error("No current worker checkout");
@@ -155,13 +231,18 @@ export function validatePlan(
 	const notes = firstPlan ? s.mandate!.approvalNotes : [];
 	if (!repliesCover(notes.length, replies))
 		return "Reply exactly once to each numbered approval annotation, with its disposition and a reason.";
-	const first = existing[0] ?? goals[0];
+	const first =
+		existing.find((i) => i.kind === "encode") ?? existing[0] ?? goals[0];
 	if (
 		s.mandate!.encodeRequired &&
 		(first?.kind !== "encode" ||
 			goals.some((g) => g !== first && !g.deps.includes(first.id)))
 	)
 		return "Begin with an Encode item and make every other item depend directly on it.";
+	return validateGraph(existing, goals);
+}
+
+export function validateGraph(existing: Goal[], goals: Goal[]) {
 	if (!goals.length) return "Name at least one item.";
 	const ids = new Set(existing.map((i) => i.id));
 	for (const g of goals) {

@@ -48,6 +48,27 @@ type V1 = {
 		status: "acted_on" | "considered" | "dismissed";
 		reason: string;
 	}[];
+	revision: {
+		kind: "propose_revision";
+		mandate: MandateV1;
+		causes: string[];
+		nodes: string[];
+		text: string;
+	} | null;
+	findings: {
+		kind: "plan_finding";
+		text: string;
+		reference: string;
+		nodes: string[];
+		cause: string | null;
+	}[];
+	queueHolds: {
+		cause: string;
+		items: string[];
+		nodes: string[];
+		evidence: string;
+		forwarded: string[];
+	}[];
 	repo: RepoV1 | null;
 	branches: { base: string; trunk: string } | null;
 	base: Sha | null;
@@ -69,6 +90,8 @@ type V1 = {
 		tool: "publish_plan" | "brief_item" | "handoff_build" | null;
 		item: string | null;
 		seq: number;
+		findings: number;
+		revising: boolean;
 		pendingDirection: string;
 		reason: {
 			inheritedTrunk: Sha | null;
@@ -83,6 +106,9 @@ type V1 = {
 		kind: "build" | "encode";
 		goal: string;
 		deps: string[];
+		awaitingNodes: string[];
+		parked: boolean;
+		verified: boolean;
 		stage:
 			| "planned"
 			| "preparing"
@@ -135,6 +161,9 @@ export const buildV1 = {
 		phase: "idle",
 		mandate: null,
 		approvalReplies: [],
+		revision: null,
+		findings: [],
+		queueHolds: [],
 		repo: null,
 		branches: null,
 		base: null,
@@ -151,6 +180,8 @@ export const buildV1 = {
 			tool: null,
 			item: null,
 			seq: 0,
+			findings: 0,
+			revising: false,
 			reason: null,
 			pendingDirection: "",
 			direction: "",

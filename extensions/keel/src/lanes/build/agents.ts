@@ -1,7 +1,7 @@
 import { agentKey, token } from "../../kernel/ids.ts";
 import { type AgentDecl, prose } from "../../kernel/lane.ts";
 import { renderMandate } from "../design/public.ts";
-import { type Build, held, type Item, workerKey } from "./state.ts";
+import { type Build, held, type Item, parked, workerKey } from "./state.ts";
 
 const dir = import.meta.dirname;
 const plan = prose(dir, "../../prose/inputs/build/plan.md", [
@@ -19,6 +19,20 @@ const correction = prose(dir, "../../prose/inputs/build/correction.md", [
 	"direction",
 	"reason",
 	"plan",
+]);
+const discover = prose(dir, "../../prose/inputs/build/discovered.md", [
+	"mandate",
+	"findings",
+	"plan",
+	"direction",
+]);
+const revise = prose(dir, "../../prose/inputs/build/revision-plan.md", [
+	"before",
+	"mandate",
+	"findings",
+	"plan",
+	"annotations",
+	"direction",
 ]);
 const askBrief = prose(dir, "../../prose/inputs/build/brief-request.md", [
 	"id",
@@ -128,38 +142,70 @@ function coordInput(s: Build) {
 	};
 	const planRecord = () =>
 		JSON.stringify(
-			s.items.map(({ id, kind, goal, deps, publication, rulings }) => ({
-				id,
-				kind,
-				goal,
-				deps,
-				publication,
-				rulings,
-			})),
+			s.items.map(
+				({
+					id,
+					kind,
+					goal,
+					deps,
+					stage,
+					verified,
+					brief,
+					publication,
+					rulings,
+				}) => ({
+					id,
+					kind,
+					goal,
+					deps,
+					stage,
+					verified: verified || stage === "merged" || stage === "cleaning",
+					briefNodes: brief?.nodes ?? [],
+					publication,
+					rulings,
+				}),
+			),
 			null,
 			2,
 		);
+	const approval = (notes: string[]) =>
+		notes.length
+			? annotations({
+					notes: notes.map((note, n) => `${n + 1}. ${note}`).join("\n"),
+				})
+			: "";
 	switch (c.tool) {
-		case "publish_plan":
+		case "publish_plan": {
+			if (c.revising) {
+				const p = s.revision!;
+				return revise({
+					...facts,
+					before: renderMandate(s.mandate!, p.nodes),
+					mandate: renderMandate(p.mandate),
+					findings: p.text || p.nodes.join(", "),
+					plan: planRecord(),
+					annotations: approval(p.mandate.approvalNotes),
+				});
+			}
+			if (c.findings)
+				return discover({
+					...facts,
+					plan: planRecord(),
+					findings: JSON.stringify(s.findings.slice(0, c.findings), null, 2),
+				});
 			return c.reason
 				? correction({ ...facts, plan: planRecord(), reason: fullContext(s) })
 				: plan({
 						...facts,
 						encode: s.mandate!.encodeRequired ? encode({}) : "",
-						annotations: s.mandate!.approvalNotes.length
-							? annotations({
-									notes: s
-										.mandate!.approvalNotes.map(
-											(note, n) => `${n + 1}. ${note}`,
-										)
-										.join("\n"),
-								})
-							: "",
+						annotations: approval(s.mandate!.approvalNotes),
 					});
+		}
 		case "brief_item": {
 			const i = s.items.find((i) => i.id === c.item)!;
 			return askBrief({
 				...facts,
+				direction: [facts.direction, i.direction].filter(Boolean).join("\n"),
 				id: i.id,
 				goal: i.goal,
 				deps: i.deps.join(", "),
@@ -225,9 +271,9 @@ export function agents(s: Build): AgentDecl[] {
 			role: "worker",
 			cwd: i.worker!.path,
 			projectPrinciples: i.projectPrinciples,
-			paused: held(s, i.id),
+			paused: parked(s, i),
 			expects:
-				i.stage === "building" && !held(s, i.id)
+				i.stage === "building" && !parked(s, i)
 					? [
 							{
 								token: token("publish", i.seq),

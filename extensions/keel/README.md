@@ -41,7 +41,7 @@ The investigator can group findings with the same cause and decision. A duplicat
 
 Items begin as goals and dependencies. The coordinator briefs ready items against the current build head, up to `max_workers`, and each item uses its own checkout. Only a merged dependency makes a dependent item ready. Review can proceed in parallel, but mergers into the build branch are serialized.
 
-When you approve a mid-build Mandate revision, the coordinator replans the unstarted items. The revision and plan edits become active in the same commit. Unaffected items keep moving. A verified item is a record; if the revision invalidates it, the correction is a new item. A held item gets the change and resumes only after its dependencies merge and its last hold clears.
+An unresolved Mandate node hold prevents full-set handoff, even if the affected item already merged. When you approve a mid-build Mandate revision, the coordinator can add, edit, reorder, or drop unstarted items. The revision and plan edits become active in the same commit. Unaffected items keep moving. A verified item is a record; correcting it takes a new item. A held item gets the changed authority and resumes only after its dependencies merge and its last hold clears.
 
 ## Principles
 

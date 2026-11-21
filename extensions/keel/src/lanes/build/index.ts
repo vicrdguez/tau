@@ -22,15 +22,25 @@ import { fileHolding, type Resume, resumption } from "../queue/public.ts";
 import type { Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
+import {
+	addDirection,
+	addQueueHold,
+	applyRevision,
+	releaseQueueHold,
+} from "./live-plan.ts";
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
 	type Brief,
 	type Build,
 	buildDoc,
 	buildView,
+	depsReady,
 	type Goal,
 	held,
 	type Item,
+	newItem,
+	parked,
+	repoHeld,
 	validatePlan,
 	workerKey,
 } from "./state.ts";
@@ -65,23 +75,53 @@ function coordinator(
 	Object.assign(c, { tool, item, seq: ++s.seq });
 }
 function schedule(s: Build, w: World) {
-	if (s.coordinator.tool || held(s, null) || s.phase !== "active") return;
-	if (s.items.every((i) => i.stage === "merged")) {
-		coordinator(s, "handoff_build");
+	if (s.phase !== "active") return;
+	const c = s.coordinator;
+	let slots =
+		w.options.max_workers -
+		s.items.filter(
+			(i) =>
+				i.stage === "cleaning" ||
+				(i.stage !== "planned" && i.stage !== "merged" && !i.parked),
+		).length -
+		Number(c.tool === "brief_item");
+	for (const i of s.items) {
+		if (slots <= 0) break;
+		if (
+			!i.parked ||
+			i.stage === "cleaning" ||
+			i.stage === "merged" ||
+			held(s, i.id) ||
+			!depsReady(s, i)
+		)
+			continue;
+		i.parked = false;
+		i.seq = ++s.seq;
+		slots--;
+	}
+	if (c.tool || held(s, null)) return;
+	if (s.revision || s.findings.length) {
+		coordinator(s, "publish_plan");
+		c.revising = !!s.revision;
+		c.findings = s.revision ? 0 : s.findings.length;
 		return;
 	}
-	const busy = s.items.filter(
-		(i) => i.stage !== "planned" && i.stage !== "merged",
-	).length;
-	if (busy >= w.options.max_workers) return;
+	if (s.items.every((i) => i.stage === "merged")) {
+		if (!s.queueHolds.some((h) => h.nodes.length))
+			coordinator(s, "handoff_build");
+		return;
+	}
+	if (slots <= 0) return;
 	const next = s.items.find(
-		(i) =>
-			i.stage === "planned" &&
-			i.deps.every((id) =>
-				s.items.some((d) => d.id === id && d.stage === "merged"),
-			),
+		(i) => i.stage === "planned" && !held(s, i.id) && depsReady(s, i),
 	);
 	if (next) coordinator(s, "brief_item", next.id);
+}
+function yieldCoordinator(s: Build) {
+	const c = s.coordinator;
+	if (c.tool !== "brief_item" && c.tool !== "handoff_build") return;
+	c.pendingDirection = c.direction;
+	coordinator(s, null);
 }
 function discover(s: Build, w: World) {
 	s.phase = "discover";
@@ -125,9 +165,10 @@ const delivery = (plan: string, retry: number) =>
 function plans(
 	s: Build,
 	w: StaticFacts,
+	settling = false,
 ): { item: string | null; effect: EffectDecl }[] {
 	const work = String(w.work);
-	if ((s.phase === "discover" || s.phase === "start") && !held(s, null)) {
+	if ((s.phase === "discover" || s.phase === "start") && !repoHeld(s, null)) {
 		const key = `${s.refreshTrunk ? "refresh" : s.phase}:${work}:${s.setupSeq}`;
 		const effect: EffectDecl =
 			s.phase === "discover" || s.refreshTrunk
@@ -150,7 +191,8 @@ function plans(
 	}
 	if (s.phase !== "active") return [];
 	return s.items.flatMap((i) => {
-		if ((i.stage !== "preparing" && i.stage !== "cleaning") || held(s, i.id))
+		if (i.stage !== "preparing" && i.stage !== "cleaning") return [];
+		if (settling || i.stage === "cleaning" ? repoHeld(s, i.id) : parked(s, i))
 			return [];
 		const worker = i.worker!;
 		const op =
@@ -245,7 +287,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 		case "effect_done":
 		case "effect_failed": {
 			if (s.cleanup.some((j) => j.key === e.key)) return settleCleanup(s, e, w);
-			const planned = plans(s, w).find((p) => p.effect.key === e.key);
+			const planned = plans(s, w, true).find((p) => p.effect.key === e.key);
 			if (!planned) return { state };
 			const id = planned.item;
 			if (e.kind === "effect_failed")
@@ -358,8 +400,31 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 }
 function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	const state = s;
+	if (
+		e.kind === "plan_finding" &&
+		(s.phase === "idle" ||
+			s.phase === "handed_off" ||
+			s.phase === "closed" ||
+			s.phase === "cancelled")
+	) {
+		return {
+			state,
+			send: [
+				{
+					lane: "design",
+					work: "new",
+					event: {
+						kind: "queue_seed",
+						route: "follow",
+						text: e.text,
+						reference: e.reference,
+					},
+				},
+			],
+		};
+	}
 	if (s.phase === "cancelled" || s.phase === "closed") return { state };
-	if (e.kind === "cancel") return cancel(s, w, plans(s, w));
+	if (e.kind === "cancel") return cancel(s, w, plans(s, w, true));
 	if (e.kind === "closed") {
 		s.phase = "closed";
 		return { state };
@@ -370,11 +435,13 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 	function publish(i: Item, changedPolicyFiles: string[]) {
 		const p = i.publication!;
 		i.stage = "published";
+		i.verified = false;
 		i.direction = "";
 		return verify({
 			kind: "published",
 			item: i.id,
 			paths: i.brief!.fences,
+			nodes: i.brief!.nodes,
 			sha: p.sha,
 			base: p.base,
 			changedPolicyFiles,
@@ -393,31 +460,50 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			s.mandate = e.mandate;
 			discover(s, w);
 			return { state };
+		case "queue_hold": {
+			const send = addQueueHold(s, e, w);
+			if (
+				(s.coordinator.tool === "handoff_build" && e.nodes.length) ||
+				(s.coordinator.tool === "brief_item" && held(s, s.coordinator.item))
+			)
+				yieldCoordinator(s);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "queue_release": {
+			const send = releaseQueueHold(s, e.cause, e.direction, w);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "plan_finding":
+			s.findings.push({ ...e, cause: e.cause ?? null });
+			yieldCoordinator(s);
+			break;
+		case "propose_revision":
+			if (s.revision)
+				return { reject: "A Mandate revision is already being planned." };
+			s.revision = { ...e, text: e.text ?? "" };
+			yieldCoordinator(s);
+			break;
 		case "plan": {
-			if (s.coordinator.tool !== "publish_plan" || held(s, null))
+			const c = s.coordinator;
+			if (c.tool !== "publish_plan" || held(s, null))
 				return { reject: "No plan is due." };
 			const replies = e.replies ?? [];
+			if (c.revising) {
+				const activation = applyRevision(s, e.items, replies, w);
+				if ("reject" in activation) return activation;
+				c.revising = false;
+				coordinator(s, null);
+				schedule(s, w);
+				return activation;
+			}
 			const reject = validatePlan(s, e.items, replies);
 			if (reject) return { reject };
 			if (!s.items.length) s.approvalReplies = replies;
-			for (const goal of e.items)
-				s.items.push({
-					...goal,
-					stage: "planned",
-					brief: null,
-					worker: null,
-					projectPrinciples: [],
-					attempt: 0,
-					seq: 0,
-					retry: 0,
-					mergedHead: null,
-					input: "brief",
-					evidence: "",
-					threads: [],
-					direction: "",
-					rulings: [],
-					publication: null,
-				});
+			s.items.push(...e.items.map(newItem));
+			s.findings.splice(0, c.findings);
+			c.findings = 0;
 			coordinator(s, null);
 			break;
 		}
@@ -427,7 +513,8 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				held(s, null) ||
 				s.coordinator.tool !== "brief_item" ||
 				s.coordinator.item !== e.item ||
-				i?.stage !== "planned"
+				i?.stage !== "planned" ||
+				held(s, i.id)
 			)
 				return { reject: "Brief only the requested ready item." };
 			if (
@@ -445,14 +532,20 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				fences: fences.paths,
 				nodes: e.nodes,
 			};
-			prepare(s, i, w);
 			coordinator(s, null);
+			if (held(s, i.id)) {
+				i.awaitingNodes = e.nodes;
+				i.brief = null;
+				break;
+			}
+			i.awaitingNodes = [];
+			prepare(s, i, w);
 			break;
 		}
 		case "ruling":
 		case "publish": {
 			const i = s.items.find((i) => workerKey(i) === e.agent);
-			if (i?.stage !== "building" || held(s, i.id))
+			if (i?.stage !== "building" || parked(s, i))
 				return { reject: "No active worker item." };
 			if (e.kind === "ruling") {
 				i.rulings.push(e.ruling);
@@ -506,13 +599,21 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			const i = s.items.find((i) => i.id === e.item);
 			if (i?.stage !== "published")
 				return { reject: "Only a published item can be returned." };
-			i.direction = e.direction ?? "";
+			addDirection(i, e.direction ?? "");
 			i.input = e.kind;
 			i.stage = "building";
+			i.verified = false;
 			i.evidence = e.evidence;
 			i.threads = e.threads;
 			i.seq = ++s.seq;
-			return { state, send: settleMovedPreparations(s, w) };
+			const send = settleMovedPreparations(s, w);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "item_verified": {
+			const i = s.items.find((i) => i.id === e.item);
+			if (i?.stage === "published") i.verified = true;
+			return { state };
 		}
 		case "merged": {
 			const i = s.items.find((i) => i.id === e.item);
@@ -572,7 +673,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				s.coordinator.seq = ++s.seq;
 				if (s.phase === "discover") discover(s, w);
 				else if (s.phase === "start") s.setupRetry++;
-			} else if (!held(s, i.id)) {
+			} else if (!repoHeld(s, i.id)) {
 				if (
 					i.stage === "preparing" &&
 					(h.obstruction === "occupied" ||

@@ -17,7 +17,7 @@ export const buildTools = [
 		...coord,
 		name: "publish_plan",
 		description:
-			"Add items with goals and dependencies. Reserve briefs for ready items.",
+			"Plan item goals and dependencies. Supply the complete plan for a Mandate revision, or new items for other plan requests. Brief only ready items.",
 		parameters: obj({
 			items: arr(
 				obj({
