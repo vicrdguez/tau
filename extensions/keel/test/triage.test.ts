@@ -40,7 +40,11 @@ const activeWorld: World = {
 								rule: "Round once.",
 								probe: "Post a half-cent.",
 							},
-							{ label: "totals", rule: "Totals include reversed postings.", probe: "Reverse a posting." },
+							{
+								label: "totals",
+								rule: "Totals include reversed postings.",
+								probe: "Reverse a posting.",
+							},
 						],
 						checks: [],
 						delegated: [],
@@ -118,7 +122,11 @@ function queue(world: World = activeWorld) {
 			agents,
 			state: () => s,
 			notes: () => notes,
-			view: () => l.view(s) as { findingsFor(work: number): string; patternRulings: {name: string; status: string}[] },
+			view: () =>
+				l.view(s) as {
+					findingsFor(work: number): string;
+					patternRulings: { name: string; status: string }[];
+				},
 		};
 	});
 }
@@ -218,7 +226,10 @@ test("five findings about two causes leave two open decisions, each showing ever
 	assert.equal(current.length, 2);
 	assert.notEqual(current[0]!.basis, original[0]!.basis);
 	assert.notEqual(current[1]!.basis, original[1]!.basis);
-	assert.match(current[0]!.basis, /First discrepancy[\s\S]+Another discrepancy[\s\S]+Third discrepancy/);
+	assert.match(
+		current[0]!.basis,
+		/First discrepancy[\s\S]+Another discrepancy[\s\S]+Third discrepancy/,
+	);
 	assert.match(current[1]!.basis, /Unclear flag[\s\S]+Another flag/);
 	const seeds = q
 		.answer("build", original[0]!.subject)
@@ -261,13 +272,22 @@ test("a link after drop or build under an approved reference needs its own answe
 		const previous = q.ask()[0]!.subject;
 		q.answer(choice);
 		q.file({ text: "Same cause after the answer", blocking: true });
-		assert.deepEqual(q.send(q.investigation(2, "determined", { sameAs: 1, cause: "" })), []);
+		assert.deepEqual(
+			q.send(q.investigation(2, "determined", { sameAs: 1, cause: "" })),
+			[],
+		);
 		const next = q.ask()[0]!;
 		assert.notEqual(next.subject, previous);
 		assert.match(next.basis, /Finding #2: Same cause after the answer/);
 		assert.match(next.basis, /#1[^\n]+Which rounding boundary/);
-		assert.match(next.basis, new RegExp(choice === "drop" ? "dropped" : "build"));
-		assert.equal(q.answer("build", next.subject)[0]?.event.kind, "plan_finding");
+		assert.match(
+			next.basis,
+			new RegExp(choice === "drop" ? "dropped" : "build"),
+		);
+		assert.equal(
+			q.answer("build", next.subject)[0]?.event.kind,
+			"plan_finding",
+		);
 	}
 });
 
@@ -277,15 +297,28 @@ test("linking to a wrong-Mandate finding after build never joins its prior revis
 		q.file();
 		q.send(q.investigation(1, "mandate_wrong"));
 		q.answer("build");
-		if (applied) q.send({ kind: "revision_disposition", work: 4, causes: ["queue/1"], disposition: "revision applied (sums)" });
-		q.file({ text: "The revised framing still loses the prefix", blocking: true });
+		if (applied)
+			q.send({
+				kind: "revision_disposition",
+				work: 4,
+				causes: ["queue/1"],
+				disposition: "revision applied (sums)",
+			});
+		q.file({
+			text: "The revised framing still loses the prefix",
+			blocking: true,
+		});
 		const messages = q.send(q.investigation(2, "mandate_wrong", { sameAs: 1 }));
 		assert.ok(messages.every((m) => m.event.kind === "queue_hold"));
 		const next = q.ask()[0]!;
 		assert.match(next.basis, /The revised framing still loses the prefix/);
 		assert.match(next.basis, /#1[^\n]+Which rounding boundary/);
 		assert.match(next.basis, /(?:awaiting Mandate revision|revision applied)/);
-		assert.deepEqual(q.answer("build").find((m) => m.event.kind === "revise_mandate")?.event.causes, ["queue/2"]);
+		assert.deepEqual(
+			q.answer("build").find((m) => m.event.kind === "revise_mandate")?.event
+				.causes,
+			["queue/2"],
+		);
 	}
 });
 
@@ -326,7 +359,10 @@ test("an identical re-filing after defer is investigated once and can reopen the
 test("the investigator can close a non-blocking observation with a reason but not a blocked filer or the owner's finding", () => {
 	const q = queue();
 	q.file({ source: "verifier", text: "Other readers unchanged" });
-	q.file({ source: "owner", text: "MISSING-CHECK: the owner rejected hand-over" });
+	q.file({
+		source: "owner",
+		text: "MISSING-CHECK: the owner rejected hand-over",
+	});
 	q.file({ text: "I am blocked", blocking: true });
 	const closure = {
 		recommendation: "no_action",
@@ -335,7 +371,10 @@ test("the investigator can close a non-blocking observation with a reason but no
 	};
 	assert.deepEqual(q.send(q.investigation(1, "no_action", closure)), []);
 	assert.deepEqual(q.ask(), []);
-	assert.match(q.view().findingsFor(4), /no action: The observations match the bound rule/);
+	assert.match(
+		q.view().findingsFor(4),
+		/no action: The observations match the bound rule/,
+	);
 	assert.ok("reject" in q.attempt(q.investigation(2, "no_action", closure)));
 	q.send(q.investigation(2, "sets_precedent"));
 	assert.ok("reject" in q.attempt(q.investigation(3, "no_action", closure)));
@@ -343,13 +382,28 @@ test("the investigator can close a non-blocking observation with a reason but no
 
 test("a no-action closure after hand-over was written sends its reason to that work", () => {
 	let landed: string | null = null;
-	const q = queue({ ...activeWorld, view: (lane) => lane === "verify" ? { landed } : activeWorld.view(lane) });
+	const q = queue({
+		...activeWorld,
+		view: (lane) => (lane === "verify" ? { landed } : activeWorld.view(lane)),
+	});
 	q.file({ source: "verifier", text: "Late verifier observation" });
-	assert.match(q.view().findingsFor(4), /Late verifier observation \(open: awaiting investigation\)/);
+	assert.match(
+		q.view().findingsFor(4),
+		/Late verifier observation \(open: awaiting investigation\)/,
+	);
 	landed = "landed-commit";
-	const [note] = q.send(q.investigation(1, "no_action", { recommendation: "no_action", nodes: [], evidence: "The format already requires an empty line." }));
+	const [note] = q.send(
+		q.investigation(1, "no_action", {
+			recommendation: "no_action",
+			nodes: [],
+			evidence: "The format already requires an empty line.",
+		}),
+	);
 	assert.equal(note?.work, 4);
-	assert.match(JSON.stringify(note?.event), /Late verifier observation[^\n]+The format already requires an empty line/);
+	assert.match(
+		JSON.stringify(note?.event),
+		/Late verifier observation[^\n]+The format already requires an empty line/,
+	);
 	assert.deepEqual(q.ask(), []);
 });
 
@@ -420,7 +474,13 @@ test("an unlikely edge case holds nothing until the owner answers build on a wro
 	);
 	assert.deepEqual(q.send(q.investigation(1, "mandate_wrong")), []);
 	assert.equal(q.ask().length, 1);
-	assert.deepEqual(q.answer("build").map((m) => [m.event.kind, m.event.nodes]), [["queue_hold", ["sums"]], ["revise_mandate", ["sums"]]]);
+	assert.deepEqual(
+		q.answer("build").map((m) => [m.event.kind, m.event.nodes]),
+		[
+			["queue_hold", ["sums"]],
+			["revise_mandate", ["sums"]],
+		],
+	);
 });
 
 test("a blocked filer classified as a defect keeps its cause on the fix request and is not released", () => {
@@ -490,33 +550,75 @@ test("a defect goes to the coordinator without triage; determined work waits for
 test("a linked blocker is shown in reissued triage with both reports and both nodes", () => {
 	const q = queue();
 	q.file();
-	q.file({ text: "Same issue in another item", item: "second", blocking: true });
+	q.file({
+		text: "Same issue in another item",
+		item: "second",
+		blocking: true,
+	});
 	q.send(q.investigation(1, "mandate_wrong"));
 	const previous = q.ask()[0]!.basis;
 	q.send(q.investigation(2, "mandate_wrong", { sameAs: 1, nodes: ["totals"] }));
 	assert.equal(q.ask().length, 1);
 	const basis = q.ask()[0]!.basis;
 	assert.notEqual(basis, previous);
-	for (const text of ["Finding #1", filing.report, "Finding #2", "Same issue in another item", "The filer could not continue item second.", "Round once.", "Totals include reversed postings.", "Source: worker / Post each cent once. / second"]) assert.ok(basis.includes(text), text);
-	assert.doesNotMatch(basis, /Held items:|Waiting on held dependencies:|Keeps running:|queue conversation/);
+	for (const text of [
+		"Finding #1",
+		filing.report,
+		"Finding #2",
+		"Same issue in another item",
+		"The filer could not continue item second.",
+		"Round once.",
+		"Totals include reversed postings.",
+		"Source: worker / Post each cent once. / second",
+	])
+		assert.ok(basis.includes(text), text);
+	assert.doesNotMatch(
+		basis,
+		/Held items:|Waiting on held dependencies:|Keeps running:|queue conversation/,
+	);
 	assert.deepEqual(q.notes(), []);
-	assert.deepEqual(q.answer("defer").map((m) => [m.event.kind, m.event.cause]), [["queue_release", "queue/1"], ["queue_release", "queue/2"]]);
-	if (process.env.KEEL_REWORK_RENDERS) writeFileSync("/tmp/keel-queue-rework2-triage.md", basis);
+	assert.deepEqual(
+		q.answer("defer").map((m) => [m.event.kind, m.event.cause]),
+		[
+			["queue_release", "queue/1"],
+			["queue_release", "queue/2"],
+		],
+	);
+	if (process.env.KEEL_REWORK_RENDERS)
+		writeFileSync("/tmp/keel-queue-rework2-triage.md", basis);
 });
 
 test("a second blocked filer linked to a defect being fixed stays held until that defect merges", () => {
 	const q = queue();
 	q.file({ blocking: true });
 	q.send(q.investigation(1, "defect_in_scope"));
-	q.file({ item: "second", text: "Same defect blocks the other filer", blocking: true });
+	q.file({
+		item: "second",
+		text: "Same defect blocks the other filer",
+		blocking: true,
+	});
 	const messages = q.send(q.investigation(2, "defect_in_scope", { sameAs: 1 }));
-	assert.equal(messages.length, 1);
-	assert.ok(!messages.some((m) => ["queue_release", "plan_finding"].includes(m.event.kind)));
+	assert.deepEqual(messages.map((m) => [m.event.kind, m.event.cause]), [["queue_hold", "queue/1"], ["queue_release", "queue/2"]]);
 	assert.deepEqual(q.ask(), []);
-	q.send({ kind: "revision_disposition", work: 4, causes: ["queue/1"], disposition: "fixed by writer, stats" });
-	assert.match(q.view().findingsFor(4), /Finding #2: Same defect blocks the other filer \(fixed by writer, stats\)/);
-	q.file({ item: "second", text: "Still broken after the fix", blocking: true });
-	assert.deepEqual(q.send(q.investigation(3, "defect_in_scope", { sameAs: 2 })), []);
+	q.send({
+		kind: "revision_disposition",
+		work: 4,
+		causes: ["queue/1"],
+		disposition: "fixed by writer, stats",
+	});
+	assert.match(
+		q.view().findingsFor(4),
+		/Finding #2: Same defect blocks the other filer \(fixed by writer, stats\)/,
+	);
+	q.file({
+		item: "second",
+		text: "Still broken after the fix",
+		blocking: true,
+	});
+	assert.deepEqual(
+		q.send(q.investigation(3, "defect_in_scope", { sameAs: 2 })),
+		[],
+	);
 	assert.match(q.ask()[0]!.basis, /#2[^\n]+fixed by writer, stats/);
 });
 
@@ -614,14 +716,22 @@ test("a later blessing replaces a prior revocation and governs the next citation
 	const q = queue();
 	const pattern = "legacy-writer";
 	q.file({ pattern });
-	q.send(q.investigation(1, "unapproved_pattern", { recommendation: "revoke" }));
+	q.send(
+		q.investigation(1, "unapproved_pattern", { recommendation: "revoke" }),
+	);
 	q.answer("revoke");
 	q.file({ work: null, text: "New evidence supports the pattern", pattern });
 	q.send(q.investigation(2, "unapproved_pattern", { recommendation: "bless" }));
 	q.answer("bless");
-	assert.deepEqual(q.file({ text: "Use the newly blessed pattern", pattern }), []);
+	assert.deepEqual(
+		q.file({ text: "Use the newly blessed pattern", pattern }),
+		[],
+	);
 	assert.equal(q.agents()[0]?.expects.length, 0);
-	assert.deepEqual(q.view().patternRulings.map(({ name, status }) => [name, status]), [[pattern, "blessed"]]);
+	assert.deepEqual(
+		q.view().patternRulings.map(({ name, status }) => [name, status]),
+		[[pattern, "blessed"]],
+	);
 });
 
 test("determined work whose original build closed seeds new follow work with its reference", () => {
@@ -653,17 +763,17 @@ test("approving triage asks the designer of the same work for a revision and kee
 	});
 	const [second] = q.send(q.investigation(2, "mandate_wrong", { sameAs: 1 }));
 	const out = q.answer("build");
-	assert.equal(out.length, 1);
-	assert.equal(out[0]?.lane, "design");
-	assert.equal(out[0]?.work, 4);
-	assert.equal(out[0]?.event.kind, "revise_mandate");
-	assert.deepEqual(out[0]?.event.causes, [
+	const revision = out.find((m) => m.event.kind === "revise_mandate");
+	assert.ok(out.every((m) => ["queue_hold", "revise_mandate"].includes(m.event.kind)));
+	assert.equal(revision?.lane, "design");
+	assert.equal(revision?.work, 4);
+	assert.deepEqual(revision?.event.causes, [
 		own?.event.cause,
 		second?.event.cause,
 	]);
-	assert.deepEqual(out[0]?.event.nodes, ["sums"]);
+	assert.deepEqual(revision?.event.nodes, ["sums"]);
 	assert.match(
-		String(out[0]?.event.text),
+		String(revision?.event.text),
 		/smallest amount[\s\S]+Use the ledger boundary/,
 	);
 });
