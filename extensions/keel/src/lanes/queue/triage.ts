@@ -150,11 +150,18 @@ function seed(
 	route: "follow" | "precedent",
 	text: string,
 	reference: string | null,
+	owed?: number[],
 ): Message {
 	return {
 		lane: "design",
 		work: "new",
-		event: { kind: "queue_seed", route, text, reference },
+		event: {
+			kind: "queue_seed",
+			route,
+			text,
+			reference,
+			...(owed && { owed }),
+		},
 	};
 }
 
@@ -196,7 +203,7 @@ export function intake(
 			state: q,
 			reply: `Approved reference: ${pattern}. No finding filed.`,
 		};
-	const input: Intake = {
+	const input: Finding["intake"] = {
 		work: e.work,
 		source: e.source,
 		item: e.item,
@@ -207,12 +214,23 @@ export function intake(
 		edgeCase: e.edgeCase,
 		pattern,
 		blocking: e.blocking,
+		missingCheck: e.missingCheck && e.source === "owner" ? true : null,
 	};
+	const sameCheck =
+		input.missingCheck &&
+		q.entries.find(
+			(f) =>
+				f.intake.missingCheck &&
+				!f.encodedAt &&
+				checkKey(f.intake.text) === checkKey(input.text),
+		);
+	if (sameCheck)
+		return { state: q, reply: `Already owed as finding #${sameCheck.id}.` };
 	const serialized = JSON.stringify(input);
 	const prior = q.entries.findLast(
 		(f) => JSON.stringify(f.intake) === serialized,
 	);
-	if (prior && prior.disposition !== "deferred")
+	if (prior && !input.missingCheck && prior.disposition !== "deferred")
 		return { state: q, reply: `Already filed as finding #${prior.id}.` };
 	const live = context(world, input.work);
 	const f: Finding = {
@@ -224,7 +242,23 @@ export function intake(
 		investigation: null,
 		group: null,
 		disposition: null,
+		encodedAt: null,
 	};
+	if (input.missingCheck) {
+		f.investigation = {
+			classification: "determined",
+			nodes: [],
+			evidence: "The owner rejected the verified result.",
+			size: "not estimated",
+			cause: "encoding the missing check",
+			recommendation: "build",
+			reference: input.text,
+			sameAs: null,
+		};
+		f.status = "triage";
+		f.group = f.id;
+		f.basis = triageBasis(q, f, [f], { ...live, active: false });
+	}
 	if (
 		precedent?.status === "revoked" &&
 		f.intake.work !== null &&
@@ -258,7 +292,12 @@ export function intake(
 }
 
 function shareDecision(f: Finding, i: Investigation, other: Finding) {
-	if (i.classification !== other.investigation?.classification) return false;
+	if (
+		f.intake.missingCheck ||
+		other.intake.missingCheck ||
+		i.classification !== other.investigation?.classification
+	)
+		return false;
 	switch (i.classification) {
 		case "mandate_wrong":
 			return other.intake.work === f.intake.work;
@@ -570,7 +609,9 @@ export function onFact(
 
 	const send: Message[] = [];
 	if (building) {
-		if (i.classification === "determined")
+		if (first.intake.missingCheck)
+			send.push(seed("follow", text, i.reference!, [first.id]));
+		else if (i.classification === "determined")
 			send.push(
 				active
 					? plan(first, related, text, i.reference!)
@@ -614,8 +655,9 @@ function triageBasis(
 	return triageDocument({
 		cause: i.cause,
 		work: first.goal ?? "the project queue",
-		choices:
-			i.classification === "mandate_wrong" && !live.active
+		choices: first.intake.missingCheck
+			? "Build starts work to encode this check. Defer or drop closes this decision but the check remains owed."
+			: i.classification === "mandate_wrong" && !live.active
 				? "Build starts follow-up design. This finding does not hold the landing. Defer parks it. Drop closes it."
 				: actions(i.classification),
 		findings: evidence(q, related),
@@ -714,6 +756,15 @@ export function agents(q: Queue): AgentDecl[] {
 					: [],
 		},
 	];
+}
+
+const checkKey = (text: string) =>
+	text.toLowerCase().replace(/\s+/g, " ").trim();
+export function checks(q: Queue, select: (f: Finding) => boolean) {
+	return q.entries
+		.filter((f) => f.intake.missingCheck && select(f))
+		.map((f) => `- #${f.id}: ${f.intake.text} (rejected ${f.intake.sha})`)
+		.join("\n");
 }
 
 export function findingSummary(q: Queue, work: WorkId) {

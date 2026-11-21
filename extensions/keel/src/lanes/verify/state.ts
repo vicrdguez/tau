@@ -40,6 +40,7 @@ export type Review = {
 	direction: string;
 	changedPolicyFiles: string[];
 	playbook: string | null;
+	owed: { ids: number[]; text: string } | null;
 };
 export type Verdict = {
 	item: string;
@@ -51,6 +52,7 @@ export type Verdict = {
 	diagnose: string[];
 	notes: string[];
 	addresses: string[];
+	encodedChecks: number[];
 };
 type Integration = {
 	key: string;
@@ -117,6 +119,7 @@ export type State = {
 		missing: string[];
 		revisions: string;
 		findings: string;
+		owed: string;
 	} | null;
 };
 export const queueHeld = (s: State, item: string) =>

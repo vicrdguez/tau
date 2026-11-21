@@ -3,10 +3,12 @@ import {
 	type Accepted,
 	defineLane,
 	type Message,
+	type LaneEvent,
 	prose,
 	type Reduction,
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
+import type { Sha } from "../../repo/index.ts";
 import { queueFixture } from "./fixture.ts";
 import type {
 	FindingDisposition,
@@ -101,6 +103,22 @@ export const queueLane = defineLane(
 				return result.reject === undefined
 					? withTriage(state, result)
 					: { reject: result.reject };
+			}
+			if (event.kind === "checks_encoded") {
+				const { ids, sha } = event as LaneEvent & {
+					ids: number[];
+					sha: Sha;
+				};
+				return withTriage(state, {
+					state: {
+						...state.triage,
+						entries: state.triage.entries.map((f) =>
+							f.intake.missingCheck && !f.encodedAt && ids.includes(f.id)
+								? { ...f, encodedAt: sha }
+								: f,
+						),
+					},
+				});
 			}
 			if (event.kind === "revision_disposition")
 				return withTriage(state, {
@@ -215,6 +233,13 @@ export const queueLane = defineLane(
 		],
 		view: (state) => ({
 			patternRulings: state.triage.patterns,
+			owedChecks: (except: number[] = []) =>
+				triage.checks(
+					state.triage,
+					(f) => !f.encodedAt && !except.includes(f.id),
+				),
+			checks: (ids: number[]) =>
+				triage.checks(state.triage, (f) => ids.includes(f.id)),
 			investigation: pending(state.triage) ? state.triage.context : null,
 			findingsFor: (work: WorkId) =>
 				[

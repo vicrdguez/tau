@@ -34,6 +34,7 @@ type QueueV1 = {
 				edgeCase: { failure: string; likelihood: string; cost: string } | null;
 				pattern: string | null;
 				blocking: boolean;
+				missingCheck: true | null;
 			};
 			goal: string | null;
 			basis: string | null;
@@ -56,6 +57,7 @@ type QueueV1 = {
 			} | null;
 			group: number | null;
 			disposition: string | null;
+			encodedAt: Sha | null;
 		}[];
 		patterns: {
 			name: string;
@@ -99,6 +101,7 @@ export const queueFixture = {
 						edgeCase: null,
 						pattern: null,
 						blocking: true,
+						missingCheck: null,
 					},
 					goal: "Keep the ledger balanced.",
 					basis: "Decide what to do about rounding.",
@@ -115,6 +118,7 @@ export const queueFixture = {
 					},
 					group: 1,
 					disposition: null,
+					encodedAt: null,
 				},
 			],
 			patterns: [],

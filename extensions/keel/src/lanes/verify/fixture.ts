@@ -111,6 +111,7 @@ type V1 = {
 		direction: string;
 		changedPolicyFiles: string[];
 		playbook: string | null;
+		owed: { ids: number[]; text: string } | null;
 	}[];
 	jobs: { item: string; key: string; op: OpV1 }[];
 	holds: {
@@ -129,6 +130,7 @@ type V1 = {
 		diagnose: string[];
 		notes: string[];
 		addresses: string[];
+		encodedChecks: number[];
 	}[];
 	threads: {
 		item: string;
@@ -162,6 +164,7 @@ type V1 = {
 		missing: string[];
 		revisions: string;
 		findings: string;
+		owed: string;
 	} | null;
 };
 export const verifyFixture = {

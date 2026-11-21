@@ -26,6 +26,7 @@ const form = prose(dir, "documents/verify-facts.md", [
 	"playbook",
 	"history",
 	"addresses",
+	"owed",
 	"changedPolicyFiles",
 ]);
 const diagnose = prose(dir, "inputs/verify/diagnosis.md", ["facts", "threads"]);
@@ -45,6 +46,7 @@ const handover = prose(dir, "documents/handover.md", [
 	"revisions",
 	"findings",
 	"approvalReplies",
+	"owed",
 	"base",
 ]);
 const title = prose(dir, "documents/handover-title.md", [
@@ -94,6 +96,7 @@ function input(s: State, c: Review) {
 				)
 				.join("\n") || "None.",
 		addresses: c.addresses.join(", ") || "None.",
+		owed: c.owed?.text ?? "None.",
 	});
 	function situation() {
 		if (c.scope !== "item") return c.scope;
@@ -202,6 +205,7 @@ export function asks(s: State): Ask[] {
 				diagnoses: s.diagnoses.join("\n") || "None.",
 				revisions: h.revisions || "None.",
 				findings: h.findings || "None.",
+				owed: h.owed || "None.",
 			}),
 		},
 	];

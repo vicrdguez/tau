@@ -1,5 +1,6 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import type { World } from "../../kernel/lane.ts";
+import type { Sha } from "../../repo/index.ts";
 import type { Mandate } from "../design/public.ts";
 import type { Intake } from "./public.ts";
 
@@ -62,7 +63,7 @@ export function context(world: World, work: WorkId | null) {
 
 export type Finding = {
 	id: number;
-	intake: Intake;
+	intake: Omit<Intake, "missingCheck"> & { missingCheck: true | null };
 	goal: string | null;
 	basis: string | null;
 	status: "filed" | "triage" | "defect" | "revision" | "closed";
@@ -70,6 +71,7 @@ export type Finding = {
 	// An open decision's first finding, or the finding whose fix holds this filer.
 	group: number | null;
 	disposition: string | null;
+	encodedAt: Sha | null;
 };
 export type Queue = {
 	entries: Finding[];

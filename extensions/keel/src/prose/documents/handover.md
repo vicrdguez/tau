@@ -27,6 +27,10 @@ Mandate revisions during the build:
 Findings for this work and their dispositions at landing:
 {{findings}}
 
+Checks still owed
+
+{{owed}}
+
 Residual risk: {{risk}}
 
 Promotion to {{base}} is yours. From a clean checkout of {{base}}, run `git merge --ff-only {{sha}}` to promote it.

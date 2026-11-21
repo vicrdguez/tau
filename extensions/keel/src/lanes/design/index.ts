@@ -178,6 +178,7 @@ type Seed = {
 	route: "follow" | "precedent";
 	reference: string | null;
 	text: string;
+	owed: number[];
 };
 type DesignerPhase =
 	| "seeded"
@@ -604,6 +605,7 @@ export const design: Lane<State> = {
 			r.phase === "applied" ? r.rounds.at(-1)!.nodes : [],
 		),
 		reference: s.reference,
+		owed: s.seed?.owed ?? [],
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {
 				if (r.phase !== "applied") return [];
@@ -663,7 +665,12 @@ export const design: Lane<State> = {
 					state: {
 						...s,
 						phase: "seeded",
-						seed: { route, text, reference },
+						seed: {
+							route,
+							text,
+							reference,
+							owed: Array.isArray(e.owed) ? (e.owed as number[]) : [],
+						},
 						seq: s.seq + 1,
 					},
 				};

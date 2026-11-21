@@ -65,10 +65,23 @@ export type Intake = {
 	edgeCase: { failure: string; likelihood: string; cost: string } | null;
 	pattern: string | null;
 	blocking: boolean;
+	missingCheck?: true;
 };
 
 export function fileIntake(finding: Intake): Message {
 	return { lane: "queue", work: null, event: { kind: "intake", ...finding } };
+}
+
+export type QueueChecks = {
+	owedChecks(except?: number[]): string;
+	checks(ids: number[]): string;
+};
+export function checksEncoded(work: WorkId, ids: number[], sha: Sha): Message {
+	return {
+		lane: "queue",
+		work: null,
+		event: { kind: "checks_encoded", work, ids, sha },
+	};
 }
 
 export type FindingDisposition = {

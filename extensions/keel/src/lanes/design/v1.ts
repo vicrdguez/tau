@@ -149,6 +149,7 @@ export const designV1 = {
 			contradictions: Observation[];
 		} | null,
 		seed: null as {
+			owed: number[];
 			route: "follow" | "precedent";
 			reference: string | null;
 			text: string;

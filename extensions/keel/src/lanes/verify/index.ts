@@ -19,8 +19,10 @@ import {
 import { toBuild } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
 import {
+	checksEncoded,
 	fileHolding,
 	fileIntake,
+	type QueueChecks,
 	type Resume,
 	resumption,
 } from "../queue/public.ts";
@@ -71,6 +73,7 @@ type Event =
 			agent: string;
 			blocks: Block[];
 			notes: string[];
+			encodedChecks?: number[];
 			outcome: "pass" | "fail";
 			text: string;
 	  }
@@ -88,6 +91,9 @@ function transition(prev: State, world: World) {
 		send: Message[] = [],
 		notes: Note[] = [];
 	const work = world.work!;
+	const queue = world.view("queue") as
+		| (QueueChecks & { findingsFor?(id: typeof work): string })
+		| null;
 	const deliver = (lane: "design" | "trunk", e: LaneEvent) =>
 		send.push({
 			lane,
@@ -102,6 +108,7 @@ function transition(prev: State, world: World) {
 		text: string,
 		report: string,
 		nodes: string[],
+		missingCheck?: true,
 	) {
 		send.push(
 			fileIntake({
@@ -115,6 +122,7 @@ function transition(prev: State, world: World) {
 				edgeCase: null,
 				pattern: null,
 				blocking: false,
+				...(missingCheck && { missingCheck }),
 			}),
 		);
 	}
@@ -229,9 +237,13 @@ function transition(prev: State, world: World) {
 	function landed(sha: Sha, unchanged: boolean) {
 		release();
 		const design = world.view("design") as { revisionSummary: string } | null;
-		const queue = world.view("queue") as {
-			findingsFor?: (id: typeof work) => string;
-		} | null;
+		const encoded =
+			s.cancelled || unchanged
+				? []
+				: (s.verdicts.findLast(
+						(v) => v.scope !== "item" && v.outcome === "pass",
+					)?.encodedChecks ?? []);
+		if (encoded.length) send.push(checksEncoded(work, encoded, sha));
 		s.handover = {
 			sha,
 			unchanged,
@@ -239,6 +251,7 @@ function transition(prev: State, world: World) {
 			missing: [],
 			revisions: design?.revisionSummary ?? "",
 			findings: queue?.findingsFor?.(work) ?? "",
+			owed: queue?.owedChecks?.(encoded) ?? "",
 		};
 		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
@@ -373,14 +386,17 @@ function transition(prev: State, world: World) {
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
 					if (e.choice === "reject") {
 						s.handover.missing = missing.map((a) => a.text);
-						file(
-							"owner",
-							s.handover.sha,
-							null,
-							missing.map((a) => `${a.n}. ${a.text}`).join("\n"),
-							`${s.mandate!.intent}\n${s.handoff!.summary}`,
-							[],
-						);
+						const original = asks(prev)[0]!.basis;
+						for (const a of missing)
+							file(
+								"owner",
+								s.handover.sha,
+								null,
+								a.text,
+								`Annotation ${a.n}. Rejected hand-over:\n${original}`,
+								[],
+								true,
+							);
 					}
 					deliver("design", { kind: "closed" });
 					send.push(toBuild(work, { kind: "closed" }));
@@ -636,6 +652,9 @@ function transition(prev: State, world: World) {
 							),
 						]
 					: e.addresses;
+				const owed = full
+					? ((world.view("design") as { owed?: number[] } | null)?.owed ?? [])
+					: [];
 				const c: Review = {
 					item,
 					scope: full ? "full" : "item",
@@ -658,6 +677,9 @@ function transition(prev: State, world: World) {
 					turn: 0,
 					checkout: null,
 					playbook: null,
+					owed: owed.length
+						? { ids: owed, text: queue?.checks?.(owed) ?? "" }
+						: null,
 				};
 				if (full) for (const prior of s.checks) prior.direction = "";
 				s.checks = s.checks.filter((x) => x !== old);
@@ -699,6 +721,17 @@ function transition(prev: State, world: World) {
 						reject:
 							"Pass with no blocks, or fail with distinct grounded threads and evidence.",
 					};
+				const encoded = e.encodedChecks ?? [];
+				const assigned = e.outcome === "pass" ? (c.owed?.ids ?? []) : [];
+				if (
+					new Set(encoded).size !== assigned.length ||
+					encoded.length !== assigned.length ||
+					encoded.some((id) => !assigned.includes(id))
+				)
+					return {
+						reject:
+							"Record exactly the assigned owed checks on a full-set or landing pass, or fail with evidence if they are missing.",
+					};
 				const diagnose: string[] = [];
 				s.verdicts.push({
 					item: c.item,
@@ -710,6 +743,7 @@ function transition(prev: State, world: World) {
 					blocks,
 					diagnose,
 					notes: e.notes,
+					encodedChecks: encoded,
 				});
 				for (const text of e.notes)
 					file(
