@@ -318,10 +318,10 @@ test("a hand-over explains rejection and lists owed checks up front; its rejecti
 		open!.basis,
 		/Each annotation becomes a check that is owed until built or dropped/,
 	);
-	assert.match(
-		open!.basis,
-		/Build starts work to encode a check\. Defer keeps it owed and listed\. Drop clears it\./,
-	);
+	const opening = open!.basis.split("Checks still owed", 1)[0]!;
+	assert.deepEqual(open!.choices, ["accept", "reject"]);
+	assert.match(opening, /Accept the result on trunk, or reject it/);
+	assert.doesNotMatch(opening, /build starts|defer keeps|drop clears/i);
 	assert.match(
 		open!.basis,
 		/Checks still owed[\s\S]*Cover a zero-sized lot[\s\S]*Balance every ledger/,
@@ -1421,6 +1421,66 @@ test("the hand-over names each note's approval and pairs it with its local reply
 	if (process.env.KEEL_HANDOVER_SAMPLE)
 		writeFileSync(process.env.KEEL_HANDOVER_SAMPLE, ask.basis);
 });
+test("a follow-route hand-over shows the reference, bound rule and timed proof before the rulings and keeps them in rejection evidence", () => {
+	const x = flow((lane) =>
+		lane === "design"
+			? {
+					ownerReviewed: false,
+					reference: "Approved ledger contract §2",
+					revisionSummary: "- Revision 1: sums (falsifying probe)",
+				}
+			: null,
+	);
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const ask = x.asks()[0]!;
+	const assertMandateBeforeRulings = (basis: string) => {
+		const document = basis.match(/## Bound Mandate\n([\s\S]*?)\nRulings,/);
+		assert.ok(document?.[1], "the Mandate is a document before the rulings");
+		assert.match(document[1], /Reference: Approved ledger contract §2/);
+		assert.match(
+			document[1],
+			/sums: Rule\s+Sums match\s+Falsifying probe: compare totals/,
+		);
+		assert.match(
+			document[1],
+			/totals: Proof[\s\S]*\["run","proof"\][\s\S]*Timeout: 10 ms/,
+		);
+	};
+	assertMandateBeforeRulings(ask.basis);
+	const rejected = x.apply({
+		kind: "answered",
+		subject: ask.subject,
+		choice: "reject",
+		annotations: [{ n: 1, text: "Check the lower bound." }],
+	});
+	const filing = rejected.send?.find(({ lane }) => lane === "queue");
+	assertMandateBeforeRulings(String(filing?.event.report));
+});
+
+test("a reviewed Mandate with no approval notes is not repeated, but its build revisions still appear", () => {
+	const x = flow((lane) =>
+		lane === "design"
+			? {
+					ownerReviewed: true,
+					reference: "Approved ledger contract §2",
+					revisionSummary: "- Revision 1: sums (falsifying probe)",
+				}
+			: null,
+	);
+	x.prepared();
+	x.done("land", { kind: "landed", sha: "prepared" });
+	const { basis } = x.asks()[0]!;
+	assert.doesNotMatch(
+		basis,
+		/Bound Mandate|Approved ledger contract|Timeout: 10 ms/,
+	);
+	assert.match(
+		basis,
+		/Mandate revisions during the build:\s+- Revision 1: sums \(falsifying probe\)/,
+	);
+});
+
 test("the hand-over title names the goal without the done predicate", () => {
 	const x = flow();
 	x.merged();
