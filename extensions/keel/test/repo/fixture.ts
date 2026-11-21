@@ -63,8 +63,7 @@ export async function fixture(t: TestContext) {
 		sha: base,
 	} as const;
 	const run = (op: RepoOp, exec = nodeExec) => converge(exec, repo, op);
-	const publish = (globs?: readonly string[]) =>
-		readPublishable(nodeExec, repo, worker, globs);
+	const publish = () => readPublishable(nodeExec, repo, worker);
 	async function prepare(plan: Landing) {
 		const result = await run({
 			kind: "prepare_landing",

@@ -107,6 +107,33 @@ test("completed worker creation survives another item merging before replay", as
 	assert.deepEqual(await f.run(worker), result);
 	assert.equal(git(worker.path, "rev-parse", "HEAD"), f.base);
 });
+test("a stale start distinguishes a keel landing from a hand-written move to the same commit", async (t) => {
+	const f = await fixture(t);
+	const op = await f.item();
+	const merged = await f.run(op);
+	is(merged, "merged");
+	const plan = {
+		key: "land:42",
+		expectedTrunk: f.base,
+		combined: merged.sha,
+		message: "first landing",
+	};
+	const target = await f.prepare(plan);
+	is(await f.run({ ...plan, kind: "land", target }), "landed");
+	const start = {
+		...f.start,
+		key: "start:43",
+		branch: layout.buildBranch("43"),
+	};
+	assert.deepEqual(await f.run(start), {
+		kind: "moved",
+		actual: target,
+		keelMoved: true,
+	});
+	git(f.root, "update-ref", "refs/heads/trunk", f.base, target);
+	git(f.root, "update-ref", "refs/heads/trunk", target, f.base);
+	assert.deepEqual(await f.run(start), { kind: "moved", actual: target });
+});
 test("discovery from a linked checkout uses its toplevel but the shared repository layout", async (t) => {
 	const f = await fixture(t);
 	const linked = join(f.root, "linked space");
@@ -451,7 +478,7 @@ test("symbolic trunk cannot redirect a landing to main", async (t) => {
 		"refs/heads/main",
 	);
 });
-test("publish rejects dirt, detachment, and unrelated history; reports both ends of a rename with spaces", async (t) => {
+test("publish rejects dirt, detachment, and unrelated history", async (t) => {
 	const f = await fixture(t);
 	await f.item();
 	await rename(join(f.worker.path, "book"), join(f.worker.path, "new book"));
@@ -461,12 +488,8 @@ test("publish rejects dirt, detachment, and unrelated history; reports both ends
 	const result = await f.publish();
 	assert.equal(result.kind, "ok");
 	assert.equal(result.sha, git(f.worker.path, "rev-parse", "HEAD"));
-	assert.deepEqual(result.touched, ["book", "new book"]);
 	assert.equal(result.base, f.base);
 	assert.deepEqual(await f.publish(), result);
-	const protectedOnly = await f.publish(["new *"]);
-	assert.equal(protectedOnly.kind, "ok");
-	assert.deepEqual(protectedOnly.touched, ["new book"]);
 	git(f.worker.path, "switch", "--detach");
 	assert.equal((await f.publish()).kind, "occupied");
 	git(f.worker.path, "switch", f.worker.branch);
@@ -480,7 +503,76 @@ test("publish rejects dirt, detachment, and unrelated history; reports both ends
 	git(f.worker.path, "reset", "--hard", unrelated);
 	assert.equal((await f.publish()).kind, "not_descendant");
 });
-test("publish reports a worker's protected deletion, not the Encode change it merged from build", async (t) => {
+test("publish lists only committed changes in the project principles and playbooks directories", async (t) => {
+	const f = await fixture(t);
+	const principles = ".keel/principles";
+	const playbooks = ".keel/playbooks/nested";
+	await mkdir(join(f.root, principles), { recursive: true });
+	await mkdir(join(f.root, playbooks), { recursive: true });
+	for (const path of [
+		`${principles}/removed.md`,
+		`${principles}/unchanged.md`,
+		`${playbooks}/updated.md`,
+	])
+		await writeFile(join(f.root, path), "original\n");
+	git(f.root, "add", ".keel");
+	git(f.root, "commit", "-m", "owner policy");
+	const repo = await readRepo(nodeExec, f.root);
+	const worker = { ...f.worker, base: repo.baseHead };
+	is(await converge(nodeExec, repo, f.start), "started");
+	is(await converge(nodeExec, repo, worker), "worktree");
+	for (const [path, body] of [
+		[`${playbooks}/updated.md`, "revised\n"],
+		[`${principles}/added.md`, "new principle\n"],
+		[".keel/principles.md", "not in the directory\n"],
+		[".keel/verify.sh", "unrelated verification asset\n"],
+		["book", "new edition\n"],
+	] as const)
+		await writeFile(join(worker.path, path), body);
+	git(worker.path, "rm", `${principles}/removed.md`);
+	git(worker.path, "add", "-A");
+	git(worker.path, "commit", "-m", "change policy and the book");
+	const result = await readPublishable(nodeExec, repo, worker);
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.changedPolicyFiles, [
+		`${playbooks}/updated.md`,
+		`${principles}/added.md`,
+		`${principles}/removed.md`,
+	]);
+});
+test("publish lists both in-scope rename paths and only the in-scope side of crossing renames", async (t) => {
+	const f = await fixture(t);
+	const principles = ".keel/principles";
+	const playbooks = ".keel/playbooks";
+	const renamed = `${principles}/old title\nwith a newline.md`;
+	await mkdir(join(f.root, principles), { recursive: true });
+	for (const [path, body] of [
+		[renamed, "Rename between policy directories\n"],
+		[`${principles}/moved out.md`, "Leave policy\n"],
+		["outside.md", "Enter policy\n"],
+	] as const)
+		await writeFile(join(f.root, path), body);
+	git(f.root, "add", ".");
+	git(f.root, "commit", "-m", "pre-existing files");
+	const repo = await readRepo(nodeExec, f.root);
+	const worker = { ...f.worker, base: repo.baseHead };
+	is(await converge(nodeExec, repo, f.start), "started");
+	is(await converge(nodeExec, repo, worker), "worktree");
+	await mkdir(join(worker.path, playbooks));
+	git(worker.path, "mv", renamed, `${playbooks}/new title.md`);
+	git(worker.path, "mv", `${principles}/moved out.md`, "retired.md");
+	git(worker.path, "mv", "outside.md", `${principles}/moved in.md`);
+	git(worker.path, "commit", "-m", "move policy files");
+	const result = await readPublishable(nodeExec, repo, worker);
+	assert.equal(result.kind, "ok");
+	assert.deepEqual(result.changedPolicyFiles, [
+		`${playbooks}/new title.md`,
+		`${principles}/moved in.md`,
+		`${principles}/moved out.md`,
+		renamed,
+	]);
+});
+test("publish compares against the build the worker took, excluding sibling changes but including its own deletion", async (t) => {
 	const f = await fixture(t);
 	const item = await f.item();
 	const encode = {
@@ -490,25 +582,30 @@ test("publish reports a worker's protected deletion, not the Encode change it me
 		path: layout.worktree(f.repo, "42", "encode"),
 	};
 	is(await f.run(encode), "worktree");
-	await mkdir(join(encode.path, "tests"));
-	await writeFile(join(encode.path, "tests/check.sh"), "check");
-	git(encode.path, "add", "tests");
-	git(encode.path, "commit", "-m", "Encode adds a check");
+	const policy = ".keel/playbooks/check.md";
+	await mkdir(join(encode.path, ".keel/playbooks"), { recursive: true });
+	await writeFile(join(encode.path, policy), "check");
+	git(encode.path, "add", policy);
+	git(encode.path, "commit", "-m", "sibling adds a playbook");
 	const pub = await readPublishable(nodeExec, f.repo, encode);
 	assert.equal(pub.kind, "ok");
 	const merged = await f.run({ ...item, item: pub.sha });
 	is(merged, "merged");
 	git(f.worker.path, "merge", "--no-edit", f.branch);
-	const unchanged = await f.publish(["tests/**"]);
+	const unchanged = await f.publish();
 	assert.equal(unchanged.kind, "ok");
-	git(f.worker.path, "rm", "tests/check.sh");
-	git(f.worker.path, "commit", "-m", "remove the check");
-	const deleted = await f.publish(["tests/**"]);
-	assert.equal(deleted.kind, "ok");
-	assert.deepEqual(
-		[unchanged.touched, deleted.touched],
-		[[], ["tests/check.sh"]],
+	assert.equal(unchanged.base, merged.sha);
+	assert.equal(
+		git(f.root, "diff", "--name-only", unchanged.base, unchanged.sha),
+		"book",
 	);
+	assert.deepEqual(unchanged.changedPolicyFiles, []);
+	git(f.worker.path, "rm", policy);
+	git(f.worker.path, "commit", "-m", "remove the playbook");
+	const deleted = await f.publish();
+	assert.equal(deleted.kind, "ok");
+	assert.equal(deleted.base, merged.sha);
+	assert.deepEqual(deleted.changedPolicyFiles, [policy]);
 });
 test("git ignores inherited redirection/config, replacement refs and a graft at publish", async (t) => {
 	const f = await fixture(t);
@@ -540,10 +637,9 @@ test("git ignores inherited redirection/config, replacement refs and a graft at 
 	const before = { ...process.env };
 	try {
 		Object.assign(process.env, poison);
-		const result = await f.publish(["b*"]);
+		const result = await f.publish();
 		assert.equal(result.kind, "ok");
 		assert.equal(result.sha, merge.item);
-		assert.deepEqual(result.touched, ["book"]);
 		assert.equal(result.base, f.base);
 		assert.equal(
 			(await readRepo(nodeExec, f.root)).commonDir,
