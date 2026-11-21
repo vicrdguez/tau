@@ -6,8 +6,8 @@ import type {
 	RepoInfo,
 	Sha,
 } from "../../repo/index.ts";
-import type { Ruling } from "../build/public.ts";
-import type { Mandate, Reply } from "../design/public.ts";
+import type { Approval, Ruling } from "../build/public.ts";
+import type { Mandate } from "../design/public.ts";
 
 export type Block = { thread: string; ground: string; evidence: string };
 export type Scope = "item" | "full" | "landing";
@@ -104,7 +104,7 @@ export type State = {
 		summary: string;
 		risk: string;
 		rulings: Ruling[];
-		approvalReplies: Reply[];
+		approvals: Approval[];
 	} | null;
 	slot: "none" | "waiting" | "held";
 	plan: Landing | null;

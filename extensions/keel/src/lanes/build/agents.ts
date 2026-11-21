@@ -3,7 +3,6 @@ import { type AgentDecl, prose } from "../../kernel/lane.ts";
 import { renderMandate } from "../design/public.ts";
 import {
 	affects,
-	approvalFollowup,
 	type Build,
 	held,
 	type Item,
@@ -35,11 +34,6 @@ const discover = prose(dir, "../../prose/inputs/build/discovered.md", [
 	"plan",
 	"direction",
 ]);
-const reviewFollowup = prose(
-	dir,
-	"../../prose/inputs/build/approval-followup.md",
-	["annotations", "direction"],
-);
 const revise = prose(dir, "../../prose/inputs/build/revision-plan.md", [
 	"before",
 	"mandate",
@@ -200,12 +194,6 @@ function coordInput(s: Build) {
 			: "";
 	switch (c.tool) {
 		case "publish_plan": {
-			const owed = approvalFollowup(s);
-			if (owed.length)
-				return reviewFollowup({
-					annotations: approval(owed),
-					direction: c.direction,
-				});
 			if (c.revising) {
 				const p = s.revision!;
 				const list = (includes: (item: Item) => boolean) =>

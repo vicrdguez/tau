@@ -141,10 +141,14 @@ type V1 = {
 		summary: string;
 		risk: string;
 		rulings: RulingV1[];
-		approvalReplies: {
-			n: number;
-			status: "acted_on" | "considered" | "dismissed";
-			reason: string;
+		approvals: {
+			revision: number | null;
+			notes: {
+				n: number;
+				status: "acted_on" | "considered" | "dismissed";
+				reason: string;
+				text: string;
+			}[];
 		}[];
 	} | null;
 	slot: "none" | "waiting" | "held";

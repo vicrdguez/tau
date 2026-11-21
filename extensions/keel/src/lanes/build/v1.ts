@@ -43,13 +43,18 @@ type V1 = {
 		| "closed"
 		| "cancelled";
 	mandate: MandateV1 | null;
-	approvalReplies: {
-		n: number;
-		status: "acted_on" | "considered" | "dismissed";
-		reason: string;
+	approvals: {
+		revision: number | null;
+		notes: {
+			n: number;
+			status: "acted_on" | "considered" | "dismissed";
+			reason: string;
+			text: string;
+		}[];
 	}[];
 	revision: {
 		kind: "propose_revision";
+		number: number;
 		mandate: MandateV1;
 		causes: string[];
 		nodes: string[];
@@ -162,7 +167,7 @@ export const buildV1 = {
 	sample: (): V1 => ({
 		phase: "idle",
 		mandate: null,
-		approvalReplies: [],
+		approvals: [],
 		revision: null,
 		findings: [],
 		queueHolds: [],

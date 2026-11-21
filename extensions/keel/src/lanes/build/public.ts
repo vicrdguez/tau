@@ -1,7 +1,12 @@
 import type { WorkId } from "../../kernel/ids.ts";
 import type { Message } from "../../kernel/lane.ts";
 import type { Sha } from "../../repo/index.ts";
-import type { Mandate } from "../design/public.ts";
+import type { Mandate, Reply } from "../design/public.ts";
+
+export type Approval = {
+	revision: number | null;
+	notes: (Reply & { text: string })[];
+};
 
 export type PlanFinding = {
 	kind: "plan_finding";
@@ -12,6 +17,7 @@ export type PlanFinding = {
 };
 export type RevisionProposal = {
 	kind: "propose_revision";
+	number: number;
 	mandate: Mandate;
 	causes: string[];
 	nodes: string[];
@@ -32,8 +38,6 @@ export type BuildUpdate =
 	| { kind: "queue_release"; cause: string; direction?: string }
 	| PlanFinding
 	| RevisionProposal
-	| { kind: "withdraw_revision" }
-	| { kind: "approval_followup"; notes: string[] }
 	| {
 			kind: "integration" | "rework";
 			item: string;

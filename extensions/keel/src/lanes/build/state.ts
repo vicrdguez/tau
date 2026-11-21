@@ -6,7 +6,12 @@ import type {
 	Worker,
 } from "../../repo/index.ts";
 import { type Mandate, type Reply, repliesCover } from "../design/public.ts";
-import type { PlanFinding, RevisionProposal, Ruling } from "./public.ts";
+import type {
+	Approval,
+	PlanFinding,
+	RevisionProposal,
+	Ruling,
+} from "./public.ts";
 
 export type Goal = {
 	id: string;
@@ -62,7 +67,7 @@ export type Build = {
 		| "closed"
 		| "cancelled";
 	mandate: Mandate | null;
-	approvalReplies: Reply[];
+	approvals: Approval[];
 	revision: (RevisionProposal & { text: string }) | null;
 	findings: (Omit<PlanFinding, "cause"> & {
 		cause: string | null;
@@ -124,7 +129,7 @@ export const buildDoc = defineState({
 	initial: (): Build => ({
 		phase: "idle",
 		mandate: null,
-		approvalReplies: [],
+		approvals: [],
 		revision: null,
 		findings: [],
 		queueHolds: [],
@@ -155,10 +160,21 @@ export const buildDoc = defineState({
 	}),
 });
 
-export const approvalFollowup = (s: Build) =>
-	s.items.length
-		? s.mandate!.approvalNotes.slice(s.approvalReplies.length)
-		: [];
+export function recordApproval(
+	s: Build,
+	revision: number | null,
+	notes: string[],
+	replies: Reply[],
+) {
+	if (notes.length)
+		s.approvals.push({
+			revision,
+			notes: notes.map((text, index) => ({
+				...replies.find((r) => r.n === index + 1)!,
+				text,
+			})),
+		});
+}
 
 export const unplannedFinding = (s: Build) =>
 	s.findings.find((f) => f.items.length === 0);

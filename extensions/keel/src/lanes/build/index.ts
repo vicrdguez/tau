@@ -18,7 +18,7 @@ import {
 	type RepoResult,
 	type Sha,
 } from "../../repo/index.ts";
-import { mandateLabels, type Reply, repliesCover } from "../design/public.ts";
+import { mandateLabels, type Reply } from "../design/public.ts";
 import {
 	closeFindings,
 	fileHolding,
@@ -39,7 +39,6 @@ import {
 import type { BuildUpdate, Ruling } from "./public.ts";
 import {
 	affects,
-	approvalFollowup,
 	type Brief,
 	type Build,
 	buildDoc,
@@ -51,6 +50,7 @@ import {
 	newItem,
 	parked,
 	queueHeld,
+	recordApproval,
 	repoHeld,
 	unplannedFinding,
 	validatePlan,
@@ -122,11 +122,6 @@ function schedule(s: Build, w: World) {
 		slots--;
 	}
 	if (c.tool || held(s, null)) return;
-	if (approvalFollowup(s).length) {
-		coordinator(s, "publish_plan");
-		c.revising = false;
-		return;
-	}
 	if (s.revision || unplannedFinding(s)) {
 		coordinator(s, "publish_plan");
 		c.revising = !!s.revision;
@@ -529,43 +524,11 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			schedule(s, w);
 			return { state, send };
 		}
-		case "withdraw_revision": {
-			s.revision = null;
-			if (s.coordinator.revising) {
-				s.coordinator.pendingDirection = s.coordinator.direction;
-				s.coordinator.revising = false;
-				coordinator(s, null);
-			}
-			const send = releaseQueueHold(s, revisionPlanHold, undefined, w);
-			schedule(s, w);
-			return { state, send };
-		}
-		case "approval_followup":
-			if (s.phase !== "active") return { state };
-			s.mandate!.approvalNotes.push(...e.notes);
-			if (s.coordinator.tool) {
-				s.coordinator.pendingDirection = s.coordinator.direction;
-				coordinator(s, null);
-			}
-			break;
 		case "plan": {
 			const c = s.coordinator;
 			if (c.tool !== "publish_plan" || held(s, null))
 				return { reject: "No plan is due." };
 			const replies = e.replies ?? [];
-			const owed = approvalFollowup(s);
-			if (owed.length) {
-				if (e.items.length || !repliesCover(owed.length, replies))
-					return {
-						reject: "Reply to each owed annotation without changing the plan.",
-					};
-				const offset = s.approvalReplies.length;
-				s.approvalReplies.push(
-					...replies.map((r) => ({ ...r, n: offset + r.n })),
-				);
-				coordinator(s, null);
-				break;
-			}
 			if (c.revising) {
 				const activation = applyRevision(s, e.items, replies, w);
 				if ("reject" in activation) return activation;
@@ -576,7 +539,8 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			}
 			const reject = validatePlan(s, e.items, replies);
 			if (reject) return { reject };
-			if (!s.items.length) s.approvalReplies = replies;
+			if (!s.items.length)
+				recordApproval(s, null, s.mandate!.approvalNotes, replies);
 			s.items.push(...e.items.map(newItem));
 			const finding = c.finding ? unplannedFinding(s)! : null;
 			if (finding?.cause) finding.items = e.items.map((i) => i.id);
@@ -797,7 +761,7 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				head: s.head!,
 				mandate: s.mandate!,
 				rulings: s.items.flatMap((i) => i.rulings),
-				approvalReplies: s.approvalReplies,
+				approvals: s.approvals,
 				summary: e.summary,
 				risk: e.risk,
 			});

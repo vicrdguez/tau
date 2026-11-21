@@ -15,6 +15,7 @@ import {
 	newItem,
 	queueHeld,
 	queueMatches,
+	recordApproval,
 	validateDependencies,
 	validateGraph,
 } from "./state.ts";
@@ -196,17 +197,8 @@ export function applyRevision(
 		}
 		return { ...i, deps: g.deps };
 	});
-	const originalNotes = s.mandate!.approvalNotes;
-	s.mandate = {
-		...p.mandate,
-		approvalNotes: [...originalNotes, ...p.mandate.approvalNotes],
-	};
-	s.approvalReplies.push(
-		...replies.map((reply) => ({
-			...reply,
-			n: originalNotes.length + reply.n,
-		})),
-	);
+	s.mandate = p.mandate;
+	recordApproval(s, p.number, p.mandate.approvalNotes, replies);
 	s.revision = null;
 	const send: Message[] = [
 		{

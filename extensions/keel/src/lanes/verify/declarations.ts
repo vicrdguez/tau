@@ -189,13 +189,15 @@ export function asks(s: State): Ask[] {
 				risk: info.risk,
 				directions: s.directions.join("\n") || "None.",
 				approvalReplies:
-					s
-						.mandate!.approvalNotes.map((note, i) => {
-							const n = i + 1;
-							const reply = info.approvalReplies.find((r) => r.n === n);
-							return `${n}. ${note}${reply ? `\n   ${reply.status}: ${reply.reason}` : ""}`;
+					info.approvals
+						.map(({ revision, notes }) => {
+							const label =
+								revision === null
+									? "Mandate approval"
+									: `Revision ${revision} approval`;
+							return `#### ${label}\n\n${notes.map((n) => `${n.n}. ${n.text}\n   ${n.status}: ${n.reason}`).join("\n")}`;
 						})
-						.join("\n") || "None.",
+						.join("\n\n") || "None.",
 
 				diagnoses: s.diagnoses.join("\n") || "None.",
 				revisions: h.revisions || "None.",
