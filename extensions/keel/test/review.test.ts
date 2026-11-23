@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { draftError, type Draft } from "../src/lanes/design/draft.ts";
+import { type Draft, draftError } from "../src/lanes/design/draft.ts";
 import {
 	mandateLabels,
 	renderMandate,
@@ -261,7 +261,10 @@ test("numbered replies must exactly cover the owner's notes", () => {
 	for (const replies of [
 		[reply(1)],
 		[reply(2), reply(2)],
-		[reply(1), reply(2), reply(3)],
+		[reply(1), reply(2), reply(2)],
+		[reply(1), reply(3)],
+		[reply(0), reply(2)],
+		[reply(1), reply(1.5)],
 		[reply(1), { ...reply(2), status: "ignored" }],
 		[reply(1), { ...reply(2), reason: " " }],
 	])

@@ -6,7 +6,6 @@ import { stateDoc } from "../../src/kernel/state.ts";
 import { design } from "../../src/lanes/design/index.ts";
 import { options } from "../../src/roles/index.ts";
 import { runRepoEffect } from "../../src/workflow.ts";
-import { git } from "./repo.ts";
 import { latch } from "../toy.ts";
 import {
 	arenaFrame,
@@ -16,6 +15,7 @@ import {
 } from "./arena-script.ts";
 import { buildTurns } from "./build-turns.ts";
 import { openScriptedWorkflow } from "./kernel.ts";
+import { git } from "./repo.ts";
 
 const intent = "Write a book export and an independent statistics file";
 const report =

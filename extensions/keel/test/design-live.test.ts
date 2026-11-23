@@ -3,8 +3,8 @@ import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import { explorerDispatch } from "../src/roles/dispatch.ts";
 import {
-	designWorld as world,
 	reviewDriver as run,
+	designWorld as world,
 } from "./fixtures/design-review.ts";
 
 const reference = "Approved line format, ADR 4";
@@ -342,6 +342,15 @@ test("a revision refuses invalid labels, malformed or duplicated edits", () => {
 		assert.ok("reject" in result, JSON.stringify(changes));
 		assert.deepEqual(x.asks(), []);
 	}
+	assert.ok(
+		"reject" in
+			x.attempt({
+				...publish,
+				changes: { remove: ["P1"] },
+				answers: answerCauses(request.causes, ["P1"]),
+			}),
+		"the revision must not remove the only timed proof",
+	);
 	x.send(publish);
 	assert.equal(x.asks().length, 1);
 });
@@ -363,6 +372,17 @@ test("a seam revision needs the usage-first contract and preserves proof, riders
 				changes: { seams: [{ ...seam, signature: "plain" }] },
 				answers,
 			}),
+	);
+	assert.ok(
+		"reject" in
+			x.attempt({
+				...publish,
+				changes: {
+					sections: [{ label: "S1", body: "Unstructured replacement" }],
+				},
+				answers,
+			}),
+		"a free-form note must not replace a seam contract",
 	);
 	x.send({ ...publish, changes, answers });
 	const [ask] = x.asks();

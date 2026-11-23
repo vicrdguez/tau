@@ -15,8 +15,8 @@ import {
 import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openReview, seedBookPolicy } from "./fixtures/mandate-scenario.ts";
-import { openScenario } from "./fixtures/scenario.ts";
 import { git, tempRepo } from "./fixtures/repo.ts";
+import { openScenario } from "./fixtures/scenario.ts";
 import { latch } from "./toy.ts";
 
 const child = fileURLToPath(

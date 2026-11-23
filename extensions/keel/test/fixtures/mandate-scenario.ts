@@ -5,7 +5,6 @@ import type { Annotation } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import type { Conversation, Harness, Storage } from "tau/durable";
 import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import { git } from "./repo.ts";
 import {
 	arenaFrame,
 	candidate,
@@ -19,6 +18,7 @@ import {
 } from "./arena-script.ts";
 import { buildTurns } from "./build-turns.ts";
 import { openScriptedWorkflow } from "./kernel.ts";
+import { git } from "./repo.ts";
 
 const prompt = "Give shell callers one way to read and write the book.";
 const gap = "No shared write function exists.";

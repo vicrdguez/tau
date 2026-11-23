@@ -606,7 +606,7 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 	for (const part of [
 		"Attach the check to the placement call.",
 		"Use the account default.",
-		"Default of arena_seat_1",
+		"Sketch of arena_seat_1",
 		"Judge's score for arena_seat_1",
 	])
 		assert.ok(job.question.toLowerCase().includes(part.toLowerCase()), part);
