@@ -26,7 +26,7 @@ You are answering a "why" question about a piece of code by synthesizing finding
 
 ## Epistemics Framework
 
-You MUST follow `references/epistemics.md`. Read it in full before writing. The key rules:
+You MUST follow `epistemics.md`. Read it in full before writing. The key rules:
 
 1. Every claim must sit in one tier: **Direct**, **Supported**, **Inferred**, **Speculative**, **Unknown**. The tier sets its section and its phrasing.
 2. Every Direct/Supported claim must have a citation (PR #, ticket ID, doc URL, chat permalink, commit hash, or file:line).
@@ -124,6 +124,6 @@ Revise if any item fails:
 4. Does "What We Don't Know" name specific gaps? If it's empty or missing, be suspicious. Historical investigations almost always have gaps.
 5. Did you check any hypothesis embedded in the question against the evidence rather than rubber-stamp it?
 6. Did you cite code as evidence for its own intent? Remove it. Code is mechanics, not motivation.
-7. Is the tone calibrated? A confident-sounding answer on weak evidence is the exact failure this skill exists to prevent.
+7. Is the tone calibrated? A confident-sounding answer on weak evidence is the exact failure this playbook exists to prevent.
 
 The value of this output is its honesty, not its authority. A reader who takes it to the original author, an engineering lead, or a product manager should know what's known, what's inferred, and what's missing, so they can ask the right follow-up questions. Optimize for being useful, not for looking decisive.
