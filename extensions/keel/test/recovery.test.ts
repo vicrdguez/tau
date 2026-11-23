@@ -12,6 +12,7 @@ import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { token } from "../src/kernel/ids.ts";
 import { ReceiptState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
+import { captureTelemetry } from "./fixtures/telemetry.ts";
 import { toy } from "./toy.ts";
 
 const child = fileURLToPath(new URL("./fixtures/recovery.ts", import.meta.url));
@@ -28,17 +29,18 @@ async function reopen(t: TestContext, point: "publish" | "create") {
 	);
 
 	const storage = await openNodeSqliteStorage(file);
-	const x = await toy({ storage });
+	const { telemetry, samples } = captureTelemetry();
+	const x = await toy({ storage, telemetry });
 	t.after(() => x.harness.close(ctx));
 	const agents = await x.agents();
 	assert.equal(agents.length, 1, "one original worker");
 	const worker = await x.harness.conversation(agents[0]!, ctx);
 	assert.ok(worker);
-	return { x, worker, storage };
+	return { x, worker, storage, samples };
 }
 
 test("SQLite SIGKILL after publish and before tool reply: replay returns the receipt without publishing again", async (t) => {
-	const { x, worker } = await reopen(t, "publish");
+	const { x, worker, samples } = await reopen(t, "publish");
 	const replies = async () =>
 		(await worker.entries({}, 100, undefined, ctx)).items
 			.flatMap((e) => e.model ?? [])
@@ -88,6 +90,10 @@ test("SQLite SIGKILL after publish and before tool reply: replay returns the rec
 	);
 	assert.equal((await x.state()).publications, 1);
 	assert.equal(x.provider.state.callCount, 0, "no replacement model call");
+	assert.deepEqual(
+		samples.filter((m) => m.name.startsWith("keel.")),
+		[],
+	);
 });
 
 test("SQLite SIGKILL between worker creation and first submit: restart delivers exactly once to the original worker", async (t) => {

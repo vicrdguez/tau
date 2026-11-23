@@ -214,7 +214,7 @@ export function createKernel(config: {
 		const forRole = (role: RoleName) => settings(role, opts, extension, tools);
 		for (const frame of result.frames)
 			await reconcile(tx, frame, tasks, forRole, now, config.input?.render);
-		return { reply: result.reply };
+		return { reply: result.reply, measures: result.measures };
 	}
 	return {
 		extension,

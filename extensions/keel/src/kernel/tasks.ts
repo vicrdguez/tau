@@ -30,6 +30,7 @@ import {
 	type Token,
 } from "./ids.ts";
 import type { FactDelivery, KernelEvent, Result } from "./lane.ts";
+import { type Measure, record } from "./metrics.ts";
 import { type Address, ProjectState, WorkState } from "./records.ts";
 import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
@@ -189,8 +190,11 @@ export function makeTasks(hooks: Hooks) {
 		now: number,
 	) {
 		const result = await hooks.transact(tx, { ...address, fact: event }, now);
-		if ("reject" in result)
+		if ("reject" in result) {
 			await refused(tx, address, event, now, result.reject);
+			return undefined;
+		}
+		return result.measures;
 	}
 	// A rejected chain that allocated a conversation has to roll back. In a
 	// fresh commit check the original slot again and record the fact/refusal
@@ -199,12 +203,29 @@ export function makeTasks(hooks: Hooks) {
 		runtime: TaskRuntime<I, S, null, object>,
 		change: (
 			tx: Tx,
-			apply: typeof recordFact,
+			apply: (
+				tx: Tx,
+				address: Address,
+				event: KernelEvent,
+				now: number,
+				measure?: Measure,
+			) => Promise<void>,
 		) => ReturnType<Parameters<typeof runtime.commit>[0]>,
 		ctx: Context,
 	) {
+		let applied: { address: Address; measures: readonly Measure[] } | undefined;
 		try {
-			await runtime.commit((tx) => change(tx, recordFact), ctx);
+			await runtime.commit((tx) => {
+				applied = undefined;
+				return change(tx, async (tx, address, event, now, measure) => {
+					const measures = await recordFact(tx, address, event, now);
+					if (measures)
+						applied = {
+							address,
+							measures: measure ? [...measures, measure] : measures,
+						};
+				});
+			}, ctx);
 		} catch (error) {
 			if (!(error instanceof RejectedSeed)) throw error;
 			await runtime.commit(
@@ -214,7 +235,9 @@ export function makeTasks(hooks: Hooks) {
 					),
 				ctx,
 			);
+			return;
 		}
+		if (applied) record(ctx, applied.measures, applied.address);
 	}
 
 	const answer = defineTask<DecisionInput<string>, { phase: "apply" }, null>({
@@ -253,6 +276,14 @@ export function makeTasks(hooks: Hooks) {
 								})),
 							},
 							runtime.now(),
+							{
+								name: "keel.decision.wait",
+								value: d.at - d.requestedAt,
+								attributes: {
+									lane,
+									choice: d.choice.startsWith("base:") ? "base" : d.choice,
+								},
+							},
 						);
 						return completed;
 					},

@@ -3,11 +3,12 @@ import {
 	CodingTools,
 	type ConversationId,
 	createRegistry,
+	type HarnessOptions,
 	type JsonObject,
 	MemoryStorage,
 	type Storage,
 } from "tau/durable";
-import { obj } from "tau/schema";
+import { obj, oneOf, opt } from "tau/schema";
 import {
 	createModels,
 	fauxAssistantMessage,
@@ -31,6 +32,12 @@ import {
 import { WorkState } from "../src/kernel/records.ts";
 import { defineState, stateDoc } from "../src/kernel/state.ts";
 import { options } from "../src/roles/index.ts";
+
+const started = {
+	name: "keel.work.started",
+	value: 1,
+	attributes: { route: "follow" },
+} as const;
 
 const initial = () => ({
 	ask: null as string | null,
@@ -90,6 +97,7 @@ const toyLane = defineLane({
 						ask: null,
 						notes: [JSON.stringify(e.annotations)],
 					},
+					measures: [started],
 				};
 			case "effect_done":
 				return {
@@ -146,6 +154,22 @@ const toyLane = defineLane({
 				return {
 					state: { ...s, publications: s.publications + 1, turn: 0 },
 					reply: "published once",
+					measures: [started],
+					...(e.refusal === "seed"
+						? {
+								send: [{ lane: "toy", work: "new", event: { kind: "reject" } }],
+							}
+						: e.refusal === "chain"
+							? {
+									send: [
+										{
+											lane: "shared",
+											work: null,
+											event: { kind: "forbidden" },
+										},
+									],
+								}
+							: {}),
 				};
 			case "reject":
 				return { reject: "not allowed" };
@@ -196,7 +220,7 @@ const toyLane = defineLane({
 						subject: subject("review"),
 						basis: s.ask!,
 						title: "Review",
-						choices: ["accept"] as const,
+						choices: ["accept", "base:seat_1"] as const,
 					},
 				],
 	agents: (s) =>
@@ -226,11 +250,13 @@ export function toolTurn(name: string, args: JsonObject = {}) {
 
 export async function toy({
 	storage = new MemoryStorage(),
+	telemetry,
 	observe = async () => {},
 	runEffect = async () => ({ value: "outside" }),
 	...composition
 }: Partial<Parameters<typeof createKernel>[0]> & {
 	storage?: Storage;
+	telemetry?: HarnessOptions["telemetry"];
 	observe?: () => Promise<void>;
 } = {}) {
 	const publish = defineLaneTool({
@@ -238,10 +264,10 @@ export async function toy({
 		roles: ["worker"],
 		name: "publish",
 		description: "Publish",
-		parameters: obj({}),
+		parameters: obj({ refusal: opt(oneOf(["seed", "chain"])) }),
 		terminate: true,
 		observe,
-		event: () => ({ kind: "publish" }),
+		event: ({ refusal }) => ({ kind: "publish", ...(refusal && { refusal }) }),
 	});
 	const k = createKernel({
 		lanes: [toyLane, shared],
@@ -255,7 +281,11 @@ export async function toy({
 	const provider = fauxProvider();
 	const models = createModels();
 	models.setProvider(provider.provider);
-	const store = await openStore(storage, { registry, models }, ctx);
+	const store = await openStore(
+		storage,
+		{ registry, models, ...(telemetry && { telemetry }) },
+		ctx,
+	);
 	const { harness } = store;
 	await harness.commit(
 		(tx) =>

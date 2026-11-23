@@ -30,7 +30,7 @@
 	},
 	"tau-wf-keel": {
 		"extension": true,
-		"tau": [".", "./durable", "./schema", "./chord"],
+		"tau": [".", "./durable", "./schema", "./chord", "./telemetry"],
 		"testOnly": {
 			"tau": ["./testing"]
 		}

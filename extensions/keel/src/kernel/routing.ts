@@ -13,6 +13,7 @@ import type {
 	RegisteredLane,
 	World,
 } from "./lane.ts";
+import type { Measure } from "./metrics.ts";
 import { stateDoc } from "./state.ts";
 import { ledger } from "./storage.ts";
 
@@ -27,7 +28,12 @@ async function draftFor<S extends JsonObject>(
 	return tx.doc(stateDoc(def), work);
 }
 
-async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
+async function load<S extends JsonObject>(
+	tx: Tx,
+	lane: Lane<S>,
+	world: World,
+	measures: Measure[],
+) {
 	const draft = await draftFor(tx, lane, world.work);
 	// A tau draft is a transaction-owned proxy. A reducer never gets one, even
 	// for its own lane: a later routed rejection must discard the entire chain.
@@ -41,6 +47,7 @@ async function load<S extends JsonObject>(tx: Tx, lane: Lane<S>, world: World) {
 	function accept(result: Accepted<S>) {
 		state = result.state;
 		notes.push(...(result.notes ?? []));
+		if (result.measures) measures.push(...result.measures);
 	}
 	return {
 		lane: lane.name,
@@ -110,6 +117,7 @@ export async function route(
 	root: string,
 	caller: WorkId | null,
 ) {
+	const measures: Measure[] = [];
 	const scopes = new Map<WorkId | null, Map<string, Frame>>();
 	const effectsByScope = new Map<
 		WorkId | null,
@@ -138,11 +146,16 @@ export async function route(
 				frames.set(
 					lane.name,
 					await lane.use((l) =>
-						load(tx, l, {
-							...world,
-							runningEffect: (key) =>
-								effects[slotKey(lane.name, key)]?.status === "running",
-						}),
+						load(
+							tx,
+							l,
+							{
+								...world,
+								runningEffect: (key) =>
+									effects[slotKey(lane.name, key)]?.status === "running",
+							},
+							measures,
+						),
 					),
 				);
 		}
@@ -250,5 +263,5 @@ export async function route(
 				pending.push({ delivery, path: new Set() });
 		}
 	}
-	return (await drain()) ?? { reply, frames: [...touched] };
+	return (await drain()) ?? { reply, frames: [...touched], measures };
 }

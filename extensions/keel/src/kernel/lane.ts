@@ -9,6 +9,7 @@ import type {
 	Token,
 	WorkId,
 } from "./ids.ts";
+import type { Measure } from "./metrics.ts";
 import type { StateDef } from "./state.ts";
 
 export { prose } from "tau";
@@ -39,7 +40,9 @@ export type Delivery = { lane: string; work: WorkId | null; event: LaneEvent };
 /** Kept distinct from lane-authored events even when their kind strings coincide. */
 export type FactDelivery = Omit<Delivery, "event"> & { fact: KernelEvent };
 export type Message = Omit<Delivery, "work"> & { work: WorkId | null | "new" };
-export type Result = { reject: string } | { reply: string | null };
+export type Result =
+	| { reject: string }
+	| { reply: string | null; measures: readonly Measure[] };
 export type Ask = {
 	subject: SubjectLocal;
 	title: string;
@@ -83,6 +86,7 @@ export type Accepted<S> = {
 	state: S;
 	send?: readonly Message[];
 	notes?: readonly Note[];
+	measures?: readonly Measure[];
 	reply?: string;
 };
 export type Reduction<S> = { reject: string } | Accepted<S>;
