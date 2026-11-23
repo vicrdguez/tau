@@ -592,6 +592,8 @@ export const calls: Readonly<Record<string, Call>> = {
 				device,
 				context,
 			);
+			if (answered.kind === "answered" && !answered.repeated)
+				open.telemetry?.recordAnswer(answered.decision);
 			return answered.kind === "answered"
 				? {
 						result: {

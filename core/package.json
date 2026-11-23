@@ -38,6 +38,7 @@
 		"@earendil-works/pi-codemode": "1.5.2",
 		"@earendil-works/pi-durable": "1.5.2",
 		"@earendil-works/pi-schema": "1.5.2",
+		"@earendil-works/pi-telemetry": "1.5.2",
 		"jiti": "2.7.0",
 		"proper-lockfile": "4.1.2"
 	},
