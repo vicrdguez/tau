@@ -459,6 +459,7 @@ export async function openScenario(
 		root,
 		store,
 		provider,
+		queueProvider,
 		turn,
 		settle,
 		assertHistory,

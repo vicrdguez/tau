@@ -76,6 +76,13 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 		`keel/${s.root.id}/build`,
 		checkouts,
 	);
+	if (process.env.KEEL_OWED_OUT_RENDERS) {
+		const { d, text } = await openAsk(s, "verify");
+		await writeFile(
+			"/tmp/keel-owed-out-handover.md",
+			`Title: ${d.title}\nChoices: ${d.choices.join(", ")}\n\n${text}`,
+		);
+	}
 	await s.accept(trunk);
 });
 
@@ -142,7 +149,7 @@ test("cancelled encoding work reopens its original owed-check decision without c
 	assert.equal(git(root, "rev-parse", "trunk"), before);
 });
 
-test("a rejected landing opens owed-check triage; the check's verified landed commit clears it from the next hand-over", async (t) => {
+test("rejected hand-over findings go through investigation; defer parks one, build seeds new work, and the next hand-over has no owed list", async (t) => {
 	const { root } = await fixture(t);
 	const s = await openScenario(root, new MemoryStorage(), "rework");
 	const { harness } = s.store;
@@ -152,8 +159,9 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 	const ask = (lane: string) => openAsk(s, lane);
 	const first = await ask("verify");
 	const before = git(root, "rev-parse", "trunk");
-	const check =
-		"Keep a runnable book-format regression check in the repository.";
+	const deferred = "Keep an example of the previous book format.";
+	const change = "Add a runnable book-format regression check.";
+	const reference = "Approved book format";
 	const reject = (
 		d: typeof first.d,
 		annotations: { start: number; end: number; text: string }[],
@@ -168,13 +176,60 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 	const askedAgain = await ask("verify");
 	assert.notEqual(first.d.id, askedAgain.d.id);
 	assert.equal(
-		(await reject(askedAgain.d, [{ start: 0, end: 1, text: check }])).kind,
+		(
+			await reject(askedAgain.d, [
+				{ start: 0, end: 1, text: deferred },
+				{ start: 1, end: 2, text: change },
+			])
+		).kind,
 		"answered",
 	);
+	s.queueProvider.setResponses([
+		...[deferred, change].map((text, index) =>
+			s.turn(
+				"investigator",
+				"report_investigation",
+				{
+					finding: index + 2,
+					classification: "determined",
+					evidence:
+						index === 0
+							? "The earlier format is in Git."
+							: "There is no runnable check in the landed tree.",
+					size: "small",
+					cause: index === 0 ? "book format history" : "book format regression",
+					recommendation: index === 0 ? "defer" : "build",
+					reference,
+				},
+				text,
+				"Source: owner",
+				before,
+				"The integrated book matches the approved format.",
+			),
+		),
+	]);
+	await s.settle();
+	assert.equal(s.queueProvider.getPendingResponseCount(), 0);
+	const parked = await ask("queue");
+	assert.ok(parked.text.includes(deferred));
+	const answer = (d: typeof first.d, choice: string) =>
+		fauxAnswer(s.store, d.id, { basis: d.basis, choice, annotations: [] });
+	assert.equal((await answer(parked.d, "defer")).kind, "answered");
 	await s.settle();
 	const triage = await ask("queue");
-	assert.ok(triage.text.includes(check) && triage.text.includes(before));
-	const goal = "Encode the accepted book format in a regression check.";
+	assert.deepEqual(triage.d.choices, ["build", "defer", "drop"]);
+	for (const part of [
+		change,
+		before,
+		"There is no runnable check in the landed tree.",
+	])
+		assert.ok(triage.text.includes(part), part);
+	if (process.env.KEEL_OWED_OUT_RENDERS)
+		await writeFile(
+			"/tmp/keel-owed-out-triage.md",
+			`Title: ${triage.d.title}\nChoices: ${triage.d.choices.join(", ")}\n\n${triage.text}`,
+		);
+	const goal = "Keep a runnable regression check for the approved book format.";
 	const proof = {
 		id: "format-check",
 		argv: ["sh", "check-book.sh"],
@@ -192,24 +247,25 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 			"ground",
 			{
 				route: "follow",
-				reference: check,
+				reference,
 				mandate: {
 					intent: goal,
 					nodes: [
-						{ label: "format", rule: check, probe: "Run sh check-book.sh" },
+						{ label: "format", rule: change, probe: "Run sh check-book.sh" },
 					],
 					checks: [proof],
 				},
 			},
-			"runnable regression check",
+			change,
+			reference,
 		),
 		s.turn("coordinator", "publish_plan", {
-			items: [{ id: "encode", kind: "encode", goal, deps: [] }],
+			items: [{ id: "regression", kind: "build", goal, deps: [] }],
 		}),
 		s.turn("coordinator", "brief_item", {
-			item: "encode",
+			item: "regression",
 			goal,
-			evidence: check,
+			evidence: reference,
 			fences: "check-book.sh",
 			nodes: ["format"],
 		}),
@@ -224,23 +280,9 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 			risk: "Only the book format is tested.",
 		}),
 		s.turn("verifier", "bash", { command: "sh check-book.sh" }),
-		s.turn(
-			"verifier",
-			"publish_verdict",
-			{ ...pass, encodedChecks: [2] },
-			check,
-		),
+		s.turn("verifier", "publish_verdict", pass),
 	]);
-	assert.equal(
-		(
-			await fauxAnswer(s.store, triage.d.id, {
-				basis: triage.d.basis,
-				choice: "build",
-				annotations: [],
-			})
-		).kind,
-		"answered",
-	);
+	assert.equal((await answer(triage.d, "build")).kind, "answered");
 	await s.settle();
 	const handover = await ask("verify");
 	const after = git(root, "rev-parse", "trunk");
@@ -250,7 +292,10 @@ test("a rejected landing opens owed-check triage; the check's verified landed co
 		"grep -qx repaired book",
 	);
 	assert.ok(handover.text.includes(after));
-	assert.match(handover.text, /Checks still owed\s+None\./i);
+	assert.doesNotMatch(
+		handover.text,
+		/Checks still owed|Keep an example of the previous book format/i,
+	);
 });
 
 test("precedent-setting work: two explorers, two candidates, judge and challenge, two annotation rounds, then land three dependent items", async (t) => {

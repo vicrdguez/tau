@@ -279,15 +279,8 @@ test("an unannotated hand-over rejection stays open and files nothing", () => {
 	assert.equal(x.asks()[0]?.subject, open?.subject);
 });
 
-test("a hand-over explains rejection and lists owed checks up front; its rejection files only the evidence", () => {
-	const x = flow((lane) =>
-		lane === "queue"
-			? {
-					owedChecks: () =>
-						"- #4: Cover a zero-sized lot. (deferred; rejected previous-commit)",
-				}
-			: null,
-	);
+test("hand-over rejection files each nonblank annotation as an ordinary owner finding with the landed commit and evidence", () => {
+	const x = flow();
 	x.prepared();
 	x.done("land", { kind: "landed", sha: "prepared" });
 	const [open] = x.asks();
@@ -304,40 +297,24 @@ test("a hand-over explains rejection and lists owed checks up front; its rejecti
 	const filings = result.send!.filter((m) => m.lane === "queue");
 	assert.deepEqual(
 		filings.map(({ event }) => [
+			event.kind,
 			event.source,
 			event.sha,
-			event.missingCheck,
 			event.text,
 		]),
 		[
-			["owner", "prepared", true, "Check the lower bound."],
-			["owner", "prepared", true, "Check the upper bound."],
+			["intake", "owner", "prepared", "Check the lower bound."],
+			["intake", "owner", "prepared", "Check the upper bound."],
 		],
 	);
-	assert.match(
-		open!.basis,
-		/Each annotation becomes a check that is owed until built or dropped/,
-	);
-	const opening = open!.basis.split("Checks still owed", 1)[0]!;
 	assert.deepEqual(open!.choices, ["accept", "reject"]);
-	assert.match(opening, /Accept the result on trunk, or reject it/);
-	assert.doesNotMatch(opening, /build starts|defer keeps|drop clears/i);
-	assert.match(
-		open!.basis,
-		/Checks still owed[\s\S]*Cover a zero-sized lot[\s\S]*Balance every ledger/,
-	);
+	assert.match(open!.basis, /Accept the result on trunk, or reject it/);
+	assert.match(open!.basis, /filed as a finding/);
 	for (const { event } of filings) {
+		assert.equal(event.blocking, false);
 		assert.match(String(event.report), /Balance every ledger/);
-		assert.doesNotMatch(
-			String(event.report),
-			/Accept the result|Checks still owed|Cover a zero-sized lot|Promotion to/,
-		);
+		assert.doesNotMatch(String(event.report), /Accept the result|Promotion to/);
 	}
-	if (process.env.KEEL_SWEEP_FIX_RENDERS)
-		writeFileSync(
-			"/tmp/keel-sweep-fix-handover.md",
-			`Title: ${open!.title}\nChoices: ${open!.choices.join(", ")}\n\n${open!.basis}`,
-		);
 	assert.deepEqual(x.asks(), []);
 });
 
