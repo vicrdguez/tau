@@ -6,6 +6,7 @@ import { buildLane } from "../src/lanes/build/index.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
 import { startBuild } from "./fixtures/build.ts";
 import { laneDriver, laneWorld } from "./fixtures/drive.ts";
+
 const { work } = laneWorld();
 const base = "a".repeat(40);
 const tip = "b".repeat(40);

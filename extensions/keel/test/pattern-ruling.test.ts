@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
-import { tempRepo, git } from "./fixtures/repo.ts";
+import { git, tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 test("a worker's pattern citation files from its commit without blocking; a later ruling follows the blessing without filing", {

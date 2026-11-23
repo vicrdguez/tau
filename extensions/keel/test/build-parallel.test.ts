@@ -5,7 +5,7 @@ import type { FauxResponseStep } from "tau/testing";
 import { options } from "../src/roles/index.ts";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
-import { tempRepo, git } from "./fixtures/repo.ts";
+import { git, tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 test("build two dependents concurrently from the first merge, merge serially, and hand over exactly the verified tree", {

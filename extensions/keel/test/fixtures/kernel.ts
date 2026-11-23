@@ -20,10 +20,10 @@ import {
 	fauxToolCall,
 	openStore,
 } from "tau/testing";
-import { ProjectState, WorkState } from "../../src/kernel/records.ts";
-import { stateDoc } from "../../src/kernel/state.ts";
 import { effectKey, workId } from "../../src/kernel/ids.ts";
 import type { KernelEvent, LaneEvent } from "../../src/kernel/lane.ts";
+import { ProjectState, WorkState } from "../../src/kernel/records.ts";
+import { stateDoc } from "../../src/kernel/state.ts";
 import type { EffectRunner } from "../../src/kernel/tasks.ts";
 import { options } from "../../src/roles/index.ts";
 import { createWorkflow } from "../../src/workflow.ts";

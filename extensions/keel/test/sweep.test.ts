@@ -14,7 +14,7 @@ import { stateDoc } from "../src/kernel/state.ts";
 import { replyJson } from "../src/reply-json.ts";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
-import { tempRepo, git } from "./fixtures/repo.ts";
+import { git, tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 const started = 1_800_000_000_000;
