@@ -32,6 +32,7 @@ const bodies: Record<(typeof CALLS)[number], object> = {
 	metrics: { project: "nope", name: "measure.latency" },
 	traces: { project: "nope" },
 	trace: { project: "nope", traceId: "trace" },
+	telemetry: {},
 };
 
 test("every call refuses one unknown field beside a valid body", async () => {

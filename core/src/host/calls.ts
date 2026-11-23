@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import type { WatchHandle } from "@earendil-works/chord/watch";
 import type { Models } from "@earendil-works/pi-ai";
+import { AI_TELEMETRY_SCHEMA } from "@earendil-works/pi-ai/models";
 import {
 	type Conversation,
 	ConversationBusy,
@@ -10,6 +11,7 @@ import {
 	ConversationIdle,
 	type Cursor,
 	configure,
+	DURABLE_TELEMETRY_SCHEMA,
 	type EntryId,
 	type EntryQuery,
 	LiveDoc,
@@ -46,7 +48,7 @@ import { hasModel, modelRef } from "./options.js";
 import { type OpenProject, PROJECT, type Projects } from "./projects.js";
 import { type Outcome, refuse } from "./refusals.js";
 import type { StructuralQueue } from "./structural.js";
-import type { Telemetry } from "./telemetry.js";
+import { TAU_TELEMETRY_SCHEMA, type Telemetry } from "./telemetry.js";
 
 /** What every call reaches, bound once when the server starts. */
 export type Host = {
@@ -633,6 +635,22 @@ export const calls: Readonly<Record<string, Call>> = {
 			return watchOf(log, input.after);
 		}),
 	),
+	telemetry: unary(obj({}), async (host) => ({
+		result: {
+			items: [
+				{ source: "pi-durable", schema: DURABLE_TELEMETRY_SCHEMA },
+				{ source: "pi-ai", schema: AI_TELEMETRY_SCHEMA },
+				{ source: "tau", schema: TAU_TELEMETRY_SCHEMA },
+				...host.projects.catalogue
+					.entries()
+					.flatMap(([source, { module }]) =>
+						module.telemetry === undefined
+							? []
+							: [{ source, schema: module.telemetry }],
+					),
+			],
+		},
+	})),
 	metrics: unary(
 		obj({ project, name: str(), ...telemetryBounds }),
 		inTelemetry(async ({ project: _project, ...query }, adapter) => ({

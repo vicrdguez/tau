@@ -54,6 +54,21 @@ function check(name: string, value: unknown): ExtensionModule {
 		typeof value.entry !== "function"
 	)
 		throw new Error("The entry export must be an object or function");
+	const telemetry = value.telemetry;
+	if (
+		telemetry !== undefined &&
+		(!object(telemetry) ||
+			!Number.isFinite(telemetry.version) ||
+			!object(telemetry.spans) ||
+			(telemetry.metrics !== undefined && !object(telemetry.metrics)) ||
+			[
+				...Object.keys(telemetry.spans),
+				...Object.keys(telemetry.metrics ?? {}),
+			].some((key) => !key.startsWith(`${name}.`)))
+	)
+		throw new Error(
+			`Telemetry requires a numeric version and span and metric names prefixed with ${name}.`,
+		);
 	return value as ExtensionModule;
 }
 

@@ -9,7 +9,11 @@ import {
 	type JsonObject,
 } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
-import type { StoredMetric, StoredTrace } from "@earendil-works/pi-telemetry";
+import {
+	defineTelemetrySchema,
+	type StoredMetric,
+	type StoredTrace,
+} from "@earendil-works/pi-telemetry";
 import { flow } from "./extensions.js";
 import { type Running, start, until } from "./helpers.js";
 
@@ -321,3 +325,83 @@ async function checkTraces(s: Running) {
 	assert.equal(unknown.status, 404);
 	assert.equal(unknown.body.refused?.code, "unknown_trace");
 }
+
+test("telemetry lists core and loaded schemas in catalogue order and rejects invalid extension schemas", async (t) => {
+	const schema = defineTelemetrySchema({
+		version: 1,
+		spans: {},
+		metrics: {
+			"measure.latency": {
+				kind: "histogram",
+				unit: "ms",
+				description: "Tool latency.",
+				attributes: {},
+			},
+		},
+	});
+	const alpha = defineExtension({ name: "alpha" });
+	const stderr: string[] = [];
+	t.mock.method(process.stderr, "write", (chunk: string) => {
+		stderr.push(String(chunk));
+		return true;
+	});
+	const invalid = {
+		"bad-object": false,
+		"bad-version": { version: "1", spans: {} },
+		"bad-spans": { version: 1, spans: [] },
+		"bad-metrics": { version: 1, spans: {}, metrics: null },
+		"bad-span-name": { version: 1, spans: { "pi.x": {} } },
+		"bad-metric-name": {
+			version: 1,
+			spans: {},
+			metrics: { "bad-metric-name-other.x": {} },
+		},
+	};
+	const minimal = { version: 1, spans: {} };
+	const s = await start({
+		source: () => ({
+			modules: {
+				measure: { extension, telemetry: schema },
+				flow,
+				alpha: { extension: alpha, telemetry: minimal },
+				...Object.fromEntries(
+					Object.entries(invalid).map(([name, telemetry]) => [
+						name,
+						{ extension: defineExtension({ name }), telemetry },
+					]),
+				),
+			},
+			failures: [],
+		}),
+	});
+	try {
+		const reply = await s.call("telemetry", {});
+		assert.equal(reply.status, 200, JSON.stringify(reply.body));
+		const [durable, ai, tau, ...loaded] = reply.body.result.items;
+		assert.deepEqual(
+			[durable.source, ai.source, tau.source],
+			["pi-durable", "pi-ai", "tau"],
+		);
+		assert.ok(durable.schema.metrics["pi.durable.phase.duration"]);
+		assert.ok(ai.schema.metrics["pi.ai.cost"]);
+		assert.equal(tau.schema.metrics["tau.decision.wait"].unit, "ms");
+		assert.deepEqual(loaded, [
+			{ source: "alpha", schema: minimal },
+			{ source: "measure", schema },
+		]);
+		const extensions = await s.call("extensions", {});
+		assert.deepEqual(
+			extensions.body.result.items.map(({ name }: { name: string }) => name),
+			["alpha", "flow", "measure"],
+		);
+		for (const name of Object.keys(invalid))
+			assert.ok(
+				stderr.some((line) =>
+					line.startsWith(`tau: extension ${name} [shape]: `),
+				),
+				name,
+			);
+	} finally {
+		await s.close();
+	}
+});

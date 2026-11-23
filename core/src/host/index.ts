@@ -10,6 +10,7 @@ import type {
 	Tx,
 } from "@earendil-works/pi-durable";
 import type { JsonSchema } from "@earendil-works/pi-schema";
+import type { TelemetrySchemaDefinition } from "@earendil-works/pi-telemetry";
 import { adminSocket, listenAdmin, refuseRunning } from "./admin.js";
 import { Catalogue } from "./catalogue.js";
 import { Devices } from "./devices.js";
@@ -36,6 +37,7 @@ export { taskLine } from "./task-reports.js";
 // docs/host.md, "Options".
 export type ExtensionModule = {
 	readonly extension: Extension;
+	readonly telemetry?: TelemetrySchemaDefinition;
 	readonly entry?: AgentChange | ((tx: Tx) => Promise<AgentChange>);
 	readonly options?: {
 		readonly schema: JsonSchema;

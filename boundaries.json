@@ -9,21 +9,21 @@
 	},
 	"tau-webkit": {
 		"extension": true,
-		"tau": [".", "./durable", "./schema", "./chord"],
+		"tau": [".", "./durable", "./schema", "./chord", "./telemetry"],
 		"testOnly": {
 			"tau": ["./testing"]
 		}
 	},
 	"tau-w2": {
 		"extension": true,
-		"tau": [".", "./durable", "./schema", "./chord"],
+		"tau": [".", "./durable", "./schema", "./chord", "./telemetry"],
 		"testOnly": {
 			"tau": ["./testing"]
 		}
 	},
 	"tau-w1": {
 		"extension": true,
-		"tau": [".", "./durable", "./schema", "./chord"],
+		"tau": [".", "./durable", "./schema", "./chord", "./telemetry"],
 		"testOnly": {
 			"tau": ["./testing"]
 		}

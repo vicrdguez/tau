@@ -30,6 +30,10 @@
 		"./chord": {
 			"types": "./dist/src/extension/chord.d.ts",
 			"import": "./dist/src/extension/chord.js"
+		},
+		"./telemetry": {
+			"types": "./dist/src/extension/telemetry.d.ts",
+			"import": "./dist/src/extension/telemetry.js"
 		}
 	},
 	"dependencies": {

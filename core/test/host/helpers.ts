@@ -300,4 +300,5 @@ export const CALLS = [
 	"metrics",
 	"traces",
 	"trace",
+	"telemetry",
 ] as const;

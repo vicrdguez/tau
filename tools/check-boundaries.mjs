@@ -65,13 +65,16 @@ export async function check(root, selections = []) {
 			return "tau at its author entries; tau/server is for starting a server";
 		if (spec === "tau/testing") return "tau/testing in test/ only";
 		const deepEntry =
-			/^tau\/dist\/src\/(durable|schema|chord|testing)\.js$/.exec(spec);
+			/^tau\/dist\/src\/(durable|schema|chord|telemetry|testing)\.js$/.exec(
+				spec,
+			);
 		if (deepEntry) return `tau/${deepEntry[1]}`;
 		return (
 			{
 				"@earendil-works/pi-durable": "tau/durable",
 				"@earendil-works/pi-schema": "tau/schema",
 				"@earendil-works/chord": "tau/chord",
+				"@earendil-works/pi-telemetry": "tau/telemetry",
 				"@earendil-works/pi-ai": "tau/testing",
 			}[name] ?? "tau"
 		);
@@ -89,9 +92,13 @@ export async function check(root, selections = []) {
 			const target =
 				!isTest &&
 				(spec === "tau" ||
-					["tau/durable", "tau/schema", "tau/chord", "tau/testing"].includes(
-						spec,
-					))
+					[
+						"tau/durable",
+						"tau/schema",
+						"tau/chord",
+						"tau/telemetry",
+						"tau/testing",
+					].includes(spec))
 					? path.join(source, "extension", "index.ts")
 					: spec === "tau/server"
 						? path.join(source, "host", "index.ts")
@@ -149,7 +156,9 @@ export async function check(root, selections = []) {
 			permissions?.extension &&
 			(forbiddenExtensionDependency(name) ||
 				(name === "tau" &&
-					![".", "./durable", "./schema", "./chord"].includes(subpath) &&
+					![".", "./durable", "./schema", "./chord", "./telemetry"].includes(
+						subpath,
+					) &&
 					!(isTest && subpath === "./testing")))
 		) {
 			const guidance =
