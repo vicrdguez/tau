@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
+import { fauxAssistantMessage } from "tau/testing";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
 import { git, tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
@@ -55,12 +56,7 @@ test("a worker's pattern citation files from its commit without blocking; a late
 				"format",
 			)(...args),
 	]);
-	const pass = turn("verifier", "publish_verdict", {
-		outcome: "pass",
-		text: "The book matches.",
-		blocks: [],
-		notes: [],
-	});
+	let citedAgain = false;
 	s.provider.setResponses([
 		turn("designer", "ground", {
 			route: "follow",
@@ -102,16 +98,16 @@ test("a worker's pattern citation files from its commit without blocking; a late
 			await blessed.promise;
 			return turn("worker", "record_ruling", second)(...args);
 		},
-		turn("worker", "publish_build", {
-			summary: "Repaired book",
-			addresses: [],
-		}),
-		pass,
-		turn("coordinator", "handoff_build", {
-			summary: goal,
-			risk: "Only ledger readers changed",
-		}),
-		pass,
+		(context, _, __, model) => {
+			const reply = context.messages.at(-1);
+			citedAgain =
+				model.id === "worker" &&
+				reply?.role === "toolResult" &&
+				reply.toolName === "record_ruling" &&
+				!reply.isError;
+			// The contract ends at acceptance of the citation, not another landing.
+			return fauxAssistantMessage("No publication in this test.");
+		},
 	]);
 	harness.resume();
 	await s.submit(goal);
@@ -144,10 +140,9 @@ test("a worker's pattern citation files from its commit without blocking; a late
 		(await filings()).map((r) => r.id),
 		[delivery.id],
 	);
-	const open = await s.asks();
-	assert.deepEqual(
-		open.map((a) => a.local),
-		["handover"],
+	assert.ok(
+		citedAgain,
+		"the blessed citation was accepted by the worker's real tool",
 	);
-	assert.ok((await s.readAsk(open[0]!)).text.includes(second.what));
+	assert.ok(!(await s.asks()).some((a) => a.local.startsWith("triage/")));
 });
