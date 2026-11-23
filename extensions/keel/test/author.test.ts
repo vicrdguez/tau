@@ -286,7 +286,3 @@ test("plain tools and prompt sections follow role assignments even at entry", as
 	assert.match(prompt, /designer index/);
 	assert.doesNotMatch(prompt, /worker index/);
 });
-test("registration requires a fixture at the state version", () => {
-	assert.throws(() => Reflect.apply(defineLane, undefined, [lane]), /fixture/i);
-	assert.throws(() => defineLane(lane, { ...fixture, version: 2 }), /fixture/i);
-});

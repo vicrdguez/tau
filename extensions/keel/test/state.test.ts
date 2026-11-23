@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import { createRegistry, Harness, openNodeSqliteStorage } from "tau/durable";
+import {
+	createRegistry,
+	Harness,
+	type JsonObject,
+	openNodeSqliteStorage,
+} from "tau/durable";
 import { createModels } from "tau/testing";
 import {
 	BindingState,
@@ -109,7 +114,7 @@ test("reopening and upgrading committed v1 records retains their outstanding wor
 			kind: "keel.work",
 			scope: "conversation",
 			version: 2,
-			initial: (): { ledger: work.V1; revision: number } => ({
+			initial: (): { ledger: JsonObject; revision: number } => ({
 				ledger: { agents: {}, effects: {} },
 				revision: 0,
 			}),

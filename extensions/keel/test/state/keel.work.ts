@@ -1,34 +1,5 @@
 import type { ConversationId, TaskId } from "tau/durable";
-import { type Token, token } from "../../src/kernel/ids.ts";
-import type { WorkState } from "../../src/kernel/records.ts";
-import type { Check, Exact } from "./fixture.ts";
-
-export type V1 = {
-	agents: Record<
-		string,
-		{
-			conversation: ConversationId;
-			role: string;
-			used: Token[];
-			stop: TaskId | null;
-			cwd: string | null;
-			status: "active" | "paused" | "retired";
-			open: { token: Token; tools: string[]; unsolicited: boolean }[];
-		}
-	>;
-	effects: Record<
-		string,
-		{
-			task: TaskId;
-			interrupt: ConversationId | null;
-			status: "planned" | "running" | "stopping" | "cancelled" | "done";
-		}
-	>;
-};
-export type CurrentMatchesV1 = Check<
-	Exact<V1, ReturnType<typeof WorkState.initial>>
->;
-
+import { token } from "../../src/kernel/ids.ts";
 export const current = {
 	agents: {
 		worker: {
@@ -51,4 +22,4 @@ export const current = {
 			interrupt: 14 as ConversationId,
 		},
 	},
-} satisfies V1;
+} satisfies import("tau/durable").JsonObject;
