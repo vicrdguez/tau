@@ -6,7 +6,6 @@ type Spec<S> = {
 	readonly kind: `keel.${string}`;
 	readonly scope: StateScope;
 	readonly initial: () => S;
-	readonly checkpointEvery?: number;
 } & (
 	| { readonly version: 1; readonly migrate?: Migration<S> }
 	| { readonly version: number; readonly migrate: Migration<S> }
@@ -36,12 +35,9 @@ function scopedState<S extends JsonObject>({
 	version,
 	initial,
 	migrate,
-	checkpointEvery = 64,
 }: Spec<S>) {
 	if (version > 1 && typeof migrate !== "function")
 		throw new TypeError(`${kind} version ${version} requires a migration`);
-	if (!Number.isSafeInteger(checkpointEvery) || checkpointEvery < 1)
-		throw new TypeError(`${kind} checkpointEvery must be a positive integer`);
 
 	const state = { kind, version, initial };
 	const persisted = {
@@ -51,7 +47,7 @@ function scopedState<S extends JsonObject>({
 			_value: Readonly<S>,
 			_ops: readonly unknown[],
 			info: { deltasSinceBase: number },
-		) => info.deltasSinceBase + 1 >= checkpointEvery,
+		) => info.deltasSinceBase + 1 >= 64,
 	};
 	switch (scope) {
 		case "session":
