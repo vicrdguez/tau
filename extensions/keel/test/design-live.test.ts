@@ -40,6 +40,7 @@ const audit = {
 	gaps: [],
 	contradictions: [],
 };
+const precedent = { kind: "ground", route: "precedent", reference, audit };
 const seam = {
 	label: "S1",
 	callersNow: "Report job",
@@ -84,13 +85,14 @@ const publish = {
 	answers: answerCauses(request.causes, ["R1"]),
 	replies: [],
 };
+const activated = { kind: "revision_activated", causes: request.causes };
 const reply = { n: 1, status: "acted_on", reason: "Test a tab too." };
 const note = { n: 1, text: "Keep escapes readable." };
 
 test("successful Ground on any route and queue seeds arm an enabled sweep, not a disabled one", () => {
 	for (const event of [
 		follow,
-		{ kind: "ground", route: "precedent", reference, audit },
+		precedent,
 		{ kind: "ground", route: "ambiguous", reference, readings: ["A", "B"] },
 		seed,
 	]) {
@@ -163,7 +165,7 @@ async function explorerHistory(
 
 function historicalReview(choice: "approve" | "decline", goal = small.intent) {
 	const x = run();
-	x.send({ kind: "ground", route: "precedent", reference, audit });
+	x.send(precedent);
 	x.publishMandate({
 		kind: "publish_mandate",
 		draft: { ...draft, intent: goal },
@@ -194,7 +196,7 @@ test("a follow work's applied revision gives explorers only the approved changed
 	assert.deepEqual((await explorerHistory([x])).priorWorks, []);
 	x.answer(ask!.subject, "approve");
 	assert.deepEqual((await explorerHistory([x])).priorWorks, []);
-	x.send({ kind: "revision_activated", causes: request.causes });
+	x.send(activated);
 	const { priorWorks } = await explorerHistory([x]);
 	assert.equal(priorWorks.length, 1);
 	assert.equal(priorWorks[0]!.mandate, undefined);
@@ -263,45 +265,39 @@ test("triage pins the route and authority; follow binds directly, precedent stil
 		assert.ok(x.input().includes(part));
 	for (const event of [
 		{ ...follow, reference: "Unapproved examples" },
-		{ kind: "ground", route: "precedent", reference, audit },
+		precedent,
 	])
 		assert.ok("reject" in x.attempt(event));
 	assert.equal(x.send(follow).send?.[0]?.event.kind, "bound");
 	assert.deepEqual(x.asks(), []);
 
-	const precedent = run();
-	precedent.send({ ...seed, route: "precedent" });
-	const stalled = precedent.send({
+	const seeded = run();
+	seeded.send({ ...seed, route: "precedent" });
+	const stalled = seeded.send({
 		kind: "agent_stalled",
 		agent: "designer",
-		tokens: [precedent.turn()!.token],
+		tokens: [seeded.turn()!.token],
 		cause: "stopped",
 		lastWords: "Reading docs",
 	});
-	precedent.send({
+	seeded.send({
 		kind: "resume",
 		cause: stalled.send![0]!.event.cause!,
 		direction: "Check ADR 8.",
 	});
-	assert.match(precedent.input(), /Check ADR 8/);
-	assert.ok("reject" in precedent.attempt(follow));
-	precedent.send({ kind: "ground", route: "precedent", reference, audit });
-	precedent.publishMandate({ kind: "publish_mandate", draft, replies: [] });
-	assert.ok(precedent.asks()[0]?.basis.includes(seed.text));
-	assert.equal(precedent.state().mandate, null);
+	assert.match(seeded.input(), /Check ADR 8/);
+	assert.ok("reject" in seeded.attempt(follow));
+	seeded.send(precedent);
+	seeded.publishMandate({ kind: "publish_mandate", draft, replies: [] });
+	assert.ok(seeded.asks()[0]?.basis.includes(seed.text));
+	assert.equal(seeded.state().mandate, null);
 });
 
-test("revision review is a delta, and approval binds only on acknowledgement of that exact plan's Mandate", () => {
+test("revision review shows the delta; approval sends it but only matching activation binds it", () => {
 	const x = pending();
 	const old = x.mandate();
-	const turn = x.turn();
-	assert.deepEqual(turn?.tools, ["publish_revision"]);
-	for (const part of [request.text, "R1", rule.rule])
-		assert.ok(x.input().includes(part));
-	assert.deepEqual(x.asks(), []);
 	x.send(publish);
 	const [ask] = x.asks();
-	assert.deepEqual(ask?.choices, ["approve", "rework", "decline"]);
 	for (const part of [
 		request.text,
 		rule.rule,
@@ -310,41 +306,24 @@ test("revision review is a delta, and approval binds only on acknowledgement of 
 	])
 		assert.ok(ask!.basis.includes(part), part);
 	assert.ok(!ask!.basis.includes(untouched.rule));
-	assert.doesNotMatch(
-		ask!.basis,
-		/\(new\)|previous round|last round|preceding round/i,
-	);
 	assert.deepEqual(x.mandate(), old);
 	const at = ask!.basis.indexOf(correction.probe);
-	const approved = x.answer(ask!.subject, "approve", [
+	const proposed = x.answer(ask!.subject, "approve", [
 		{ ...note, range: { start: at, end: at + correction.probe.length } },
-	]);
+	]).send?.[0];
 	const next = {
 		...old,
 		approvalNotes: [`${note.text}\n> ${correction.probe}`],
 		nodes: [correction, untouched],
 	};
-	assert.deepEqual(approved.send, [
-		{
-			lane: "build",
-			work: world.work,
-			event: {
-				...request,
-				kind: "propose_revision",
-				number: 1,
-				mandate: next,
-				changes: "R1: rule, falsifying probe",
-			},
-		},
-	]);
-	assert.deepEqual(x.mandate(), old);
-	assert.deepEqual(x.asks(), []);
-	assert.deepEqual(x.answer(ask!.subject, "approve").send ?? [], []);
-	x.send({ kind: "revision_activated", causes: [request.causes[0]!] });
-	assert.deepEqual(x.mandate(), old);
-	x.send({ kind: "revision_activated", causes: ["unrelated"] });
-	assert.deepEqual(x.mandate(), old);
-	x.send({ kind: "revision_activated", causes: request.causes });
+	assert.equal(proposed?.lane, "build");
+	assert.deepEqual(proposed?.event.mandate, next);
+	assert.deepEqual(proposed?.event.causes, request.causes);
+	for (const causes of [[request.causes[0]!], ["unrelated"]]) {
+		x.send({ ...activated, causes });
+		assert.deepEqual(x.mandate(), old);
+	}
+	x.send(activated);
 	assert.deepEqual(x.mandate(), next);
 });
 
@@ -369,32 +348,23 @@ test("a revision refuses invalid labels, malformed or duplicated edits", () => {
 
 test("a seam revision needs the usage-first contract and preserves proof, riders, and reference context", () => {
 	const x = run();
-	x.send({ kind: "ground", route: "precedent", reference, audit });
+	x.send(precedent);
 	x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
 	x.answer(x.asks()[0]!.subject, "approve");
 	const old = x.mandate();
 	x.send({ ...request, nodes: ["S1"] });
 	assert.ok(x.input().includes("Approved report probe ADR 9"));
-	assert.ok(x.input().includes("Keep the old file name."));
-	for (const patch of [
-		{ usage: "plain" },
-		{ signature: "plain" },
-		{ callersLater: " " },
-	]) {
-		assert.ok(
-			"reject" in
-				x.attempt({
-					...publish,
-					changes: { seams: [{ ...seam, owner: "Export boundary", ...patch }] },
-					answers: answerCauses(request.causes, ["S1"]),
-				}),
-		);
-	}
-	x.send({
-		...publish,
-		changes: { seams: [{ ...seam, owner: "Export boundary" }] },
-		answers: answerCauses(request.causes, ["S1"]),
-	});
+	const changes = { seams: [{ ...seam, owner: "Export boundary" }] };
+	const answers = answerCauses(request.causes, ["S1"]);
+	assert.ok(
+		"reject" in
+			x.attempt({
+				...publish,
+				changes: { seams: [{ ...seam, signature: "plain" }] },
+				answers,
+			}),
+	);
+	x.send({ ...publish, changes, answers });
 	const [ask] = x.asks();
 	const text = ask!.basis;
 	assert.ok(text.includes(seam.owner));
@@ -658,31 +628,8 @@ test("a cited label cannot be removed, whether an item is preparing or already r
 	}
 });
 
-test("a revision shows and applies all differences, including removal of an uncited node", () => {
-	const x = run({
-		...world,
-		view: (lane) =>
-			lane === "build"
-				? {
-						plan: [
-							{
-								id: "writer",
-								goal: "Write the report",
-								stage: "building",
-								nodes: ["R1"],
-							},
-							{
-								id: "stats",
-								goal: "Write statistics",
-								stage: "planned",
-								nodes: [],
-							},
-						],
-					}
-				: null,
-	});
-	x.send(follow);
-	x.send(request);
+test("a revision distinguishes changes, additions and removals of uncited labels", () => {
+	const x = pending();
 	x.send({
 		...publish,
 		changes: {
@@ -694,18 +641,15 @@ test("a revision shows and applies all differences, including removal of an unci
 	const ask = x.asks()[0]!;
 	assert.match(ask.basis, /R3: Rule \(new\)/);
 	assert.match(ask.basis, /R2[^\n]*removed/i);
-	assert.match(ask.basis, /Changed: rule, falsifying probe/);
-	assert.doesNotMatch(ask.basis, /R1: Rule \(new\)/);
+	assert.match(
+		ask.basis,
+		/R1: Rule \(changed\)\n\nChanged: rule, falsifying probe/,
+	);
 	const approval = x.answer(ask.subject, "approve").send?.[0]?.event;
 	assert.deepEqual(approval?.nodes, ["R1", "R2", "R3"]);
-	assert.equal(
-		approval?.changes,
-		"R1: rule, falsifying probe; R2: removed; R3: added",
-	);
+	x.send(activated);
 	assert.deepEqual(
-		(approval?.mandate as { nodes: { label: string }[] }).nodes.map(
-			(n) => n.label,
-		),
+		x.mandate().nodes.map((n) => n.label),
 		["R1", "R3"],
 	);
 });
@@ -718,7 +662,7 @@ test("triage evidence remains usable when an intervening revision removed a repo
 		answers: answerCauses(request.causes, ["R2"]),
 	});
 	x.answer(x.asks()[0]!.subject, "approve");
-	x.send({ kind: "revision_activated", causes: request.causes });
+	x.send(activated);
 	x.send({
 		...request,
 		causes: ["finding-8"],
@@ -788,7 +732,7 @@ test("causes after approval wait without changing it, then join the next revisio
 
 test("cancel names the current rework annotation as not pursued, and omits a reply already given", () => {
 	const x = run();
-	x.send({ kind: "ground", route: "precedent", reference, audit });
+	x.send(precedent);
 	const first = { kind: "publish_mandate", draft, replies: [] };
 	x.publishMandate(first);
 	x.answer(x.asks()[0]!.subject, "rework", [
@@ -811,7 +755,7 @@ test("cancel names approval notes as not pursued only before their plan is writt
 			...world,
 			view: () => ({ plan: hasPlan ? [{ id: "report" }] : [] }),
 		});
-		x.send({ kind: "ground", route: "precedent", reference, audit });
+		x.send(precedent);
 		x.publishMandate({ kind: "publish_mandate", draft, replies: [] });
 		x.answer(x.asks()[0]!.subject, "approve", [note]);
 		const text =

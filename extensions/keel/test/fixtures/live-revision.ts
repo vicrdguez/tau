@@ -14,6 +14,7 @@ import {
 	judgeReport,
 	seats,
 } from "./arena-script.ts";
+import { buildTurns } from "./build-turns.ts";
 import { openScriptedWorkflow } from "./kernel.ts";
 
 const intent = "Write a book export and an independent statistics file";
@@ -119,17 +120,7 @@ export async function openLiveRevision(
 			},
 			item.goal,
 		);
-	const bash = (role: string, command: string, ...input: string[]) =>
-		s.turn(role, "bash", { command }, ...input);
-	const publish = (summary: string) =>
-		s.turn("worker", "publish_build", { summary, addresses: [] });
-	const pass = (text: string) =>
-		s.turn("verifier", "publish_verdict", {
-			outcome: "pass",
-			blocks: [],
-			notes: [],
-			text,
-		});
+	const { bash, publish, pass, implement, verify } = buildTurns(s.turn);
 	const permitStats = () => statsGate.resolve();
 	async function openTriage() {
 		s.secondCandidate.setResponses([candidateResponse(seats[1])]);
@@ -232,11 +223,10 @@ export async function openLiveRevision(
 				],
 			}),
 			brief(encode, "P1"),
-			bash(
-				"worker",
+			...implement(
 				"printf 'Book is tracked.\\n' > encode && git add encode && git commit -m 'encode book check'",
+				"Encoded the initial check",
 			),
-			publish("Encoded the initial check"),
 			pass("Initial check recorded."),
 			...Array.from({ length: 7 }, () => point),
 		]);
@@ -393,36 +383,32 @@ export async function openLiveRevision(
 				"Recorded items",
 			),
 			brief(frame, "wire", "frame.sh"),
-			bash(
-				"worker",
+			...implement(
 				`printf '%s\\n' 'frame_book() { printf "%s:%s\\\\n" "$1" "$2"; }' > frame.sh && git add frame.sh && git commit -m 'encode framing'`,
+				"Added frame_book",
 				"frame_book prefix value",
 			),
-			publish("Added frame_book"),
 			pass("Framing seam passes."),
-			bash(
-				"worker",
+			...implement(
 				`git merge --no-edit ${build} && . ./frame.sh && frame_book record repaired > book && git commit -am 'frame writer output'`,
+				"Framed the exported book",
 				"frame_book prefix value",
 			),
-			publish("Framed the exported book"),
 			pass("Export passes."),
 			brief(revisedClient, "wire", "reader"),
-			bash(
-				"worker",
+			...implement(
 				"cut -d: -f2 book > reader && git add reader && git commit -m 'read the framed export'",
+				"Read the framed export",
 			),
-			publish("Read the framed export"),
 			pass("Framed reader passes."),
 			s.turn("coordinator", "handoff_build", {
 				summary: "Framed book and independent statistics",
 				risk: "One framing scheme exercised.",
 			}),
-			bash(
-				"verifier",
+			...verify(
 				"printf 'record:repaired\\n' | cmp - book && printf 'one\\n' | cmp - stats && printf 'repaired\\n' | cmp - reader",
+				"Framed book, reader and statistics pass together.",
 			),
-			pass("Framed book, reader and statistics pass together."),
 		]);
 		await s.settle();
 		assert.equal(s.provider.getPendingResponseCount(), 0);

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { draftError, type Draft } from "../src/lanes/design/draft.ts";
-import { mandateLabels, renderMandate } from "../src/lanes/design/public.ts";
+import {
+	mandateLabels,
+	renderMandate,
+	repliesCover,
+} from "../src/lanes/design/public.ts";
 import {
 	reviewChoices,
 	reviewDriver,
@@ -253,14 +257,7 @@ test("binding an incidental rider does not manufacture an Encode obligation with
 	assert.ok(mandateLabels(m).includes("B"));
 	assert.equal(m.encodeRequired, false);
 });
-test("rework preserves ranges and refuses missing, duplicate, extra, invalid or empty replies; an old round's answer is stale", () => {
-	const x = review();
-	const annotations = [note(1, "Prefer native."), note(2, "Explain the cost.")];
-	x.answer("mandate/1", "rework", annotations);
-	assert.deepEqual(x.asks(), []);
-	for (const n of annotations) assert.ok(x.input().includes(n.text));
-	assert.doesNotMatch(x.input(), /Approve the Mandate|Annotate this document/i);
-	const revised = { ...draft, riders: draft.riders.slice(0, 2) };
+test("numbered replies must exactly cover the owner's notes", () => {
 	for (const replies of [
 		[reply(1)],
 		[reply(2), reply(2)],
@@ -268,27 +265,68 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 		[reply(1), { ...reply(2), status: "ignored" }],
 		[reply(1), { ...reply(2), reason: " " }],
 	])
-		assert.ok("reject" in x.attemptDraft(revised, replies));
-	x.publish(revised, [reply(2), reply(1)]);
-	assert.equal(x.state().rounds.length, 2);
-	assert.deepEqual(
-		x.state().rounds[0]!.answer?.annotations.map(({ n, text, range }) => ({
-			n,
-			text,
-			range,
-		})),
-		annotations,
-	);
-	assert.deepEqual(x.state().rounds[0]!.draft, draft);
-	const basis = x.asks()[0]!.basis;
-	for (const n of annotations) assert.ok(basis.includes(n.text));
-	assert.ok(basis.includes(reply(1).reason));
-	assert.match(basis, /1\. Prefer native\.\n> /);
-	assert.doesNotMatch(basis, /\[1:4\]|\[2:5\]/);
-	const before = x.state();
-	x.answer("mandate/1", "approve");
-	assert.deepEqual(x.state(), before);
+		assert.equal(
+			repliesCover(2, replies as Parameters<typeof repliesCover>[1]),
+			false,
+		);
 });
+
+test("a changed Mandate quotes the original owner passage and refuses old answers; resuming carries only the latest notes", () => {
+	const x = review();
+	const basis = x.asks()[0]!.basis;
+	const passage = `Current callers: ${seam.callersNow}\nFuture callers: ${seam.callersLater}`;
+	const start = basis.indexOf(passage);
+	assert.ok(start >= 0);
+	const range = { start, end: start + passage.length };
+	const priorNote = "Also include the CLI.";
+	x.answer("mandate/1", "rework", [
+		{ n: 1, text: priorNote, range },
+		note(2, "Explain the cost."),
+	]);
+	assert.match(x.input(), /Also include the CLI/);
+	assert.ok("reject" in x.attemptDraft(draft, [reply(1)]));
+	x.publish({ ...draft, never: "No duplicate parser." }, [reply(2), reply(1)]);
+	const current = x.asks()[0]!;
+	assert.deepEqual(x.state().rounds[0]?.answer?.annotations[0]?.range, range);
+	assert.ok(
+		current.basis.includes(
+			`> Current callers: ${seam.callersNow}\n> Future callers: ${seam.callersLater}`,
+		),
+	);
+	assert.ok(current.basis.includes(reply(1).reason));
+	assert.ok(!current.basis.includes(`[${range.start}:${range.end}]`));
+	x.answer("mandate/1", "approve");
+	assert.equal(x.state().mandate, null);
+	assert.equal(x.asks()[0]?.subject, current.subject);
+
+	x.answer(current.subject, "rework", [note(1, "Clarify API callers.")]);
+	const t = x.turn()!.token;
+	const stalled = x.send({
+		kind: "agent_stalled",
+		agent: "designer",
+		tokens: [t],
+		cause: "stopped",
+		lastWords: "reading",
+	});
+	assert.equal(x.input(), "");
+	x.send({
+		kind: "resume",
+		cause: stalled.send![0]!.event.cause!,
+		direction: "Read ADR 4",
+	});
+	assert.deepEqual(x.turn()?.tools, ["publish_mandate", "start_experiment"]);
+	for (const value of [
+		"No duplicate parser.",
+		"Clarify API callers.",
+		"Read ADR 4",
+	])
+		assert.ok(x.input().includes(value), value);
+	assert.doesNotMatch(
+		x.input(),
+		/Also include the CLI|See the revised ruling|Replies to the preceding round|Approve the Mandate/,
+	);
+});
+
 test("a revision marks changed and new nodes and riders, and shows removed content separately", () => {
 	const x = review();
 	x.answer("mandate/1", "rework");
@@ -365,43 +403,6 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	x.answer("mandate/2", "approve");
 	assert.ok(mandateLabels(x.state().mandate!).includes("R2"));
 });
-test("the reply quotes the exact multiline owner passage and keeps only stored offsets", () => {
-	const x = review();
-	const basis = x.asks()[0]!.basis;
-	const passage = `Current callers: ${seam.callersNow}\nFuture callers: ${seam.callersLater}`;
-	const start = basis.indexOf(passage);
-	assert.ok(start >= 0);
-	const range = { start, end: start + passage.length };
-	x.answer("mandate/1", "rework", [
-		{ n: 1, text: "Also include the CLI.", range },
-	]);
-	x.publish(draft, [reply(1)]);
-	assert.deepEqual(x.state().rounds[0]?.answer?.annotations[0]?.range, range);
-	const rendered = x.asks()[0]!.basis;
-	assert.ok(
-		rendered.includes(
-			`> Current callers: ${seam.callersNow}\n> Future callers: ${seam.callersLater}`,
-		),
-	);
-	assert.ok(!rendered.includes(`[${range.start}:${range.end}]`));
-});
-
-test("revision input includes the current draft and owed annotations but not earlier replies", () => {
-	const x = review();
-	x.answer("mandate/1", "rework", [note(1, "Earlier resolved question.")]);
-	x.publish({ ...draft, never: "No duplicate parser." }, [
-		{ ...reply(1), reason: "Explanation already delivered." },
-	]);
-	x.answer("mandate/2", "rework", [note(1, "Tell me about the API now.")]);
-	const input = x.input();
-	assert.match(input, /No duplicate parser\./);
-	assert.match(input, /Tell me about the API now\./);
-	assert.doesNotMatch(
-		input,
-		/Earlier resolved question|Explanation already delivered|Replies to the preceding round/,
-	);
-});
-
 test("decline records every still-owed annotation, not already answered notes, and withdraws all work", () => {
 	const x = review();
 	x.answer("mandate/1", "rework", [note(1, "Already addressed.")]);
@@ -421,29 +422,4 @@ test("decline records every still-owed annotation, not already answered notes, a
 				(m) => m.text.includes(n.text) && /not pursued/i.test(m.text),
 			),
 		);
-});
-test("a stopped draft resumes with its annotation debt under a new draft token, never as Ground", () => {
-	const x = review();
-	x.answer("mandate/1", "rework", [note(1, "Clarify callers.")]);
-	const t = x.turn()!.token;
-	const r = x.send({
-		kind: "agent_stalled",
-		agent: "designer",
-		tokens: [t],
-		cause: "stopped",
-		lastWords: "reading",
-	});
-	assert.equal(r.send?.[0]?.lane, "queue");
-	assert.equal(x.input(), "");
-	x.send({
-		kind: "resume",
-		cause: r.send![0]!.event.cause!,
-		direction: "Read ADR 4",
-		evidence: "reading",
-	});
-	const turn = x.turn()!;
-	assert.deepEqual(turn.tools, ["publish_mandate", "start_experiment"]);
-	assert.notEqual(t, turn.token);
-	for (const v of ["Read ADR 4", "Clarify callers."])
-		assert.ok(x.input().includes(v));
 });

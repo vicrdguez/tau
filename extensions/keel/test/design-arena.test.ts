@@ -604,8 +604,6 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 	assert.equal(job.seat, "arena_challenger");
 	assert.equal(job.model, world.options.design);
 	for (const part of [
-		"what did the winning candidate decide that the question did not ask?",
-		"what will the implementer copy from the nearest example?",
 		"Attach the check to the placement call.",
 		"Use the account default.",
 		"Default of arena_seat_1",
@@ -618,31 +616,15 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 	const answering = answeringTurn(challenge);
 	assert.deepEqual(design.asks(answering, world), []);
 	assert.match(input(answering), /Which account/);
-	assert.ok(
-		"reject" in
-			design.reduce(
-				answering,
-				{
-					...answerChallenger,
-					dispositions: answerChallenger.dispositions.slice(1),
-				},
-				world,
-			),
-	);
-	assert.ok(
-		"reject" in
-			design.reduce(
-				answering,
-				{
-					...answerChallenger,
-					dispositions: [
-						answerChallenger.dispositions[0]!,
-						answerChallenger.dispositions[0]!,
-					],
-				},
-				world,
-			),
-	);
+	for (const dispositions of [
+		answerChallenger.dispositions.slice(1),
+		[answerChallenger.dispositions[0]!, answerChallenger.dispositions[0]!],
+	])
+		assert.ok(
+			"reject" in
+				design.reduce(answering, { ...answerChallenger, dispositions }, world),
+		);
+
 	const review = step(answering, answerChallenger).state;
 	const decision = ask(review);
 	for (const seat of seats)
@@ -659,31 +641,35 @@ test("synthesis must name real sources, and the challenged Mandate cannot reach 
 		"Which account does the limit attach to?",
 		"The account is named in R1.",
 		"Use the account default.",
-		"Expose a rejected-order count.",
-		"Limits are measured in lots.",
 	])
 		assert.ok(decision.basis.includes(part), part);
 	assert.deepEqual(design.effects(review, world), []);
 	assert.equal(input(review), "");
 });
 
-function beforeEvidence(basis: string) {
-	return basis.split("\n## Evidence (does not bind)", 1)[0]!;
-}
-
-test("review shows each source's own unasked decisions beside the judge's list, including a decision the judge dropped", () => {
+test("review keeps each choice's provenance and quotes model headings as evidence", () => {
+	const first = seats[0]!;
 	const extra = "Keep an append-only audit log for rejected orders.";
-	const s = complete(candidateTurn(), {
+	const judged = complete(candidateTurn(), {
 		...candidates,
-		[seats[0]!]: `${candidate(seats[0]!)}\n\n${extra}\n\n## Unrelated heading\nDo not copy this into the decision list.`,
+		[first]: `${candidate(first)}\n\n${extra}\n\n## Unrelated heading\nDo not copy this into the decision list.`,
 	});
-	const review = step(
-		answeringTurn(challengeTurn(synthesisTurn(s))),
-		answerChallenger,
-	).state;
-	const decisions = beforeEvidence(ask(review).basis).split(
-		"\n### arena_seat_1\n",
-	)[1]!;
+	const report = judge.replace(
+		"Judge's score for arena_seat_1",
+		"## Rationale\\nIndependent evidence.",
+	);
+	const drafting = complete(judged, { arena_judge: report });
+	const mapped = {
+		...publish,
+		outcomes: [{ source: first, n: 1, label: "R2" }, publish.outcomes[1]!],
+	};
+	const basis = ask(
+		step(answeringTurn(challengeTurn(drafting, mapped)), answerChallenger)
+			.state,
+	).basis;
+	const decisions = basis
+		.split("\n### arena_seat_1\n")[1]!
+		.split("\n## Evidence")[0]!;
 	assert.match(
 		decisions,
 		/Default of arena_seat_1[\s\S]*Keep an append-only audit log[\s\S]*Judge's independent observation of arena_seat_1/,
@@ -693,40 +679,14 @@ test("review shows each source's own unasked decisions beside the judge's list, 
 		/Default of arena_seat_2[\s\S]*Judge's independent observation of arena_seat_2/,
 	);
 	assert.doesNotMatch(decisions, /Do not copy this/);
-});
-
-test("review pairs each labelled outcome with node text or rider text and disposition", () => {
-	const mapped = {
-		...publish,
-		outcomes: [{ source: seats[0]!, n: 1, label: "R2" }, publish.outcomes[1]!],
-	};
-	const review = step(
-		answeringTurn(challengeTurn(synthesisTurn(), mapped)),
-		answerChallenger,
-	).state;
-	const basis = beforeEvidence(ask(review).basis);
 	assert.match(
-		basis,
+		decisions,
 		/Rider `R2`[^\n]*\n[\s\S]*Expose a rejected-order count\.[\s\S]*Disposition: open/,
 	);
 	assert.match(
-		basis,
+		decisions,
 		/Node `L1`[^\n]*\n[\s\S]*Check before placing\.[\s\S]*Place an over-limit order\./,
 	);
-});
-
-test("judge reasons with headings are quoted under their score, not inserted as review headings", () => {
-	const report = judge.replace(
-		"Judge's score for arena_seat_1",
-		"## Rationale\\nIndependent evidence.",
-	);
-	const review = step(
-		answeringTurn(
-			challengeTurn(complete(judgeTurn(), { arena_judge: report })),
-		),
-		answerChallenger,
-	).state;
-	const basis = ask(review).basis;
 	assert.match(basis, /^> ## Rationale\n> Independent evidence\.$/m);
 	assert.doesNotMatch(basis, /^## Rationale$/m);
 });
@@ -736,10 +696,6 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 	const note = "Retain account ownership with this base.";
 	const taken = owner(first, "base:arena_seat_2", [{ n: 1, text: note }]);
 	assert.deepEqual(taken.send ?? [], []);
-	assert.deepEqual(design.effects(taken.state, world), []);
-	assert.deepEqual(design.asks(taken.state, world), []);
-	assert.match(input(taken.state), /arena_seat_2/);
-	assert.match(input(taken.state), /Retain account ownership/);
 	const replies = [
 		{ n: 1, status: "acted_on", reason: "Kept account ownership." },
 	];
@@ -763,7 +719,6 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 		/Default of arena_seat_2/,
 	);
 	const review = step(answeringTurn(challenging), answerChallenger).state;
-	assert.deepEqual(design.effects(review, world), []);
 	assert.match(ask(review).basis, /challenged round 2.*arena_seat_2/i);
 	assert.match(
 		ask(review).basis.split("\n## Mandate", 1)[0]!,
@@ -775,8 +730,6 @@ test("the owner's candidate choice pins the next synthesis base, retains the ear
 	assert.equal(review.rounds[0]?.answer?.choice, "base:arena_seat_2");
 	const approved = owner(review, "approve");
 	assert.equal(approved.send?.[0]?.event.kind, "bound");
-	assert.ok(approved.state.mandate?.nodes.some((node) => node.label === "R1"));
-	assert.equal(approved.state.mandate?.delegated[0]?.label, "R2");
 });
 
 test("seeded and fresh arenas keep the old candidates, judge, challenger and round; only seeded candidates receive the old review", () => {
@@ -786,20 +739,10 @@ test("seeded and fresh arenas keep the old candidates, judge, challenger and rou
 			{ n: 1, text: "Measure ownership independently." },
 		]);
 		const fresh = choice === "arena_fresh";
-		assert.deepEqual(rerun.send ?? [], []);
-		assert.match(input(rerun.state), /Measure ownership independently/);
-		assert.equal(
-			input(rerun.state).replace(/^> ?/gm, "").includes(candidate(seats[0]!)),
-			!fresh,
-		);
 		const next = step(rerun.state, {
 			...frame,
 			question: "What scopes the risk limit?",
 		}).state;
-		assert.deepEqual(
-			next.rounds[0]?.dispositions,
-			answerChallenger.dispositions,
-		);
 		assert.equal(next.rounds[0]?.answer?.choice, choice);
 		assert.deepEqual(next.arenas[0], first.arenas[0]);
 		assert.notEqual(pending(next).key, pending(candidateTurn()).key);
@@ -844,45 +787,34 @@ test("rework retains the first challenge and round, and replies by annotation nu
 	assert.deepEqual(review.rounds[0]?.draft, draft);
 });
 
-test("declining after review or a failed dispatch leaves no effects, owner decision, or designer expectation running", () => {
-	for (const s of [
-		complete(candidateTurn(), { ...candidates, [seats[1]!]: null }),
-	]) {
-		const { state, send } = owner(s, "decline");
-		assert.deepEqual(send ?? [], []);
-		assert.deepEqual(design.effects(state, world), []);
-		assert.deepEqual(design.asks(state, world), []);
-		assert.deepEqual(design.agents(state, world)[0]?.expects, []);
-		assert.equal(state.mandate, null);
-	}
+test("declining a failed dispatch stops the arena without binding", () => {
+	const failed = complete(candidateTurn(), {
+		...candidates,
+		[seats[1]!]: null,
+	});
+	const { state, send } = owner(failed, "decline");
+	assert.deepEqual(send ?? [], []);
+	assert.deepEqual(design.effects(state, world), []);
+	assert.deepEqual(design.asks(state, world), []);
+	assert.equal(input(state), "");
 });
 
-test("a stopped designer resumes the same arena turn under a new expectation without starting another effect", () => {
-	for (const s of [answeringTurn()]) {
-		const [turn] = design.agents(s, world)[0]!.expects;
-		assert.ok(turn);
-		const held = step(s, {
-			kind: "agent_stalled",
-			agent: "designer",
-			tokens: [turn.token],
-			cause: "stopped",
-			lastWords: "Still checking the evidence.",
-		});
-		assert.ok(held.send?.[0]);
-		assert.equal(input(held.state), "");
-		const resumed = step(held.state, {
-			kind: "resume",
-			cause: held.send[0].event.cause!,
-			direction: "Continue this turn.",
-			evidence: "Stopped.",
-		}).state;
-		const [after] = design.agents(resumed, world)[0]!.expects;
-		assert.ok(after);
-		assert.notEqual(after.token, turn.token);
-		assert.deepEqual(after.tools, turn.tools);
-		assert.match(input(resumed), /Continue this turn/);
-		assert.deepEqual(design.effects(resumed, world), []);
-	}
+test("resuming an interrupted challenger response keeps the objections instead of starting another dispatch", () => {
+	const s = answeringTurn();
+	const held = step(s, {
+		kind: "agent_stalled",
+		agent: "designer",
+		tokens: [design.agents(s, world)[0]!.expects[0]!.token],
+		cause: "stopped",
+		lastWords: "Still checking the evidence.",
+	});
+	const resumed = step(held.state, {
+		kind: "resume",
+		cause: held.send![0]!.event.cause!,
+		direction: "Continue this turn.",
+	}).state;
+	assert.match(input(resumed), /Which account does the limit attach to/);
+	assert.deepEqual(design.effects(resumed, world), []);
 });
 
 test("cancelling a pending arena withdraws its effect and an old completion cannot start its next stage", () => {

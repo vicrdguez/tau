@@ -17,6 +17,7 @@ import {
 	objection,
 	seats,
 } from "./arena-script.ts";
+import { buildTurns } from "./build-turns.ts";
 import { openScriptedWorkflow } from "./kernel.ts";
 
 const prompt = "Give shell callers one way to read and write the book.";
@@ -424,15 +425,7 @@ export async function openReview(
 		const report = "Use the approved shared reader from the report.";
 		const check = "! git symbolic-ref -q HEAD && sh book-check.sh";
 		const bytes = `${check} && printf 'repaired\\n' | cmp - book`;
-		const verify = (command: string, text: string, ...facts: string[]) => [
-			turn("verifier", "bash", { command }, description, ...facts),
-			turn("verifier", "publish_verdict", {
-				outcome: "pass",
-				text,
-				blocks: [],
-				notes: [],
-			}),
-		];
+		const { implement, verify } = buildTurns(turn);
 		provider.setResponses([
 			turn(
 				"coordinator",
@@ -479,13 +472,11 @@ export async function openReview(
 				},
 				{ tool: "principle", text: body },
 			),
-			turn("worker", "bash", {
-				command: encodeCommand,
-			}),
-			turn("worker", "publish_build", { summary: encode, addresses: [] }),
+			...implement(encodeCommand, encode),
 			...verify(
 				check,
 				"Shell contract passes on the Encode publication.",
+				description,
 				".keel/playbooks/book.md",
 			),
 			turn("coordinator", "brief_item", {
@@ -495,12 +486,11 @@ export async function openReview(
 				fences: "book",
 				nodes: ["line-ending", "write-book"],
 			}),
-			turn("worker", "bash", {
-				command:
-					". ./book.sh && write_book book repaired && git commit -am 'migrate book'",
-			}),
-			turn("worker", "publish_build", { summary: migrate, addresses: [] }),
-			...verify(bytes, "Migrated bytes match."),
+			...implement(
+				". ./book.sh && write_book book repaired && git commit -am 'migrate book'",
+				migrate,
+			),
+			...verify(bytes, "Migrated bytes match.", description),
 			turn("coordinator", "brief_item", {
 				item: "report",
 				goal: report,
@@ -508,14 +498,14 @@ export async function openReview(
 				fences: "book-report.sh",
 				nodes: ["read-book", "stdout"],
 			}),
-			turn("worker", "bash", {
-				command:
-					"test \"$(cat book)\" = repaired && printf '%s\\n' '. ./book.sh' 'read_book book' > book-report.sh && git add book-report.sh && git commit -m 'use shared reader in report'",
-			}),
-			turn("worker", "publish_build", { summary: report, addresses: [] }),
+			...implement(
+				"test \"$(cat book)\" = repaired && printf '%s\\n' '. ./book.sh' 'read_book book' > book-report.sh && git add book-report.sh && git commit -m 'use shared reader in report'",
+				report,
+			),
 			...verify(
 				`${bytes} && test "$(sh book-report.sh)" = repaired`,
 				"Report uses the shared reader.",
+				description,
 			),
 			turn("coordinator", "handoff_build", {
 				summary: migrate,
@@ -524,6 +514,7 @@ export async function openReview(
 			...verify(
 				`${bytes} && test "$(sh book-report.sh)" = repaired && test "$(git rev-parse HEAD)" = "$(cat "$(git rev-parse --git-common-dir)/merge-proof")"`,
 				"The integrated shell contract and migrated bytes match.",
+				description,
 			),
 		]);
 		await answer("mandate/3", "approve", [[redesigned, approvalNote]]);
