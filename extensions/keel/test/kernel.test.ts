@@ -3,9 +3,9 @@ import { type TestContext, test } from "node:test";
 import { type DecisionId, decision, eventLog } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
+	type FauxResponseStep,
 	fauxAnswer,
 	fauxAssistantMessage,
-	type FauxResponseStep,
 } from "tau/testing";
 import { agentKey, token, workId } from "../src/kernel/ids.ts";
 import { stateDoc } from "../src/kernel/state.ts";

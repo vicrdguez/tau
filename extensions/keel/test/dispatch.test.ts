@@ -7,7 +7,7 @@ import {
 	defineTool,
 	MemoryStorage,
 } from "tau/durable";
-import { obj } from "tau/schema";
+import { compile, obj } from "tau/schema";
 import {
 	createModels,
 	fauxAssistantMessage,
@@ -262,17 +262,25 @@ test("an owned child cannot dispatch even when another tool exposes fan-out", {
 	assert.equal(x.quick.state.callCount, 0);
 });
 
-for (const [name, input] of [
-	["empty", []],
-	["oversized", Array.from({ length: 100 }, () => jobs[0]!)],
-	["unknown seat", [jobs[0]!, { seat: "unknown", question: "no" }]],
-] as const) {
-	test(`${name} job list is refused without starting any children`, {
-		timeout: 3000,
-	}, async (t) => {
-		const x = await setup(t);
-		await x.start([...input]);
-		assert.equal((await x.result()).error, true);
-		assert.deepEqual(await x.owned(), []);
-	});
-}
+test("the tool schema permits one to eight dispatch jobs", () => {
+	const schema = compile(dispatchTool({ resolve: () => undefined }).parameters);
+	for (const [length, expected] of [
+		[0, false],
+		[1, true],
+		[8, true],
+		[9, false],
+	] as const)
+		assert.equal(
+			schema.validate({ jobs: Array.from({ length }, () => jobs[0]!) }).ok,
+			expected,
+		);
+});
+
+test("an unknown last seat refuses the whole batch before starting any children", {
+	timeout: 3000,
+}, async (t) => {
+	const x = await setup(t);
+	await x.start([jobs[0]!, { seat: "unknown", question: "no" }]);
+	assert.equal((await x.result()).error, true);
+	assert.deepEqual(await x.owned(), []);
+});

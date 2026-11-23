@@ -33,20 +33,8 @@ import { defineState, stateDoc } from "../src/kernel/state.ts";
 import { options } from "../src/roles/index.ts";
 import { sharedFixture, toyFixture } from "./state/toy.ts";
 
-type ToyState = {
-	ask: string | null;
-	turn: number;
-	agents: number;
-	paused: boolean;
-	effect: boolean;
-	answers: number;
-	publications: number;
-	stalls: number;
-	facts: string[];
-	notes: string[];
-};
-const initial = (): ToyState => ({
-	ask: null,
+const initial = () => ({
+	ask: null as string | null,
 	turn: 0,
 	agents: 0,
 	paused: false,
@@ -54,8 +42,8 @@ const initial = (): ToyState => ({
 	answers: 0,
 	publications: 0,
 	stalls: 0,
-	facts: [],
-	notes: [],
+	facts: [] as string[],
+	notes: [] as string[],
 });
 export const Toy = defineState({
 	kind: "keel.toy",

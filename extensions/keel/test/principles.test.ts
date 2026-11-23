@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import { configure, type Conversation } from "tau/durable";
+import { type Conversation, configure } from "tau/durable";
 import { obj, str } from "tau/schema";
 import { fauxAssistantMessage } from "tau/testing";
 import { agentKey, token } from "../src/kernel/ids.ts";

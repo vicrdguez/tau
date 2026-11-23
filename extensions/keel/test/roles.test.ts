@@ -63,7 +63,7 @@ const extension = defineExtension({ name: "keel", tools: [publish, inspect] });
 
 // Failure cases: a role is required instead of its lane; a model inherits from
 // the wrong lane or sibling; omitting optional settings breaks an old project.
-test("four lane models suffice; every role and seat can independently override its lane", async (t) => {
+test("role settings retain lane defaults, independent overrides and tool authority", async (t) => {
 	const registry = createRegistry();
 	const { harness } = await openStore(
 		new MemoryStorage(),
@@ -126,31 +126,8 @@ test("four lane models suffice; every role and seat can independently override i
 			);
 		}
 	}
-});
 
-// Failure cases: a project default or another role's tool leaks in; the
-// verifier loses bash; a shared registration is available to only one role.
-test("configured agents see their coding tools and only their assigned Keel tools", async (t) => {
-	const registry = createRegistry();
-	const unrelated = defineExtension({
-		name: "unrelated",
-		tools: [tool("external")],
-	});
-	for (const ext of [CodingTools, extension, unrelated]) registry.install(ext);
-	const { harness } = await openStore(
-		new MemoryStorage(),
-		{
-			registry,
-			models: createModels(),
-			settings: () => ({ extensions: [CodingTools, unrelated] }),
-		},
-		ctx,
-	);
-	t.after(() => harness.close(ctx));
-	const opts = await harness.commit(async (tx) => {
-		await options.set(tx, lanes);
-		return options.read(tx);
-	}, ctx);
+	// Settings own the closed tool list; entry.test.ts proves Tau uses it.
 	for (const [role, expected] of [
 		["coordinator", ["read"]],
 		["diagnoser", ["bash", "read"]],
@@ -158,21 +135,15 @@ test("configured agents see their coding tools and only their assigned Keel tool
 		["verifier", ["bash", "inspect", "read"]],
 		["designer", ["bash", "read"]],
 	] as const) {
-		const conversation = await harness.createConversation(
-			{
-				ownership: { kind: "ownerless" },
-				agent: settings(role, opts, extension, specs),
-			},
-			ctx,
-		);
-		const agent = await conversation.agent(ctx);
+		const agent = settings(role, defaults, extension, specs);
 		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
-		assert.deepEqual(agent.tools.map((t) => t.name).sort(), expected, role);
+		assert.ok(Array.isArray(agent.tools), role);
 		assert.deepEqual(
-			agent.extensions.map((e) => e.name).sort(),
-			[CodingTools.name, extension.name].sort(),
+			agent.tools.map((t: ToolRegistration) => t.name).sort(),
+			expected,
 			role,
 		);
+		assert.deepEqual(agent.extensions, [CodingTools, extension], role);
 	}
 	assert.deepEqual([...explorerDispatch.roles].sort(), [
 		"designer",
@@ -182,18 +153,20 @@ test("configured agents see their coding tools and only their assigned Keel tool
 	const worker = {
 		role: "worker",
 		cwd: null,
-		options: opts,
+		options: chosen,
 		view: () => null,
 		priorWorks: [],
 	} as const;
-	assert.ok(
-		explorerDispatch.resolve(worker, {
-			seat: "build_explorer",
-			question: "Check the inputs",
-		}),
-	);
+	const seat = await explorerDispatch.resolve(worker, {
+		seat: "build_explorer",
+		question: "Check the inputs",
+	});
+	assert.deepEqual(seat?.model, {
+		provider: "custom",
+		modelId: "build_explorer",
+	});
 	assert.equal(
-		explorerDispatch.resolve(worker, {
+		await explorerDispatch.resolve(worker, {
 			seat: "design_explorer",
 			question: "Check the inputs",
 		}),
