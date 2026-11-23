@@ -10,6 +10,25 @@ export function findingNote(work: WorkId, text: string): Message {
 	return { lane: "verify", work, event };
 }
 
+/** Hand-over evidence, not a decision or a way to resume a lane. */
+export type HoldingReport = {
+	kind: "holding_report";
+	lane: "design" | "build" | "verify";
+	item: string | null;
+	cause: string;
+	evidence: string;
+	/** Null on first report; an answer without annotations is the empty string. */
+	direction: string | null;
+};
+export const holdingReport = (
+	work: WorkId,
+	report: Omit<HoldingReport, "kind">,
+): Message => ({
+	lane: "verify",
+	work,
+	event: { kind: "holding_report", ...report },
+});
+
 type BuildSnapshot = {
 	repo: RepoInfo;
 	mandate: Mandate;

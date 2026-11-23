@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { design } from "../src/lanes/design/index.ts";
-import { laneDriver, laneWorld } from "./fixtures/drive.ts";
+import { holdingChoice, laneDriver, laneWorld } from "./fixtures/drive.ts";
 
 const world = laneWorld();
 const run = () => laneDriver(design, world);
@@ -129,17 +129,12 @@ test("a stopped Ground turn files a hold; resume carries direction and ignores t
 		tokens: [token],
 		lastWords: "Still reading.",
 	};
-	const [file] = x.send(stall).send ?? [];
-	assert.equal(file?.lane, "queue");
-	assert.equal(file?.work, null);
+	x.send(stall);
+	assert.match(x.asks()[0]!.basis, /design reports:\nstopped: Still reading/);
 	assert.deepEqual(x.agents()[0]?.expects, []);
-	assert.deepEqual(x.send(stall).send ?? [], []);
-	x.send({
-		kind: "resume",
-		cause: file!.event.cause!,
-		evidence: file!.event.evidence!,
-		direction: "Check venue A.",
-	});
+	x.send(stall);
+	assert.equal(x.asks().length, 1);
+	x.send(holdingChoice(x.asks()[0]!, "resume", "Check venue A."));
 	const next = x.agents()[0]!.expects[0]!;
 	assert.notEqual(next.token, token);
 	assert.match(next.input?.() ?? "", /Still reading[\s\S]*Check venue A/);

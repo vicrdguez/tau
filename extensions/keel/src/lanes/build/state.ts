@@ -115,6 +115,7 @@ export type Build = {
 	};
 	items: Item[];
 	holds: {
+		basis: string | null;
 		cause: string;
 		item: string | null;
 		evidence: string;

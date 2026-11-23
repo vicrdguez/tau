@@ -4,7 +4,7 @@ import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
 import { replyJson } from "../src/reply-json.ts";
 import { dispatchResult } from "./fixtures/design-review.ts";
-import { drive, laneWorld } from "./fixtures/drive.ts";
+import { holdingChoice, drive, laneWorld } from "./fixtures/drive.ts";
 
 const world = laneWorld({
 	options: {
@@ -808,11 +808,14 @@ test("resuming an interrupted challenger response keeps the objections instead o
 		cause: "stopped",
 		lastWords: "Still checking the evidence.",
 	});
-	const resumed = step(held.state, {
-		kind: "resume",
-		cause: held.send![0]!.event.cause!,
-		direction: "Continue this turn.",
-	}).state;
+	const resumed = step(
+		held.state,
+		holdingChoice(
+			design.asks(held.state, world)[0]!,
+			"resume",
+			"Continue this turn.",
+		),
+	).state;
 	assert.match(input(resumed), /Which account does the limit attach to/);
 	assert.deepEqual(design.effects(resumed, world), []);
 });

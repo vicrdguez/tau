@@ -5,7 +5,7 @@ import { buildLane } from "../src/lanes/build/index.ts";
 import { type buildView, validateGraph } from "../src/lanes/build/state.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
 import { startBuild } from "./fixtures/build.ts";
-import { laneDriver, laneWorld } from "./fixtures/drive.ts";
+import { holdingChoice, laneDriver, laneWorld } from "./fixtures/drive.ts";
 
 const mandate: Mandate = {
 	delegated: [],
@@ -107,6 +107,8 @@ function setup(max_workers = 1) {
 		};
 		return {
 			...driver,
+			resume: (direction = "") =>
+				send(holdingChoice(driver.asks()[0]!, "resume", direction)),
 			world,
 			publication: () =>
 				(driver.view() as ReturnType<typeof buildView>).publicationOf(
@@ -451,24 +453,19 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 								? { kind: outcome, path: "/foreign" }
 								: { kind: outcome, actual: sha },
 					};
-		const file = b.send(fact).send![0]!.event;
-		assert.equal(file.item, "fix");
+		b.send(fact);
+		const [ask] = b.asks();
 		assert.equal(b.effects().length, 0);
+		assert.match(ask!.basis, /build\/fix reports:/);
 		assert.match(
-			String(file.evidence),
+			ask!.basis,
 			new RegExp(outcome === "effect_failed" ? "read failed" : outcome),
 		);
-		b.send({
-			kind: "resume",
-			item: "fix",
-			cause: file.cause!,
-			evidence: file.evidence!,
-			direction: "try another checkout",
-		});
+		b.resume("try another checkout");
 		assert.notEqual(b.effect().key, first.key);
 		if (outcome !== "occupied") {
 			assert.deepEqual(b.effect().spec, first.spec);
-			assert.match(String(file.resume), /same pinned/i);
+			assert.match(ask!.basis, /same pinned/i);
 		} else
 			assert.notEqual(
 				(b.effect().spec.op as JsonObject).path,
@@ -525,16 +522,16 @@ test("a sibling merge at the wrong SHA or a failed review cannot explain a moved
 	for (const kind of ["merged", "rework"]) {
 		const b = preparingBesidePublication();
 		b.done({ kind: "moved", actual: sha });
-		const files = b.send({
+		b.send({
 			kind,
 			item: "fix",
 			head: merged,
 			evidence: "conflict",
 			threads: [],
-		}).send;
-		assert.equal(files?.length, 1);
-		assert.equal(files[0]!.event.item, "other");
-		assert.match(String(files[0]!.event.evidence), new RegExp(sha));
+		});
+		assert.equal(b.asks().length, 1);
+		assert.match(b.asks()[0]!.basis, /build\/other reports:/);
+		assert.match(b.asks()[0]!.basis, new RegExp(sha));
 		assert.ok(
 			!b.effects().some((e) => (e.spec.op as JsonObject).kind === "worktree"),
 		);
@@ -543,14 +540,8 @@ test("a sibling merge at the wrong SHA or a failed review cannot explain a moved
 
 function replaceOccupied(b: ReturnType<typeof setup>) {
 	const before = b.effect();
-	const hold = b.done({ kind: "occupied", path: "/foreign" }).send![0]!.event;
-	b.send({
-		kind: "resume",
-		cause: hold.cause!,
-		item: hold.item!,
-		evidence: hold.evidence!,
-		direction: "",
-	});
+	b.done({ kind: "occupied", path: "/foreign" });
+	b.resume();
 	return before.spec.op as JsonObject;
 }
 
@@ -648,19 +639,10 @@ for (const confirmed of [false, true]) {
 test("a discovery resumed after bad options reads the current base and trunk", () => {
 	const b = setup();
 	b.send({ kind: "bound", mandate });
-	const failure = b.send({
-		kind: "effect_failed",
-		key: b.effect().key,
-		error: "missing base",
-	}).send![0]!.event;
+	b.send({ kind: "effect_failed", key: b.effect().key, error: "missing base" });
+	assert.match(b.asks()[0]!.basis, /missing base/);
 	Object.assign(b.world.options, { base: "stable", trunk: "release" });
-	b.send({
-		kind: "resume",
-		item: null,
-		cause: failure.cause!,
-		direction: "retry",
-		evidence: failure.evidence!,
-	});
+	b.resume("retry");
 	assert.deepEqual(b.effect().spec, {
 		kind: "read_repo",
 		base: "stable",
@@ -682,8 +664,8 @@ test("only an attributed trunk move refreshes a start plan, and the refreshed sn
 		if (race) {
 			// Replay the original start so repo must attribute this second move too.
 			assert.deepEqual(b.effect().spec, old.spec);
-			const held = b.done({ kind: "moved", actual: sha }).send![0]!.event;
-			assert.match(String(held.resume), /same pinned/i);
+			b.done({ kind: "moved", actual: sha });
+			assert.match(b.asks()[0]!.basis, /same pinned/i);
 			assert.deepEqual(b.effects(), []);
 		} else {
 			assert.notEqual(
@@ -700,18 +682,9 @@ test("a start that failed after a possible CAS keeps its immutable git plan on e
 	b.send({ kind: "bound", mandate });
 	b.done({ kind: "repo", repo });
 	const first = b.effect();
-	const f = b.send({
-		kind: "effect_failed",
-		key: first.key,
-		error: "lost CAS response",
-	}).send![0]!.event;
-	b.send({
-		kind: "resume",
-		cause: f.cause!,
-		item: null,
-		evidence: f.evidence!,
-		direction: "retry the pinned plan",
-	});
+	b.send({ kind: "effect_failed", key: first.key, error: "lost CAS response" });
+	assert.match(b.asks()[0]!.basis, /lost CAS response/);
+	b.resume("retry the pinned plan");
 	assert.notEqual(b.effect().key, first.key);
 	assert.deepEqual(b.effect().spec, first.spec);
 });
@@ -729,11 +702,11 @@ for (const role of ["coordinator", "worker"]) {
 			lastWords: "need review",
 		});
 		const old = stop();
-		const file = b.send(old).send![0]!.event;
+		b.send(old);
 		assert.equal(b.agent(role).paused, true);
-		assert.match(String(file.evidence), /stopped[\s\S]*need review/);
+		assert.match(b.asks()[0]!.basis, /stopped[\s\S]*need review/);
 		assert.deepEqual(b.send(old).send ?? [], []);
-		b.send({ ...file, kind: "resume", direction: "continue now" });
+		b.resume("continue now");
 		assert.notEqual(b.request(role).token, old.tokens[0]);
 		assert.deepEqual(b.send(old).send ?? [], []);
 		assert.match(b.request(role).text, /continue now/);
@@ -742,6 +715,10 @@ for (const role of ["coordinator", "worker"]) {
 			assert.doesNotMatch(b.request(role).text, /continue now/);
 		}
 		b.send(stop());
+		assert.equal(
+			b.send(holdingChoice(b.asks()[0]!, "cancel")).send?.[0]?.event.kind,
+			"cancel_work",
+		);
 		b.send({ kind: "cancel" });
 		if (role === "worker") {
 			assert.equal((b.effect().spec.op as JsonObject).kind, "remove");
@@ -905,17 +882,11 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 		(op.target as JsonObject).path,
 		"/repo/.git/keel/32/worker-fix-1",
 	);
-	const obstruction = b.done({ kind: "occupied", path: "private path" })
-		.send![0]!.event;
+	b.done({ kind: "occupied", path: "private path" });
+	assert.match(b.asks()[0]!.basis, /private path/);
 	assert.equal(b.agent("coordinator").expects.length, 0);
 	assert.deepEqual(b.effects(), []);
-	b.send({
-		kind: "resume",
-		cause: obstruction.cause!,
-		item: "fix",
-		evidence: obstruction.evidence!,
-		direction: "leave my notes intact",
-	});
+	b.resume("leave my notes intact");
 	assert.deepEqual(b.effect().spec.op, op);
 	assert.match(
 		JSON.stringify(

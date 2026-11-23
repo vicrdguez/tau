@@ -1,3 +1,10 @@
+import {
+	directions,
+	holdingBasis,
+	holdingScope,
+	holdingSubject,
+	resumption,
+} from "../../holding.ts";
 import { effectKey, token } from "../../kernel/ids.ts";
 import {
 	type Accepted,
@@ -18,12 +25,7 @@ import {
 } from "../../repo/index.ts";
 import { toBuild } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
-import {
-	fileHolding,
-	fileIntake,
-	type Resume,
-	resumption,
-} from "../queue/public.ts";
+import { cancelWork, fileIntake } from "../queue/public.ts";
 import {
 	agentFor,
 	agents,
@@ -31,7 +33,7 @@ import {
 	effects,
 	handoverEvidence,
 } from "./declarations.ts";
-import type { FindingNote, Publication } from "./public.ts";
+import type { FindingNote, HoldingReport, Publication } from "./public.ts";
 import {
 	type Block,
 	cleaning,
@@ -50,18 +52,9 @@ export { verifyTools } from "./tools.ts";
 type Event =
 	| Publication
 	| FindingNote
-	| Resume
+	| HoldingReport
 	| { kind: "ambiguity_answer"; direction: string }
-	| {
-			kind: "finding_direction";
-			lane: string;
-			item: string | null;
-			cause: string;
-			evidence: string;
-			direction: string;
-	  }
 	| { kind: "slot_granted" | "cancel" }
-	| { kind: "reset_counts"; item: string }
 	| { kind: "queue_hold"; item: string; cause: string }
 	| { kind: "defect_fixed"; item: string; evidence: string }
 	| {
@@ -166,18 +159,41 @@ function transition(prev: State, world: World) {
 		job: string | null = null,
 	) {
 		const cause = key("hold");
-		s.holds.push({ cause, item, evidence, job });
-		send.push(
-			fileHolding({
-				work,
-				lane: "verify",
-				goal: s.mandate!.intent,
-				item,
-				cause,
-				evidence,
-				resume,
-			}),
-		);
+		const basis = holdingBasis({
+			goal: s.mandate!.intent,
+			scope: holdingScope("verify", item),
+			evidence,
+			resume,
+		});
+		s.holds.push({ cause, item, evidence, job, basis });
+		recordHold({
+			kind: "holding_report",
+			lane: "verify",
+			item,
+			cause,
+			evidence,
+			direction: null,
+		});
+	}
+	function recordHold({
+		lane,
+		item,
+		cause,
+		evidence,
+		direction,
+	}: HoldingReport) {
+		const scope = holdingScope(lane, item);
+		s.holdingReports[`${lane}/${cause}`] = {
+			scope,
+			evidence,
+			status: direction === null ? "open" : "resumed",
+		};
+		if (direction !== null) {
+			if (direction.trim())
+				s.directions.push(`${scope}: ${evidence}\nDirection: ${direction}`);
+			if (item !== null)
+				for (const t of s.threads) if (t.item === item) t.survived = 0;
+		}
 	}
 	function release() {
 		if (s.slot !== "none") deliver("trunk", { kind: "release_slot", work });
@@ -259,7 +275,15 @@ function transition(prev: State, world: World) {
 			followReference:
 				design?.ownerReviewed === false ? design.reference : null,
 			revisions: design?.revisionSummary ?? "",
-			findings: queue?.findingsFor?.(work) ?? "",
+			findings: [
+				queue?.findingsFor?.(work),
+				...Object.values(s.holdingReports).map(
+					({ scope, evidence, status }) =>
+						`- Holding finding (${scope}): ${evidence} (${status})`,
+				),
+			]
+				.filter(Boolean)
+				.join("\n"),
 		};
 		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
@@ -302,16 +326,7 @@ function transition(prev: State, world: World) {
 				(h.job === null || !s.jobs.some((j) => j.key === h.job)),
 		)) {
 			s.holds = s.holds.filter((other) => other !== h);
-			send.push({
-				lane: "queue",
-				work: null,
-				event: {
-					kind: "resolve_holding",
-					work,
-					lane: "verify",
-					cause: h.cause,
-				},
-			});
+			s.holdingReports[`verify/${h.cause}`]!.status = "resolved";
 		}
 		retire(c);
 		back(
@@ -348,6 +363,8 @@ function transition(prev: State, world: World) {
 			clearIntegration(j);
 		}
 		s.holds = [];
+		for (const report of Object.values(s.holdingReports))
+			if (report.status === "open") report.status = "cancelled";
 		s.queueHolds = [];
 		for (const c of s.checks) {
 			if (
@@ -382,6 +399,35 @@ function transition(prev: State, world: World) {
 				}
 
 				case "answered": {
+					const h = s.holds.find(
+						(h) => holdingSubject(work, "verify", h.cause) === e.subject,
+					);
+					if (h) {
+						if (e.choice === "cancel")
+							return { state: prev, send: [cancelWork(work)] };
+						if (e.choice !== "resume") return { state: prev };
+						const direction = directions(e);
+						recordHold({
+							kind: "holding_report",
+							lane: "verify",
+							item: h.item,
+							cause: h.cause,
+							evidence: h.evidence,
+							direction,
+						});
+						const c = find(h.item)!;
+						s.holds = s.holds.filter((other) => other !== h);
+						c.direction = [
+							c.direction,
+							c.phase === "nonconvergent" ? "" : h.evidence,
+							direction,
+						]
+							.filter(Boolean)
+							.join("\n");
+						if (h.job) s.jobs.find((j) => j.key === h.job)!.key = key("retry");
+						resumeReview(c);
+						break;
+					}
 					if (s.handover?.status !== "asking" || e.subject !== "handover")
 						break;
 					if (e.choice !== "accept" && e.choice !== "reject")
@@ -567,18 +613,16 @@ function transition(prev: State, world: World) {
 		if (e.kind === "finding_note")
 			return { state: prev, notes: [{ agent: null, text: e.text }] };
 		if (s.cancelled) return { state: prev };
+		if (e.kind === "holding_report") {
+			recordHold(e);
+			return { state: s };
+		}
 		switch (e.kind) {
 			case "cancel":
 				cancel();
 				break;
 			case "ambiguity_answer":
 				s.directions.push(`Ground reading: ${e.direction}`);
-				break;
-			case "finding_direction":
-				if (e.direction.trim())
-					s.directions.push(
-						`${e.lane}${e.item ? "/" + e.item : ""}: ${e.evidence}\nDirection: ${e.direction}`,
-					);
 				break;
 			case "queue_hold":
 				if (
@@ -819,25 +863,6 @@ function transition(prev: State, world: World) {
 					});
 				}
 				break;
-			case "reset_counts":
-				for (const t of s.threads) if (t.item === e.item) t.survived = 0;
-				break;
-			case "resume": {
-				const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
-				if (!h) break;
-				const c = find(h.item)!;
-				s.holds = s.holds.filter((x) => x !== h);
-				const returning = c.phase === "nonconvergent";
-				c.direction = [c.direction, returning ? "" : h.evidence, e.direction]
-					.filter(Boolean)
-					.join("\n");
-				if (h.job) {
-					const j = s.jobs.find((j) => j.key === h.job)!;
-					j.key = key("retry");
-				}
-				resumeReview(c);
-				break;
-			}
 		}
 		return settle();
 	}

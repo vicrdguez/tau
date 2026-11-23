@@ -5,7 +5,12 @@ import type { LaneEvent } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
 import { verify } from "../src/lanes/verify/index.ts";
 import { principleInputs } from "../src/principles/index.ts";
-import { drive, laneDriver, laneWorld } from "./fixtures/drive.ts";
+import {
+	holdingChoice,
+	drive,
+	laneDriver,
+	laneWorld,
+} from "./fixtures/drive.ts";
 
 const world = laneWorld({ work: 41 as WorkId, options: { max_workers: 3 } });
 const repo = {
@@ -206,6 +211,8 @@ function flow(view = world.view) {
 		prepare,
 		prepared,
 		asks: driver.asks,
+		resume: (direction = "test the premise") =>
+			apply(holdingChoice(driver.asks()[0]!, "resume", direction)),
 	};
 }
 const findingHold = (cause: string, item = "bug") => ({
@@ -447,7 +454,7 @@ test("diagnosed rework waits for the last queue hold regardless of answer order"
 		x.checkout();
 		x.fail();
 	}
-	const diagnosis = x.call(
+	x.call(
 		{
 			kind: "diagnosis",
 			premise: "No rounding before posting",
@@ -456,10 +463,9 @@ test("diagnosed rework waits for the last queue hold regardless of answer order"
 		},
 		"diagnoser",
 	);
-	const local = diagnosis.send?.find((m) => m.lane === "queue")?.event;
-	assert.ok(local);
+	assert.match(x.asks()[0]!.basis, /Pre-posting rounding differs/);
 	x.apply(findingHold("boundary"));
-	assert.deepEqual(x.apply(resume(local)).send, []);
+	assert.deepEqual(x.resume().send, []);
 	const result = x.apply({ kind: "queue_release", cause: "boundary" });
 	const update = result.send?.find((m) => m.lane === "build")?.event;
 	assert.equal(update?.kind, "rework");
@@ -568,13 +574,6 @@ test("a revision repins a queued merge's proof but records a claimed merge witho
 	}
 });
 
-const resume = (file: LaneEvent) => ({
-	kind: "resume",
-	cause: file.cause!,
-	item: file.item!,
-	direction: "test the premise",
-	evidence: file.evidence!,
-});
 test("Verify opens only the published checkout, renders the proof, brief, rulings and project playbook; inconsistent verdicts are refused", () => {
 	const x = flow();
 	x.publish("one", [], "bug", "base", {
@@ -657,17 +656,15 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 		else assert.ok(!r.send?.length);
 	}
 	const a = x.agent("diagnoser");
-	const stalled = x.apply({
+	x.apply({
 		kind: "agent_stalled",
 		agent: a.key,
 		tokens: [a.expects[0]!.token],
 		cause: "stopped",
 		lastWords: "checking that premise",
 	});
-	const stall = stalled.send?.[0]?.event;
-	assert.ok(stall);
-	x.apply({ kind: "reset_counts", item: "bug" });
-	x.apply({ ...resume(stall), direction: "Diagnoser only: inspect floats" });
+	assert.match(x.asks()[0]!.basis, /checking that premise/);
+	x.resume("Diagnoser only: inspect floats");
 	const diagnosis = x.agent("diagnoser");
 	const exp = diagnosis.expects[0]!;
 	const request = principleInputs.render(
@@ -681,7 +678,7 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	assert.match(request, /negative balance/);
 	assert.match(request, /Diagnoser only: inspect floats/);
 	assert.match(request, /Threads that survived two claimed fixes: totals/);
-	const r = x.call(
+	x.call(
 		{
 			kind: "diagnosis",
 			premise: "float is exact",
@@ -690,13 +687,12 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 		},
 		"diagnoser",
 	);
-	const file = r.send?.find((m) => m.lane === "queue")?.event;
-	assert.ok(file);
-	assert.equal(file.item, "bug");
-	assert.match(String(file.evidence), /Two claimed fixes failed on totals/);
-	assert.match(String(file.evidence), /not exact/);
+	const [ask] = x.asks();
+	assert.match(ask!.basis, /verify\/bug reports:/);
+	assert.match(ask!.basis, /Two claimed fixes failed on totals/);
+	assert.match(ask!.basis, /not exact/);
 	assert.equal(x.agents().length, 0);
-	const back = x.apply(resume(file));
+	const back = x.resume();
 	assert.match(String(back.send?.[0]?.event.direction), /test the premise/);
 	assert.doesNotMatch(
 		String(back.send?.[0]?.event.evidence),
@@ -704,7 +700,6 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	);
 	assert.match(String(back.send?.[0]?.event.evidence), /not exact/);
 	assert.doesNotMatch(JSON.stringify(back.send), /Diagnoser only/);
-	x.apply({ kind: "reset_counts", item: "bug" });
 	x.publish("fix3", ["totals"]);
 	x.clean();
 	x.checkout();
@@ -758,25 +753,21 @@ test("a superseded checkout obstruction holds the next review; a pass cleanup fa
 	x.review();
 	x.fail();
 	x.publish("repair");
-	const f = x.done("remove", { kind: "occupied", path: "/private" }).send?.[0]
-		?.event;
-	assert.ok(f);
+	x.done("remove", { kind: "occupied", path: "/private" });
+	assert.match(x.asks()[0]!.basis, /\/private/);
 	assert.deepEqual(x.effects(), []);
-	x.apply(resume(f));
+	x.resume();
 	x.clean();
 	x.checkout();
 	x.pass();
 	const key = x.effect("remove").key;
-	const r = x.apply({
-		kind: "effect_failed",
-		key,
-		error: "could not clean checkout",
-	});
-	const held = r.send?.[0]?.event;
-	assert.ok(held);
-	assert.equal(held.item, "bug");
+	x.apply({ kind: "effect_failed", key, error: "could not clean checkout" });
+	assert.match(
+		x.asks()[0]!.basis,
+		/verify\/bug reports:[\s\S]*could not clean checkout/,
+	);
 	assert.deepEqual(x.effects(), []);
-	x.apply(resume(held));
+	x.resume();
 	x.clean();
 	assert.equal(x.effect("merge_item").op.item, "repair");
 });
@@ -795,11 +786,10 @@ test("integration checkout must be removed before the full review; full checkout
 	x.checkout();
 	const pass = x.pass();
 	assert.ok(!pass.send?.some((m) => m.event.kind === "take_slot"));
-	const held = x.done("remove", { kind: "occupied", path: "/private" })
-		.send?.[0]?.event;
-	assert.ok(held);
+	x.done("remove", { kind: "occupied", path: "/private" });
+	assert.match(x.asks()[0]!.basis, /verify\/full reports:[\s\S]*\/private/);
+	x.resume();
 	assert.equal(x.asks().length, 0);
-	x.apply(resume(held));
 	assert.ok(
 		x
 			.done("remove", { kind: "removed" })
@@ -1014,12 +1004,10 @@ for (const result of [
 		const x = flow();
 		x.publish();
 		const op = x.effect("checkout");
-		const r = x.done("checkout", result as LaneEvent);
-		const file = r.send?.[0]?.event;
-		assert.equal(file?.kind, "file");
-		assert.match(String(file.evidence), /foreign/);
+		x.done("checkout", result as LaneEvent);
+		assert.match(x.asks()[0]!.basis, /foreign/);
 		assert.ok(!x.effects().length);
-		x.apply(resume(file));
+		x.resume();
 		const retried = x.effect("checkout");
 		assert.notEqual(retried.key, op.key);
 		assert.equal(retried.op.sha, "one");
@@ -1032,13 +1020,13 @@ test("owner direction on a merge retry reaches the worker on conflict or the ful
 		x.review();
 		x.pass();
 		x.clean();
-		const filing = x.apply({
+		x.apply({
 			kind: "effect_failed",
 			key: x.effect("merge_item").key,
 			error: "lost integration checkout",
-		}).send?.[0]?.event;
-		assert.ok(filing);
-		x.apply(resume(filing));
+		});
+		assert.match(x.asks()[0]!.basis, /lost integration checkout/);
+		x.resume();
 		let next: string;
 		if (conflict) {
 			const sent = x.done("merge_item", {
@@ -1065,15 +1053,14 @@ test("cancel after exhausted CAS settles the pinned landing before releasing its
 		const x = flow();
 		x.prepared();
 		const plan = x.effect("land");
-		const failed = x.apply({
+		x.apply({
 			kind: "effect_failed",
 			key: plan.key,
 			error: "lost git reply",
 		});
-		const file = failed.send?.find((m) => m.lane === "queue")?.event;
-		assert.ok(file);
+		assert.match(x.asks()[0]!.basis, /lost git reply/);
 		// A pending redelivery doesn't prove the earlier attempt made no write.
-		if (outcome === "moved") x.apply(resume(file));
+		if (outcome === "moved") x.resume();
 		const cancelled = x.apply({ kind: "cancel" });
 		assert.ok(
 			!cancelled.send?.some(
@@ -1117,14 +1104,13 @@ test("cancel after exhausted CAS settles the pinned landing before releasing its
 test("a retry that observed a foreign trunk before cancellation needs no further CAS", () => {
 	const x = flow();
 	x.prepared();
-	const failed = x.apply({
+	x.apply({
 		kind: "effect_failed",
 		key: x.effect("land").key,
 		error: "lost git reply",
 	});
-	const file = failed.send?.find((m) => m.lane === "queue")?.event;
-	assert.ok(file);
-	x.apply(resume(file));
+	assert.match(x.asks()[0]!.basis, /lost git reply/);
+	x.resume();
 	x.done("land", { kind: "moved", actual: "foreign-head" });
 	const cancelled = x.apply({ kind: "cancel" });
 	assert.ok(cancelled.send?.some((m) => m.event.kind === "release_slot"));
@@ -1135,17 +1121,10 @@ test("exhausted CAS holds its exact plan for safe retry even if the write alread
 	const x = flow();
 	x.prepared();
 	const plan = x.effect("land");
-	const r = x.apply({
-		kind: "effect_failed",
-		key: plan.key,
-		error: "lost git reply",
-	});
-	const file = r.send?.find((m) => m.lane === "queue")?.event;
-	assert.ok(file);
-	assert.match(String(file.evidence), /lost git reply/);
-	assert.match(String(file.resume), /same pinned/i);
-	x.apply({ ...resume(file), kind: "finding_direction", lane: "verify" });
-	x.apply(resume(file));
+	x.apply({ kind: "effect_failed", key: plan.key, error: "lost git reply" });
+	assert.match(x.asks()[0]!.basis, /lost git reply/);
+	assert.match(x.asks()[0]!.basis, /same pinned/i);
+	x.resume();
 	const retry = x.effect("land");
 	assert.deepEqual(retry.op, plan.op);
 	assert.notEqual(retry.key, plan.key);
@@ -1283,7 +1262,7 @@ test("all finding directions survive handoff, including answers before the first
 	const x = flow();
 	for (const lane of ["design", "build", "verify"])
 		x.apply({
-			kind: "finding_direction",
+			kind: "holding_report",
 			lane,
 			item: null,
 			cause: lane + "/1",
@@ -1305,19 +1284,18 @@ test("verifier resume uses a fresh token and fresh direction; duplicate, stale a
 		lastWords: "compare failed",
 	});
 	const old = stop();
-	const file = x.apply(old).send?.[0]?.event;
-	assert.ok(file);
-	assert.match(String(file.evidence), /compare failed/);
+	x.apply(old);
+	assert.match(x.asks()[0]!.basis, /compare failed/);
 	assert.deepEqual(x.agents(), []);
-	assert.ok(!x.apply(old).send?.length);
-	x.apply({ ...resume(file), direction: "inspect rounding" });
+	x.apply(old);
+	assert.equal(x.asks().length, 1);
+	x.resume("inspect rounding");
 	const next = stop();
 	assert.notDeepEqual(next.tokens, old.tokens);
 	assert.ok(!x.apply(old).send?.length);
 	assert.match(x.agent().expects[0]!.input!(), /inspect rounding/);
-	const other = x.apply(next).send?.[0]?.event;
-	assert.ok(other);
-	x.apply({ ...resume(other), direction: "inspect carries" });
+	x.apply(next);
+	x.resume("inspect carries");
 	const input = x.agent().expects[0]!.input!();
 	assert.match(input, /inspect carries/);
 	assert.doesNotMatch(input, /inspect rounding/);
@@ -1435,18 +1413,17 @@ test("the landing slot gates CAS; reviewed hand-over prioritizes high-cost evide
 	);
 	assert.deepEqual(x.effects(), []);
 	x.apply({ kind: "slot_granted" });
-	const obstruction = x.done("read_repo", {
+	x.done("read_repo", {
 		kind: "repo",
 		repo: { ...repo, trunkHead: null },
 	});
-	const finding = obstruction.send?.find((m) => m.lane === "queue")?.event;
-	assert.match(String(finding?.evidence), /trunk branch is absent/i);
+	assert.match(x.asks()[0]!.basis, /trunk branch is absent/i);
 	assert.deepEqual(
 		x.effects(),
 		[],
 		"the missing trunk cannot be integrated or landed",
 	);
-	x.apply(resume(finding!));
+	x.resume();
 	const { op } = x.prepare();
 	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	assert.deepEqual(x.effect("land").op, {

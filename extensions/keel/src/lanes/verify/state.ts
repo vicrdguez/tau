@@ -87,11 +87,20 @@ export type State = {
 	checks: Review[];
 	jobs: Job[];
 	holds: {
+		basis: string;
 		item: string;
 		cause: string;
 		job: string | null;
 		evidence: string;
 	}[];
+	holdingReports: Record<
+		string,
+		{
+			scope: string;
+			evidence: string;
+			status: "open" | "resumed" | "resolved" | "cancelled";
+		}
+	>;
 	verdicts: Verdict[];
 	threads: {
 		item: string;
@@ -151,6 +160,7 @@ export const VerifyDoc = defineState<State>({
 		checks: [],
 		jobs: [],
 		holds: [],
+		holdingReports: {},
 		verdicts: [],
 		threads: [],
 		handoff: null,

@@ -1,5 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 import { arr, obj, oneOf, opt } from "tau/schema";
+import {
+	directions,
+	holdingAsk,
+	holdingBasis,
+	holdingSubject,
+	resumption,
+} from "../../holding.ts";
 import { agentKey, subject, token } from "../../kernel/ids.ts";
 import {
 	type Accepted,
@@ -13,12 +20,8 @@ import {
 } from "../../kernel/lane.ts";
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
-import {
-	closeFindings,
-	fileHolding,
-	resumption,
-	sweepConfigured,
-} from "../queue/public.ts";
+import { cancelWork, closeFindings, sweepConfigured } from "../queue/public.ts";
+import { holdingReport } from "../verify/public.ts";
 import { accountingError, outcomesText, synthesisParts } from "./accounting.ts";
 import {
 	type Arena,
@@ -224,7 +227,7 @@ type State = {
 	revisions: Revision[];
 	readings: string[];
 	direction: string;
-	cause: string | null;
+	hold: { cause: string; basis: string; evidence: string } | null;
 	heldTurn: DesignerPhase | null;
 	seq: number;
 };
@@ -248,7 +251,7 @@ const doc = defineState<State>({
 		revisions: [],
 		readings: [],
 		direction: "",
-		cause: null,
+		hold: null,
 		heldTurn: null,
 		seq: 0,
 	}),
@@ -703,7 +706,7 @@ export const design: Lane<State> = {
 						state: {
 							...state,
 							direction: "",
-							cause: null,
+							hold: null,
 							revisions: [
 								...s.revisions,
 								{ phase: "drafting", causes: fresh, nodes, text, rounds: [] },
@@ -1059,27 +1062,6 @@ export const design: Lane<State> = {
 						return { reject: "Unknown Ground route." };
 				}
 			}
-			case "resume": {
-				const i = revisionIndex(s);
-				const revisionHeld = s.revisions[i]?.phase === "held";
-				if ((!revisionHeld && s.phase !== "held") || s.cause !== e.cause)
-					return { reject: "No such Design hold." };
-				const state = {
-					...s,
-					seq: s.seq + 1,
-					cause: null,
-					direction: [e.evidence, e.direction].filter(Boolean).join("\n"),
-				};
-				return {
-					state: revisionHeld
-						? amend(state, i, { phase: "drafting" })
-						: {
-								...state,
-								phase: s.heldTurn!,
-								heldTurn: null,
-							},
-				};
-			}
 			case "landed":
 				return s.phase === "bound"
 					? { state: { ...s, phase: "landed", cancelRequested: false } }
@@ -1101,7 +1083,7 @@ export const design: Lane<State> = {
 					state: {
 						...s,
 						phase: "cancelled",
-						cause: null,
+						hold: null,
 						direction: "",
 						cancelRequested: false,
 						cleanup: {
@@ -1162,16 +1144,40 @@ export const design: Lane<State> = {
 			if (s.cancelRequested && e.subject === subject("cancel")) {
 				return {
 					state: { ...s, cancelRequested: false },
-					send:
-						e.choice === "cancel"
-							? [
-									{
-										lane: "queue",
-										work: null,
-										event: { kind: "cancel_work", work: w.work! },
-									},
-								]
-							: [],
+					send: e.choice === "cancel" ? [cancelWork(w.work!)] : [],
+				};
+			}
+			if (
+				s.hold &&
+				e.subject === holdingSubject(w.work!, "design", s.hold.cause)
+			) {
+				const i = revisionIndex(s);
+				const revisionHeld = s.revisions[i]?.phase === "held";
+				if (!revisionHeld && s.phase !== "held") return { state: s };
+				if (e.choice === "cancel")
+					return { state: s, send: [cancelWork(w.work!)] };
+				if (e.choice !== "resume") return { state: s };
+				const { cause, evidence } = s.hold;
+				const direction = directions(e);
+				const state = {
+					...s,
+					seq: s.seq + 1,
+					hold: null,
+					direction: [evidence, direction].filter(Boolean).join("\n"),
+				};
+				return {
+					state: revisionHeld
+						? amend(state, i, { phase: "drafting" })
+						: { ...state, phase: s.heldTurn!, heldTurn: null },
+					send: [
+						holdingReport(w.work!, {
+							lane: "design",
+							cause,
+							item: null,
+							evidence,
+							direction,
+						}),
+					],
 				};
 			}
 			const index = revisionIndex(s);
@@ -1321,7 +1327,14 @@ export const design: Lane<State> = {
 			e.tokens.includes(turn.token)
 		) {
 			const cause = turn.token.replace("@", "/");
-			const state = { ...s, direction: "", cause };
+			const evidence = [e.cause, e.lastWords].join(": ");
+			const basis = holdingBasis({
+				goal: goal(s),
+				scope: "design",
+				evidence,
+				resume: resumption.stalled({ agent: "the designer" }).trim(),
+			});
+			const state = { ...s, direction: "", hold: { cause, basis, evidence } };
 			return {
 				state: revising
 					? amend(state, index, { phase: "held" })
@@ -1332,24 +1345,28 @@ export const design: Lane<State> = {
 								s.phase === "directed" ? "resumed" : (s.phase as DesignerPhase),
 						},
 				send: [
-					fileHolding({
-						work: w.work!,
+					holdingReport(w.work!, {
 						lane: "design",
-						item: null,
 						cause,
-						goal: goal(s),
-						evidence: [e.cause, e.lastWords].join(": "),
-						resume: resumption.stalled({ agent: "the designer" }).trim(),
+						item: null,
+						evidence,
+						direction: null,
 					}),
 				],
 			};
 		}
 		return { state: s };
 	},
-	asks(s) {
+	asks(s, w) {
 		const result: Ask[] = [];
 		const index = revisionIndex(s);
 		const revision = s.revisions[index];
+		if (
+			s.hold &&
+			(s.phase === "held" ||
+				(s.phase === "bound" && revision?.phase === "held"))
+		)
+			result.push(holdingAsk(w.work!, "design", s.hold.cause, s.hold.basis));
 		if (revision?.phase === "review")
 			result.push(revisionAsk(s.mandate!, revision, index, s.seq));
 		if (s.phase === "review") result.push(mandateAsk(s));

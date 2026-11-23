@@ -1,3 +1,11 @@
+import {
+	directions,
+	holdingAsk,
+	holdingBasis,
+	holdingScope,
+	holdingSubject,
+	resumption,
+} from "../../holding.ts";
 import { effectKey } from "../../kernel/ids.ts";
 import {
 	type Accepted,
@@ -19,14 +27,8 @@ import {
 	type Sha,
 } from "../../repo/index.ts";
 import { mandateLabels, type Reply } from "../design/public.ts";
-import {
-	closeFindings,
-	fileHolding,
-	fileIntake,
-	type Resume,
-	resumption,
-} from "../queue/public.ts";
-import type { Publication } from "../verify/public.ts";
+import { cancelWork, closeFindings, fileIntake } from "../queue/public.ts";
+import { holdingReport, type Publication } from "../verify/public.ts";
 import { agents, ownerDirection, renderReport } from "./agents.ts";
 import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
 import {
@@ -63,7 +65,6 @@ export { buildTools } from "./tools.ts";
 
 type Event =
 	| BuildUpdate
-	| Resume
 	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
 	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
 	| { kind: "handoff"; summary: string; risk: string }
@@ -239,7 +240,7 @@ function plans(
 function ourAdvance(s: Build, i: Item, actual: Sha | null) {
 	return actual !== null && actual === s.head && i.worker!.base !== actual;
 }
-function holdingMessage(s: Build, w: World, h: Build["holds"][number]) {
+function exposeHold(s: Build, w: World, h: Build["holds"][number]) {
 	const { item, obstruction, cause, evidence } = h;
 	const stage = s.items.find((i) => i.id === item)?.stage;
 	const resume =
@@ -265,14 +266,18 @@ function holdingMessage(s: Build, w: World, h: Build["holds"][number]) {
 							: obstruction === "waiting"
 								? resumption.replan
 								: resumption.coordinator;
-	return fileHolding({
-		work: w.work!,
-		lane: "build",
+	h.basis = holdingBasis({
 		goal: s.mandate!.intent,
-		resume,
-		item,
-		cause,
+		scope: holdingScope("build", item),
 		evidence,
+		resume,
+	});
+	return holdingReport(w.work!, {
+		lane: "build",
+		cause,
+		item,
+		evidence,
+		direction: null,
 	});
 }
 function hold(
@@ -283,11 +288,18 @@ function hold(
 	evidence: string,
 	actual: Sha | null = null,
 ): Accepted<Build> {
-	const h = { cause: `build/${++s.seq}`, item, obstruction, evidence, actual };
+	const h = {
+		cause: `build/${++s.seq}`,
+		item,
+		obstruction,
+		evidence,
+		actual,
+		basis: null,
+	};
 	s.holds.push(h);
 	return obstruction === "unattributed"
 		? { state: s }
-		: { state: s, send: [holdingMessage(s, w, h)] };
+		: { state: s, send: [exposeHold(s, w, h)] };
 }
 /** A merge can have written Git before Verify records its result. */
 function settleMovedPreparations(s: Build, w: World) {
@@ -301,7 +313,7 @@ function settleMovedPreparations(s: Build, w: World) {
 		}
 		if (s.items.some((i) => i.stage === "published")) return [];
 		h.obstruction = "moved";
-		return [holdingMessage(s, w, h)];
+		return [exposeHold(s, w, h)];
 	});
 }
 function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
@@ -418,8 +430,66 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 			return hold(s, w, id, "stall", id ? stalled : waitingPicture(s, stalled));
 		}
 
-		case "answered":
-			return { state };
+		case "answered": {
+			const h = s.holds.find(
+				(h) =>
+					h.basis !== null &&
+					holdingSubject(w.work!, "build", h.cause) === e.subject,
+			);
+			if (!h) return { state };
+			if (e.choice === "cancel") return { state, send: [cancelWork(w.work!)] };
+			if (e.choice !== "resume") return { state };
+			const text = directions(e);
+			const i = s.items.find((item) => item.id === h.item);
+			s.holds = s.holds.filter((other) => other !== h);
+			const direction = ownerDirection({
+				direction: text,
+				evidence: h.evidence,
+			});
+			if (i?.stage === "building" || i?.stage === "preparing") {
+				if (i.stage === "building" && i.input === "brief") i.input = "resume";
+				addDirection(i, direction);
+			} else if (!i && s.coordinator.tool) {
+				s.coordinator.direction = direction;
+			} else {
+				// Setup and cleanup have no live worker. Deliver on the next new coordinator turn.
+				const c = s.coordinator;
+				c.pendingDirection = [c.pendingDirection, direction]
+					.filter(Boolean)
+					.join("\n");
+				if (h.obstruction === "waiting") {
+					c.replanning = true;
+					coordinator(s, "publish_plan");
+				}
+			}
+			if (!i) {
+				s.coordinator.seq = ++s.seq;
+				if (s.phase === "discover") discover(s, w);
+				else if (s.phase === "start") s.setupRetry++;
+			} else if (!repoHeld(s, i.id)) {
+				if (
+					i.stage === "preparing" &&
+					(h.obstruction === "occupied" ||
+						(h.obstruction === "moved" && ourAdvance(s, i, h.actual)))
+				)
+					prepare(s, i, w);
+				else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
+				else i.seq = ++s.seq;
+			}
+			schedule(s, w);
+			return {
+				state,
+				send: [
+					holdingReport(w.work!, {
+						lane: "build",
+						cause: h.cause,
+						item: h.item,
+						evidence: h.evidence,
+						direction: text,
+					}),
+				],
+			};
+		}
 	}
 	schedule(s, w);
 	return { state };
@@ -776,47 +846,6 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				summary: e.summary,
 				risk: e.risk,
 			});
-		case "resume": {
-			const h = s.holds.find((h) => h.cause === e.cause && h.item === e.item);
-			if (!h) return { state };
-			const i = s.items.find((item) => item.id === e.item);
-			s.holds = s.holds.filter((other) => other !== h);
-			const direction = ownerDirection({
-				direction: e.direction,
-				evidence: h.evidence,
-			});
-			if (i?.stage === "building" || i?.stage === "preparing") {
-				if (i.stage === "building" && i.input === "brief") i.input = "resume";
-				addDirection(i, direction);
-			} else if (!i && s.coordinator.tool) {
-				s.coordinator.direction = direction;
-			} else {
-				// Setup and cleanup have no live worker. Deliver on the next new coordinator turn.
-				const c = s.coordinator;
-				c.pendingDirection = [c.pendingDirection, direction]
-					.filter(Boolean)
-					.join("\n");
-				if (h.obstruction === "waiting") {
-					c.replanning = true;
-					coordinator(s, "publish_plan");
-				}
-			}
-			if (!i) {
-				s.coordinator.seq = ++s.seq;
-				if (s.phase === "discover") discover(s, w);
-				else if (s.phase === "start") s.setupRetry++;
-			} else if (!repoHeld(s, i.id)) {
-				if (
-					i.stage === "preparing" &&
-					(h.obstruction === "occupied" ||
-						(h.obstruction === "moved" && ourAdvance(s, i, h.actual)))
-				)
-					prepare(s, i, w);
-				else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
-				else i.seq = ++s.seq;
-			}
-			break;
-		}
 		default:
 			return { state };
 	}
@@ -843,7 +872,14 @@ const build: Lane<Build> = {
 			: undefined,
 	agents,
 	view: buildView,
-	asks: () => [],
+	asks: (s, w) =>
+		s.phase === "closed" || s.phase === "cancelled"
+			? []
+			: s.holds.flatMap((h) =>
+					h.basis === null
+						? []
+						: [holdingAsk(w.work!, "build", h.cause, h.basis)],
+				),
 	effects: (s, w) =>
 		s.phase === "cancelled"
 			? cleanupEffects(s)

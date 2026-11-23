@@ -1,9 +1,11 @@
+import { holdingAsk } from "../../holding.ts";
 import { agentKey, effectKey, subject, token } from "../../kernel/ids.ts";
 import {
 	type AgentDecl,
 	type Ask,
 	type EffectDecl,
 	prose,
+	type StaticFacts,
 } from "../../kernel/lane.ts";
 import type { Ruling } from "../build/public.ts";
 import { renderMandate } from "../design/public.ts";
@@ -219,8 +221,11 @@ function handoverAsk(s: State): Ask {
 		}),
 	};
 }
-export function asks(s: State): Ask[] {
-	return !s.cancelled && s.handover?.status === "asking"
-		? [handoverAsk(s)]
-		: [];
+export function asks(s: State, facts: StaticFacts): Ask[] {
+	if (s.cancelled) return [];
+	const asks = s.holds.map((h) =>
+		holdingAsk(facts.work!, "verify", h.cause, h.basis),
+	);
+	if (s.handover?.status === "asking") asks.push(handoverAsk(s));
+	return asks;
 }

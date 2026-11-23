@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { holdingChoice } from "./fixtures/drive.ts";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import { explorerDispatch } from "../src/roles/dispatch.ts";
@@ -273,18 +274,14 @@ test("triage pins the route and authority; follow binds directly, precedent stil
 
 	const seeded = run();
 	seeded.send({ ...seed, route: "precedent" });
-	const stalled = seeded.send({
+	seeded.send({
 		kind: "agent_stalled",
 		agent: "designer",
 		tokens: [seeded.turn()!.token],
 		cause: "stopped",
 		lastWords: "Reading docs",
 	});
-	seeded.send({
-		kind: "resume",
-		cause: stalled.send![0]!.event.cause!,
-		direction: "Check ADR 8.",
-	});
+	seeded.send(holdingChoice(seeded.asks()[0]!, "resume", "Check ADR 8."));
 	assert.match(seeded.input(), /Check ADR 8/);
 	assert.ok("reject" in seeded.attempt(follow));
 	seeded.send(precedent);
@@ -410,7 +407,7 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	assert.ok(x.input().includes(`1. ${note.text}`));
 	assert.ok("reject" in x.attempt(publish));
 	const token = x.turn()!.token;
-	const stalled = x.send({
+	x.send({
 		kind: "agent_stalled",
 		agent: "designer",
 		tokens: [token],
@@ -418,12 +415,7 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 		lastWords: "Checking the premise",
 	});
 	assert.equal(x.turn(), undefined);
-	x.send({
-		kind: "resume",
-		cause: stalled.send![0]!.event.cause!,
-		evidence: "Check the premise",
-		direction: "Use the fixture.",
-	});
+	x.send(holdingChoice(x.asks()[0]!, "resume", "Use the fixture."));
 	assert.deepEqual(x.turn()?.tools, ["publish_revision"]);
 	assert.notEqual(x.turn()?.token, token);
 	for (const part of [note.text, "Use the fixture."])

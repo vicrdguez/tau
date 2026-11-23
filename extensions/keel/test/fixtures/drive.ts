@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import type { ConversationId, JsonObject } from "tau/durable";
 import { workId } from "../../src/kernel/ids.ts";
 import type {
+	Ask,
 	KernelEvent,
 	Lane,
 	LaneEvent,
@@ -32,6 +33,21 @@ export function laneWorld(
 			max_workers: 1,
 			...options,
 		},
+	};
+}
+
+export function holdingChoice(
+	ask: Ask,
+	choice: "resume" | "cancel",
+	direction = "",
+) {
+	assert.deepEqual(ask.choices, ["resume", "cancel"]);
+	return {
+		kind: "answered",
+		subject: ask.subject,
+		decision: `${ask.subject}#1`,
+		choice,
+		annotations: direction ? [{ n: 1, text: direction }] : [],
 	};
 }
 

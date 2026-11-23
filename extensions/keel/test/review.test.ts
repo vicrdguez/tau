@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { holdingChoice } from "./fixtures/drive.ts";
 import { test } from "node:test";
 import { type Draft, draftError } from "../src/lanes/design/draft.ts";
 import {
@@ -304,7 +305,7 @@ test("a changed Mandate quotes the original owner passage and refuses old answer
 
 	x.answer(current.subject, "rework", [note(1, "Clarify API callers.")]);
 	const t = x.turn()!.token;
-	const stalled = x.send({
+	x.send({
 		kind: "agent_stalled",
 		agent: "designer",
 		tokens: [t],
@@ -312,11 +313,7 @@ test("a changed Mandate quotes the original owner passage and refuses old answer
 		lastWords: "reading",
 	});
 	assert.equal(x.input(), "");
-	x.send({
-		kind: "resume",
-		cause: stalled.send![0]!.event.cause!,
-		direction: "Read ADR 4",
-	});
+	x.send(holdingChoice(x.asks()[0]!, "resume", "Read ADR 4"));
 	assert.deepEqual(x.turn()?.tools, ["publish_mandate", "start_experiment"]);
 	for (const value of [
 		"No duplicate parser.",

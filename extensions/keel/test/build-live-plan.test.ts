@@ -5,7 +5,7 @@ import type { LaneEvent } from "../src/kernel/lane.ts";
 import { buildLane } from "../src/lanes/build/index.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
 import { startBuild } from "./fixtures/build.ts";
-import { laneDriver, laneWorld } from "./fixtures/drive.ts";
+import { holdingChoice, laneDriver, laneWorld } from "./fixtures/drive.ts";
 
 const { work } = laneWorld();
 const base = "a".repeat(40);
@@ -126,6 +126,7 @@ function setup(
 		plan(items, initialReplies);
 		return {
 			send,
+			asks: driver.asks,
 			tryEvent: driver.attempt,
 			coord,
 			worker,
@@ -548,14 +549,14 @@ test("a stalled worker resumes with both the revision instructions and the owner
 	b.send(proposal);
 	b.plan([item], reply);
 	const worker = b.worker(item.id)!;
-	const filed = b.send({
+	b.send({
 		kind: "agent_stalled",
 		agent: worker.key,
 		cause: "stopped",
 		tokens: [worker.expects[0]!.token],
 		lastWords: "need direction",
-	})[0]!.event;
-	b.send({ ...filed, kind: "resume", direction: "Start with negatives." });
+	});
+	b.send(holdingChoice(b.asks()[0]!, "resume", "Start with negatives."));
 	const input = b.worker(item.id)!.expects[0]!.input!();
 	assert.match(input, /Correct the ledger crossing/);
 	assert.match(input, /Start with negatives/);

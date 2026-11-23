@@ -1,47 +1,14 @@
 import type { WorkId } from "../../kernel/ids.ts";
-import { type Message, prose } from "../../kernel/lane.ts";
+import type { Message } from "../../kernel/lane.ts";
 import type { Sha } from "../../repo/index.ts";
 import type { PrincipleSample } from "../build/public.ts";
 import type { AuthorityIndex } from "../design/public.ts";
 
-const dir = `${import.meta.dirname}/../../prose/documents/resume`;
-const action = (name: string) => prose(dir, `${name}.md`, [])({}).trim();
-/** Render the action at filing time so a durable finding describes its particular hold. */
-export const resumption = {
-	discovery: action("discovery"),
-	moved: action("moved"),
-	occupied: action("occupied"),
-	worker: action("worker"),
-	coordinator: action("coordinator"),
-	replan: action("replan"),
-	trunk: action("trunk"),
-	diagnosis: action("diagnosis"),
-	pinned: prose(dir, "pinned.md", ["operation"]),
-	stalled: prose(dir, "stalled.md", ["agent"]),
-};
-
-export type Holding = {
-	goal: string;
-	resume: string;
-	work: WorkId;
-	lane: "design" | "build" | "verify";
-	item: string | null;
-	cause: string;
-	evidence: string;
-};
-export type Resume = {
-	kind: "resume";
-	item: string | null;
-	cause: string;
-	evidence: string;
-	direction: string;
-};
-// Session address on the envelope, affected work in the finding.
-export function fileHolding(finding: Holding): Message {
-	return { lane: "queue", work: null, event: { kind: "file", ...finding } };
-}
-
-export type HoldingAddress = Pick<Holding, "work" | "lane" | "cause">;
+export const cancelWork = (work: WorkId): Message => ({
+	lane: "queue",
+	work: null,
+	event: { kind: "cancel_work", work },
+});
 
 export type Intake = {
 	work: WorkId | null;
