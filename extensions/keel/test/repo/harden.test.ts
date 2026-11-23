@@ -5,6 +5,12 @@ import test from "node:test";
 import { layout, nodeExec, readRepo } from "../../src/repo/index.ts";
 import { fixture, git, is } from "./fixture.ts";
 
+const proof = (id: string, command: string, ...args: string[]) => ({
+	id,
+	argv: ["sh", "-ec", command, ...args],
+	timeoutMs: 5000,
+});
+
 test("a proof deadline bounds inherited pipes even outside its group", async (t) => {
 	const f = await fixture(t);
 	const start = performance.now();
@@ -42,15 +48,10 @@ test("a lost proof retries on the candidate, without resetting an attached branc
 	const plan = {
 		...op,
 		checks: [
-			{
-				id: "restore",
-				timeoutMs: 5000,
-				argv: [
-					"sh",
-					"-ec",
-					'test ! -e proof.tmp; test "$(cat book)" = new; echo scratch > book; git restore book; echo restored',
-				],
-			},
+			proof(
+				"restore",
+				'test ! -e proof.tmp; test "$(cat book)" = new; echo scratch > book; git restore book; echo restored',
+			),
 		],
 	};
 	const stop = Error("runner lost before the proof restored book");
@@ -177,11 +178,7 @@ test("git inside a proof reads ordinary owner config without keel's graft hint",
 	const result = await f.run({
 		...op,
 		checks: [
-			{
-				id: "owner git",
-				timeoutMs: 5000,
-				argv: ["sh", "-ec", "git log -1 --format=; git config --get keel.test"],
-			},
+			proof("owner git", "git log -1 --format=; git config --get keel.test"),
 		],
 	});
 	is(result, "merged");
@@ -201,18 +198,13 @@ for (const damage of ["delete", "break gitfile", "attach build"] as const) {
 		const plan = {
 			...merge,
 			checks: [
-				{
-					id: "damage",
-					timeoutMs: 5000,
-					argv: [
-						"sh",
-						"-ec",
-						"echo proof-output; " + script,
-						"proof",
-						merge.integration,
-						f.branch,
-					],
-				},
+				proof(
+					"damage",
+					"echo proof-output; " + script,
+					"proof",
+					merge.integration,
+					f.branch,
+				),
 			],
 		};
 		const result = await f.run(plan);

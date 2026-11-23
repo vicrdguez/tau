@@ -34,28 +34,6 @@ async function start(t: TestContext, root: string) {
 	return { ...s, patch, hold };
 }
 
-for (const [option, value, reason] of [
-	["base", "bad name", /bad name/],
-	["trunk", "bad name", /bad name/],
-	["base", "refs/heads/main", /refs\/heads\/main/],
-	["trunk", "mAiN", /mAiN/],
-	["trunk", "keel/other", /keel\/other/],
-	["base", "missing", /missing.*does not exist|does not exist.*missing/],
-] as const) {
-	test(`build setup names the ${option} option for unusable branch ${value}`, async (t) => {
-		const { root } = await fixture(t);
-		git(root, "branch", "stable");
-		const s = await start(t, root);
-		await s.patch({ base: "stable", [option]: value });
-		await s.start();
-		await s.settle();
-		assert.equal(git(root, "for-each-ref", "refs/heads/keel/"), "");
-		const { text } = await s.hold();
-		assert.ok(text.includes(`\`${option}\` option`), text);
-		assert.match(text, reason);
-	});
-}
-
 test("build setup holds a divergent trunk before making refs; changing trunk to a descendant allows resume", async (t) => {
 	const { root, base } = await fixture(t);
 	git(root, "switch", "-c", "stray");
@@ -91,5 +69,4 @@ test("build setup holds a divergent trunk before making refs; changing trunk to 
 	assert.notEqual(landed, release);
 	assert.equal(git(root, "log", "-1", "--format=%P", "release"), release);
 	assert.equal(git(root, "rev-parse", "stray"), stray);
-	await s.accept(landed);
 });

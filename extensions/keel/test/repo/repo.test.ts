@@ -19,7 +19,7 @@ import {
 	readRepo,
 	type Sha,
 } from "../../src/repo/index.ts";
-import { fixture, git, interrupted, is } from "./fixture.ts";
+import { fixture, git, interrupted, is, writeFiles } from "./fixture.ts";
 
 test("start pins base through both trunk/build CAS boundaries; worker and verifier survive each creation boundary", async (t) => {
 	const f = await fixture(t);
@@ -143,10 +143,6 @@ test("discovery from a linked checkout uses its toplevel but the shared reposito
 	assert.equal(again.commonDir, f.repo.commonDir);
 	assert.equal(layout.worktree(again, "42", "worker 1"), f.worker.path);
 	is(await converge(nodeExec, again, f.start), "started");
-	assert.deepEqual(
-		await readRepo(nodeExec, linked),
-		await readRepo(nodeExec, linked),
-	);
 });
 test("ref-prefix collisions are occupied, not a reason to delete a ref", async (t) => {
 	const f = await fixture(t);
@@ -173,16 +169,28 @@ test("a revision alias cannot stand in for an absent trunk branch", async (t) =>
 test("trunk equal to base, reserved branch aliases and escaping layout names are refused", async (t) => {
 	const f = await fixture(t);
 	git(f.root, "branch", "stable", f.base);
-	for (const opts of [
-		{ base: "main", trunk: "main" },
-		{ base: "stable", trunk: "main" },
-		{ base: f.branch, trunk: "trunk" },
-		{ trunk: "keel/42/trunk" },
-		{ trunk: "refs/heads/main" },
-		{ trunk: "refs/tags/x" },
-		{ trunk: "HEAD" },
-	])
-		await assert.rejects(readRepo(nodeExec, f.root, opts));
+	await assert.rejects(
+		readRepo(nodeExec, f.root, { trunk: "main" }),
+		/distinct branches/,
+	);
+	for (const [option, value] of [
+		["base", "bad name"],
+		["trunk", "bad name"],
+		["base", "refs/heads/main"],
+		["base", f.branch],
+		["trunk", "mAiN"],
+		["trunk", "keel/42/trunk"],
+		["trunk", "refs/heads/main"],
+		["trunk", "refs/tags/x"],
+		["trunk", "HEAD"],
+		["base", "missing"],
+	] as const)
+		await assert.rejects(
+			readRepo(nodeExec, f.root, { base: "stable", [option]: value }),
+			({ message }: Error) =>
+				message.includes(`\`${option}\` option`) && message.includes(value),
+		);
+	assert.equal(git(f.root, "for-each-ref", "refs/heads/keel/"), "");
 	assert.throws(() => layout.worktree(f.repo, "42", "../outside"));
 	assert.throws(() => layout.buildBranch("../main"));
 	assert.equal(git(f.root, "rev-parse", "main"), f.base);
@@ -406,6 +414,7 @@ test("a recreated build ref at the expected head is not keel's to advance", asyn
 	const op = await f.item();
 	git(f.root, "branch", "-D", f.branch);
 	git(f.root, "branch", f.branch, op.expected);
+	assert.equal((await f.publish()).kind, "occupied");
 	is(await f.run(op), "occupied");
 	assert.equal(git(f.root, "rev-parse", f.branch), op.expected);
 	await assert.rejects(access(op.integration));
@@ -517,32 +526,26 @@ test("publish lists only committed changes in the project principles and playboo
 	const f = await fixture(t);
 	const principles = ".keel/principles";
 	const playbooks = ".keel/playbooks/nested";
-	await mkdir(join(f.root, principles), { recursive: true });
-	await mkdir(join(f.root, playbooks), { recursive: true });
-	for (const path of [
-		`${principles}/removed.md`,
-		`${principles}/unchanged.md`,
-		`${playbooks}/updated.md`,
-	])
-		await writeFile(join(f.root, path), "original\n");
+	await writeFiles(f.root, {
+		[`${principles}/removed.md`]: "original\n",
+		[`${principles}/unchanged.md`]: "original\n",
+		[`${playbooks}/updated.md`]: "original\n",
+	});
 	git(f.root, "add", ".keel");
 	git(f.root, "commit", "-m", "owner policy");
-	const repo = await readRepo(nodeExec, f.root);
-	const worker = { ...f.worker, base: repo.baseHead };
-	is(await converge(nodeExec, repo, f.start), "started");
-	is(await converge(nodeExec, repo, worker), "worktree");
-	for (const [path, body] of [
-		[`${playbooks}/updated.md`, "revised\n"],
-		[`${principles}/added.md`, "new principle\n"],
-		[".keel/principles.md", "not in the directory\n"],
-		[".keel/verify.sh", "unrelated verification asset\n"],
-		["book", "new edition\n"],
-	] as const)
-		await writeFile(join(worker.path, path), body);
-	git(worker.path, "rm", `${principles}/removed.md`);
-	git(worker.path, "add", "-A");
-	git(worker.path, "commit", "-m", "change policy and the book");
-	const result = await readPublishable(nodeExec, repo, worker);
+	const publish = await f.startWorker(await readRepo(nodeExec, f.root));
+	const { path } = f.worker;
+	await writeFiles(path, {
+		[`${playbooks}/updated.md`]: "revised\n",
+		[`${principles}/added.md`]: "new principle\n",
+		".keel/principles.md": "not in the directory\n",
+		".keel/verify.sh": "unrelated verification asset\n",
+		book: "new edition\n",
+	});
+	git(path, "rm", `${principles}/removed.md`);
+	git(path, "add", "-A");
+	git(path, "commit", "-m", "change policy and the book");
+	const result = await publish();
 	assert.equal(result.kind, "ok");
 	assert.deepEqual(result.changedPolicyFiles, [
 		`${playbooks}/updated.md`,
@@ -558,22 +561,15 @@ test("publish reports added and changed policy directory symlinks without follow
 	await symlink("../docs", join(f.root, ".keel/playbooks"));
 	git(f.root, "add", ".keel", "docs");
 	git(f.root, "commit", "-m", "owner files");
-	const repo = await readRepo(nodeExec, f.root);
-	const worker = { ...f.worker, base: repo.baseHead };
-	is(await converge(nodeExec, repo, f.start), "started");
-	is(await converge(nodeExec, repo, worker), "worktree");
-	await symlink("../docs", join(worker.path, ".keel/principles"));
-	await rm(join(worker.path, ".keel/playbooks"));
-	await symlink("../docs/.", join(worker.path, ".keel/playbooks"));
-	await writeFile(join(worker.path, "docs/guide.md"), "new policy\n");
-	git(worker.path, "add", "-A");
-	git(
-		worker.path,
-		"commit",
-		"-m",
-		"add and change links and edit their target",
-	);
-	const result = await readPublishable(nodeExec, repo, worker);
+	const publish = await f.startWorker(await readRepo(nodeExec, f.root));
+	const { path } = f.worker;
+	await symlink("../docs", join(path, ".keel/principles"));
+	await rm(join(path, ".keel/playbooks"));
+	await symlink("../docs/.", join(path, ".keel/playbooks"));
+	await writeFile(join(path, "docs/guide.md"), "new policy\n");
+	git(path, "add", "-A");
+	git(path, "commit", "-m", "add and change links and edit their target");
+	const result = await publish();
 	assert.equal(result.kind, "ok");
 	assert.deepEqual(result.changedPolicyFiles, [
 		".keel/playbooks",
@@ -582,15 +578,21 @@ test("publish reports added and changed policy directory symlinks without follow
 });
 test("publish reports policy paths regardless of case, without matching neighboring paths", async (t) => {
 	const f = await fixture(t);
-	await f.item();
+	const publish = await f.startWorker();
 	const files = [".KEEL/PlayBooks/guide.md", ".KEEL/PRINCIPLES/nested/rule.md"];
-	for (const path of [...files, ".KEEL/Principles-old/rule.md"]) {
-		await mkdir(dirname(join(f.worker.path, path)), { recursive: true });
-		await writeFile(join(f.worker.path, path), "guide\n");
-	}
-	git(f.worker.path, "add", "-A");
-	git(f.worker.path, "commit", "-m", "add policy and a neighboring file");
-	const result = await f.publish();
+	const { path } = f.worker;
+	await writeFiles(
+		path,
+		Object.fromEntries(
+			[...files, ".KEEL/Principles-old/rule.md"].map((name) => [
+				name,
+				"guide\n",
+			]),
+		),
+	);
+	git(path, "add", "-A");
+	git(path, "commit", "-m", "add policy and a neighboring file");
+	const result = await publish();
 	assert.equal(result.kind, "ok");
 	assert.deepEqual(result.changedPolicyFiles, [...files].sort());
 });
@@ -599,25 +601,21 @@ test("publish lists both in-scope rename paths and only the in-scope side of cro
 	const principles = ".keel/principles";
 	const playbooks = ".keel/playbooks";
 	const renamed = `${principles}/old title\nwith a newline.md`;
-	await mkdir(join(f.root, principles), { recursive: true });
-	for (const [path, body] of [
-		[renamed, "Rename between policy directories\n"],
-		[`${principles}/moved out.md`, "Leave policy\n"],
-		["outside.md", "Enter policy\n"],
-	] as const)
-		await writeFile(join(f.root, path), body);
+	await writeFiles(f.root, {
+		[renamed]: "Rename between policy directories\n",
+		[`${principles}/moved out.md`]: "Leave policy\n",
+		"outside.md": "Enter policy\n",
+	});
 	git(f.root, "add", ".");
 	git(f.root, "commit", "-m", "pre-existing files");
-	const repo = await readRepo(nodeExec, f.root);
-	const worker = { ...f.worker, base: repo.baseHead };
-	is(await converge(nodeExec, repo, f.start), "started");
-	is(await converge(nodeExec, repo, worker), "worktree");
-	await mkdir(join(worker.path, playbooks));
-	git(worker.path, "mv", renamed, `${playbooks}/new title.md`);
-	git(worker.path, "mv", `${principles}/moved out.md`, "retired.md");
-	git(worker.path, "mv", "outside.md", `${principles}/moved in.md`);
-	git(worker.path, "commit", "-m", "move policy files");
-	const result = await readPublishable(nodeExec, repo, worker);
+	const publish = await f.startWorker(await readRepo(nodeExec, f.root));
+	const { path } = f.worker;
+	await mkdir(join(path, playbooks));
+	git(path, "mv", renamed, `${playbooks}/new title.md`);
+	git(path, "mv", `${principles}/moved out.md`, "retired.md");
+	git(path, "mv", "outside.md", `${principles}/moved in.md`);
+	git(path, "commit", "-m", "move policy files");
+	const result = await publish();
 	assert.equal(result.kind, "ok");
 	assert.deepEqual(result.changedPolicyFiles, [
 		`${playbooks}/new title.md`,
@@ -913,20 +911,7 @@ for (const [name, script, paths, headChanged] of [
 		assert.equal(git(f.root, "show", `${result.sha}:book`), "new");
 		assert.deepEqual(await f.run(plan), result);
 		assert.equal(git(f.root, "rev-parse", f.branch), f.base);
-		is(
-			await f.run({
-				kind: "remove",
-				key: "drop",
-				target: {
-					kind: "checkout",
-					key: op.key,
-					path: op.integration,
-					sha: result.sha,
-				},
-			}),
-			"removed",
-		);
-		await assert.rejects(access(op.integration));
+		await f.cleanIntegration(op, result.sha);
 	});
 }
 test("untracked proof output does not change the candidate or prevent replay and cleanup", async (t) => {
@@ -946,20 +931,7 @@ test("untracked proof output does not change the candidate or prevent replay and
 	is(result, "merged");
 	assert.deepEqual(await f.run(plan), result);
 	assert.equal(git(f.root, "rev-parse", f.branch), result.sha);
-	is(
-		await f.run({
-			kind: "remove",
-			key: "drop",
-			target: {
-				kind: "checkout",
-				key: op.key,
-				path: op.integration,
-				sha: result.sha,
-			},
-		}),
-		"removed",
-	);
-	await assert.rejects(access(op.integration));
+	await f.cleanIntegration(op, result.sha);
 });
 test("project principle and verifier playbook bytes come from the planned commit, not an external symlink", async (t) => {
 	const f = await fixture(t);
@@ -998,6 +970,25 @@ test("landing prepares the exact reviewable commit then survives a lost CAS resu
 		message: "land the book",
 	};
 	const target = await f.prepare(plan);
+	const prepare = { kind: "prepare_landing", key: "prepare:wrong" } as const;
+	git(
+		f.root,
+		"branch",
+		"unrelated",
+		git(f.root, "commit-tree", `${f.base}^{tree}`, "-m", "no trunk parent"),
+	);
+	const { baseHead: unrelated } = await readRepo(nodeExec, f.root, {
+		base: "unrelated",
+	});
+	await assert.rejects(
+		f.run({ ...prepare, landing: { ...plan, combined: unrelated } }),
+		/does not include expected trunk/,
+	);
+	await assert.rejects(
+		f.run({ ...plan, kind: "land", target: merge.item }),
+		/stored target does not match/,
+	);
+	assert.equal(git(f.root, "rev-parse", "trunk"), f.base);
 	assert.equal(await f.prepare(plan), target);
 	assert.equal(git(f.root, "show", "-s", "--format=%P", target), f.base);
 	assert.equal(

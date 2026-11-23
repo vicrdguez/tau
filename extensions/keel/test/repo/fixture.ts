@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import {
+	type Checkout,
 	converge,
 	type Exec,
 	type Landing,
@@ -23,6 +24,14 @@ export function is<K extends RepoResult["kind"]>(
 ): asserts result is Extract<RepoResult, { kind: K }> {
 	assert.equal(result.kind, kind, JSON.stringify(result));
 }
+export async function writeFiles(cwd: string, files: Record<string, string>) {
+	for (const [path, body] of Object.entries(files)) {
+		const file = join(cwd, path);
+		await mkdir(dirname(file), { recursive: true });
+		await writeFile(file, body);
+	}
+}
+
 export async function fixture(t: TestContext) {
 	const { root } = await tempRepo(t);
 	const repo = await readRepo(nodeExec, root);
@@ -45,6 +54,25 @@ export async function fixture(t: TestContext) {
 	} as const;
 	const run = (op: RepoOp, exec = nodeExec) => converge(exec, repo, op);
 	const publish = () => readPublishable(nodeExec, repo, worker);
+	async function startWorker(pinned = repo) {
+		const op = { ...worker, base: pinned.trunkHead ?? pinned.baseHead };
+		is(await converge(nodeExec, pinned, start), "started");
+		is(await converge(nodeExec, pinned, op), "worktree");
+		return () => readPublishable(nodeExec, pinned, op);
+	}
+	async function cleanIntegration(
+		op: { key: string; integration: string },
+		sha: Checkout["sha"],
+	) {
+		const target = {
+			kind: "checkout",
+			key: op.key,
+			path: op.integration,
+			sha,
+		} as const;
+		is(await run({ kind: "remove", key: "drop", target }), "removed");
+		await assert.rejects(access(op.integration), { code: "ENOENT" });
+	}
 	async function prepare(plan: Landing) {
 		const result = await run({
 			kind: "prepare_landing",
@@ -55,8 +83,7 @@ export async function fixture(t: TestContext) {
 		return result.sha;
 	}
 	async function item() {
-		is(await run(start), "started");
-		is(await run(worker), "worktree");
+		await startWorker();
 		await writeFile(join(worker.path, "book"), "new\n");
 		git(worker.path, "commit", "-am", "verified");
 		const pub = await publish();
@@ -82,6 +109,8 @@ export async function fixture(t: TestContext) {
 		checkout,
 		run,
 		publish,
+		startWorker,
+		cleanIntegration,
 		prepare,
 		item,
 	};
