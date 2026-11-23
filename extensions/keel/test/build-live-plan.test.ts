@@ -220,6 +220,11 @@ test("a claimed preparation can finish while held, but its worker waits for a sl
 	const preparing = b.effects()[0]?.key;
 	assert.ok(preparing);
 	b.send(hold("queue/1", "affected"));
+	assert.deepEqual(
+		b.effects(),
+		[],
+		"a held preparation cannot be newly claimed",
+	);
 	b.done({ kind: "worktree", base, principles: [] }, preparing);
 	assert.equal(b.worker("affected")?.paused, true);
 	b.workOn("other", "report");
@@ -419,17 +424,22 @@ test("a verified item awaiting merge is a record: require a separate correction 
 	b.send({ kind: "item_verified", item: "verified" });
 	b.send(hold("queue/1", null, ["ledger"]));
 	b.send(proposal);
-	assert.ok(
-		"reject" in b.tryEvent({ kind: "plan", items: [original], replies: reply }),
-	);
-	assert.ok(
-		"reject" in
-			b.tryEvent({
-				kind: "plan",
-				items: [original, goal("correction")],
-				replies: reply,
-			}),
-	);
+	const correction = goal("correction", ["verified"]);
+	const changedRecord = goal("verified", ["setup"]);
+	for (const [items, reason] of [
+		[[original, goal("correction")], /Add a new correction.*verified/],
+		[
+			[changedRecord, goal("setup"), correction],
+			/Keep the dependencies of verified/,
+		],
+	] as const) {
+		const result = b.tryEvent({
+			kind: "plan",
+			items: [...items],
+			replies: reply,
+		});
+		assert.match("reject" in result ? result.reject : "", reason);
+	}
 	const activation = b.plan(
 		[original, goal("correction", ["verified"])],
 		reply,

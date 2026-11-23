@@ -109,25 +109,6 @@ test("item resume carries the evidence and direction, resets only that item, and
 	assert.ok(q.asks()[0]!.basis.includes(file(a).evidence));
 });
 
-test("a designer-confirmed cancellation withdraws outstanding findings and notifies every work lane", () => {
-	const q = project(queueLane);
-	q.send(file(a));
-	q.send(file(b));
-	assert.deepEqual(
-		q
-			.send({ kind: "cancel_work", work: a })
-			.map((m) => [m.lane, m.work, m.event.kind])
-			.sort(),
-		[
-			["build", a, "cancel"],
-			["design", a, "cancel"],
-			["verify", a, "cancel"],
-		],
-	);
-	assert.equal(q.asks().length, 1);
-	assert.ok(q.asks()[0]!.title.includes(file(b).goal));
-});
-
 test("work-level resume reaches its filer without resetting any item", () => {
 	const q = project(queueLane);
 	const finding = file(b, "design", "ground/1", null);
@@ -149,32 +130,30 @@ test("work-level resume reaches its filer without resetting any item", () => {
 	assert.deepEqual(q.asks(), []);
 });
 
-test("cancel withdraws all questions about one work; stale answers do not resume the cancelled work", () => {
-	const q = project(queueLane);
-	q.send(file(a));
-	const stale = q.asks()[0]!.subject;
-	const stoppedAgain = file(a, "build", "stop/2");
-	q.send(stoppedAgain);
-	q.send(file(b));
-	const out = q.send(
-		answer(
-			q.asks().find((ask) => ask.basis.includes(stoppedAgain.evidence))!
-				.subject,
-			"cancel",
-		),
-	);
-	assert.deepEqual(
-		[...out].sort((x, y) => x.lane.localeCompare(y.lane)),
-		["build", "design", "verify"].map((lane) => ({
-			lane,
-			work: a,
-			event: { kind: "cancel" },
-		})),
-	);
-	assert.equal(q.asks().length, 1);
-	assert.ok(q.asks()[0]!.basis.includes(file(b).evidence));
-	assert.deepEqual(q.send(answer(stale, "resume")), []);
-	assert.equal(q.asks().length, 1);
+test("both cancellation routes withdraw only that work's questions and invalidate its answers", () => {
+	for (const viaHolding of [true, false]) {
+		const q = project(queueLane);
+		q.send(file(a));
+		const stale = q.asks()[0]!.subject;
+		q.send(file(a, "build", "stop/2"));
+		q.send(file(b));
+		const out = q.send(
+			viaHolding
+				? answer(q.asks()[1]!.subject, "cancel")
+				: { kind: "cancel_work", work: a },
+		);
+		assert.deepEqual(
+			[...out].sort((x, y) => x.lane.localeCompare(y.lane)),
+			["build", "design", "verify"].map((lane) => ({
+				lane,
+				work: a,
+				event: { kind: "cancel" },
+			})),
+		);
+		assert.deepEqual(q.send(answer(stale, "resume")), []);
+		assert.equal(q.asks().length, 1);
+		assert.ok(q.asks()[0]!.basis.includes(file(b).evidence));
+	}
 });
 
 test("resolving a superseded holding closes only that cause and never resumes its filer", () => {
@@ -203,24 +182,26 @@ test("resolving a superseded holding closes only that cause and never resumes it
 	);
 });
 
-test("one project slot grants waiters once in arrival order; another work's stale release cannot unlock it", () => {
+test("the project slot grants each live waiter once in FIFO order; only its holder can pass it on", () => {
 	const trunk = project(trunkLane);
+	const withdrawn = id(4);
 	assert.deepEqual(trunk.send(take(a)), grant(a));
-	for (const event of [take(b), take(c), take(b), take(a)])
+	for (const event of [
+		take(withdrawn),
+		take(b),
+		take(c),
+		take(b),
+		release(withdrawn),
+	])
 		assert.deepEqual(trunk.send(event), []);
 	assert.deepEqual(trunk.send(release(a)), grant(b));
-	assert.deepEqual(trunk.send(release(a)), []);
+	assert.deepEqual(
+		trunk.send(release(a)),
+		[],
+		"late release from the previous holder",
+	);
+	assert.deepEqual(trunk.send(take(b)), [], "request from the current holder");
 	assert.deepEqual(trunk.send(release(b)), grant(c));
 	assert.deepEqual(trunk.send(release(c)), []);
 	assert.deepEqual(trunk.send(take(a)), grant(a));
-});
-
-test("cancelling a waiting landing drops its request; an active landing keeps its slot until Verify releases it", () => {
-	const trunk = project(trunkLane);
-	trunk.send(take(a));
-	trunk.send(take(b));
-	assert.deepEqual(trunk.send(release(b)), []);
-	assert.deepEqual(trunk.send(take(c)), []);
-	assert.deepEqual(trunk.send(release(a)), grant(c));
-	assert.deepEqual(trunk.send(release(c)), []);
 });

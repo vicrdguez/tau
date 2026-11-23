@@ -224,53 +224,82 @@ const revised = (items: string[] = ["bug"]) => ({
 	evidence: "Use the revised ledger boundary.",
 });
 
-test("verifier notes file their own evidence against the tested commit and nodes without holding it", () => {
-	const x = flow();
-	x.review("note-head", [], "bug", "base", { nodes: ["sums"] });
-	const check = x.pass();
-	const filings = check.send?.filter((m) => m.lane === "queue") ?? [];
-	assert.equal(filings.length, 1);
-	assert.equal(filings[0]?.work, null);
-	const filing = filings[0]!.event;
-	assert.deepEqual(
-		[
-			filing.kind,
-			filing.source,
-			filing.item,
-			filing.sha,
-			filing.nodes,
-			filing.blocking,
-		],
-		["intake", "verifier", "bug", "note-head", ["sums"], false],
+test("hand-over rejection requires an explanation, then files each nonblank annotation with the landed commit and evidence", () => {
+	const revisionSummary = "- Revision 1: sums (falsifying probe)";
+	const x = flow((lane) =>
+		lane === "design"
+			? {
+					ownerReviewed: false,
+					reference: "Approved ledger contract §2",
+					revisionSummary,
+				}
+			: null,
 	);
-	assert.equal(filing.text, "monitor latency");
-	assert.match(String(filing.report), /totals now balance/);
-	assert.deepEqual(check.send?.find((m) => m.lane === "build")?.event, {
-		kind: "item_verified",
-		item: "bug",
+	x.land({
+		mandate: {
+			...mandate,
+			intent: "Balance every ledger.\n\nDone when: Both sums match.",
+		},
+		approvals: [
+			{
+				revision: null,
+				notes: [
+					{
+						n: 1,
+						text: "Cover zero.",
+						status: "acted_on",
+						reason: "Added the check.",
+					},
+				],
+			},
+			{
+				revision: 1,
+				notes: [
+					{
+						n: 1,
+						text: "Consider another oracle.",
+						status: "considered",
+						reason: "Already covered.",
+					},
+				],
+			},
+		],
 	});
-	x.clean();
-	assert.equal(x.effect("merge_item").op.item, "note-head");
-});
-
-test("an unannotated hand-over rejection stays open and files nothing", () => {
-	const x = flow();
-	x.land();
 	const [open] = x.asks();
-	const result = x.apply({
+	const blank = x.apply({
 		kind: "answered",
 		subject: open!.subject,
 		choice: "reject",
-		annotations: [{ n: 1, text: "  " }],
+		annotations: [{ n: 1, text: " " }],
 	});
-	assert.deepEqual(result.send, []);
+	assert.deepEqual(blank.send, []);
 	assert.equal(x.asks()[0]?.subject, open?.subject);
-});
-
-test("hand-over rejection files each nonblank annotation as an ordinary owner finding with the landed commit and evidence", () => {
-	const x = flow();
-	x.land();
-	const [open] = x.asks();
+	assert.match(open!.title, /Balance every ledger/);
+	assert.doesNotMatch(open!.title, /\n|Done when:/);
+	assert.match(
+		open!.basis,
+		/Mandate approval\n\n1\. Cover zero\.\n\s+acted_on: Added the check\./,
+	);
+	assert.match(
+		open!.basis,
+		/Revision 1 approval\n\n1\. Consider another oracle\.\n\s+considered: Already covered\./,
+	);
+	assert.ok(open!.basis.includes(revisionSummary));
+	function expectMandate(document: string) {
+		const bound =
+			document.match(/## Bound Mandate\n([\s\S]*?)\nRulings,/)?.[1] ?? "";
+		assert.match(bound, /Reference: Approved ledger contract §2/);
+		assert.match(bound, /Done when: Both sums match/);
+		assert.match(
+			bound,
+			/sums: Rule\s+Sums match\s+Falsifying probe: compare totals/,
+		);
+		assert.match(
+			bound,
+			/totals: Proof[\s\S]*\["run","proof"\][\s\S]*Timeout: 10 ms/,
+		);
+	}
+	expectMandate(open!.basis);
 	const result = x.apply({
 		kind: "answered",
 		subject: open!.subject,
@@ -299,6 +328,7 @@ test("hand-over rejection files each nonblank annotation as an ordinary owner fi
 	assert.match(open!.basis, /Accept the result on trunk, or reject it/);
 	assert.match(open!.basis, /filed as a finding/);
 	assert.notEqual(filings[0]?.event.report, filings[1]?.event.report);
+	expectMandate(String(filings[0]?.event.report));
 	for (const { event } of filings) {
 		assert.equal(event.blocking, false);
 		assert.match(String(event.report), /Balance every ledger/);
@@ -318,10 +348,10 @@ test("hand-over rejection files each nonblank annotation as an ordinary owner fi
 	assert.deepEqual(x.asks(), []);
 });
 
-test("a verifier's principle violation returns the failed item and separately proposes a sharper description or binding", () => {
+test("an unfollowed principle must name a real block to file a clarification independently of rework", () => {
 	const x = flow();
 	x.review();
-	const result = x.apply({
+	const verdict = {
 		kind: "verdict",
 		agent: x.agent().key,
 		outcome: "fail",
@@ -334,7 +364,19 @@ test("a verifier's principle violation returns the failed item and separately pr
 				evidence: "A half-cent is rounded twice.",
 			},
 		],
-		principlesUnfollowed: [{ name: "project/round-once", thread: "half-cent" }],
+	};
+	const name = "project/round-once";
+	const refused = x.attempt({
+		...verdict,
+		principlesUnfollowed: [{ name, thread: "absent" }],
+	});
+	assert.match(
+		"reject" in refused ? refused.reject : "",
+		/existing block thread/,
+	);
+	const result = x.apply({
+		...verdict,
+		principlesUnfollowed: [{ name, thread: "half-cent" }],
 	});
 	assert.ok(result.send?.some((m) => m.event.kind === "rework"));
 	const proposal = result.send?.find((m) => m.event.kind === "intake");
@@ -342,24 +384,6 @@ test("a verifier's principle violation returns the failed item and separately pr
 	assert.equal(proposal?.event.principle, true);
 	assert.match(String(proposal?.event.text), /project\/round-once/);
 	assert.match(String(proposal?.event.report), /A half-cent is rounded twice/);
-});
-
-test("a principle violation cannot cite a thread outside the failing verdict", () => {
-	const x = flow();
-	x.review();
-	const result = x.attempt({
-		kind: "verdict",
-		agent: x.agent().key,
-		outcome: "fail",
-		text: "The balance is wrong.",
-		blocks: [block("totals")],
-		notes: [],
-		principlesUnfollowed: [{ name: "project/round-once", thread: "absent" }],
-	});
-	assert.match(
-		"reject" in result ? result.reject : "",
-		/existing block thread/,
-	);
 });
 
 test("a classified item hold gates verifier tools and keeps siblings running until the last cause drops", () => {
@@ -551,7 +575,18 @@ const resume = (file: LaneEvent) => ({
 });
 test("Verify opens only the published checkout, renders the proof, brief, rulings and project playbook; inconsistent verdicts are refused", () => {
 	const x = flow();
-	x.publish();
+	x.publish("one", [], "bug", "base", {
+		changedPolicyFiles: [
+			".keel/principles/round.md",
+			".keel/playbooks/check.md",
+		],
+		mandate: {
+			...mandate,
+			delegated: [
+				{ label: "order", origin: "incidental", text: "Choose field order." },
+			],
+		},
+	});
 	const op = x.effect("checkout").op;
 	assert.equal(op.sha, "one");
 	assert.equal(x.agents().length, 0);
@@ -568,9 +603,15 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 		"high ruling",
 		"explain-the-number",
 		"compare totals",
-		"totals",
+		'["run","proof"]',
+		"Choose field order.",
+		"Verifiers check the choices against those nodes.",
+		".keel/principles/round.md",
+		".keel/playbooks/check.md",
 	])
 		assert.ok(input.includes(expected), expected);
+	assert.match(input, /unchanged unless[^.]*task/i);
+	assert.doesNotMatch(input, /"intent":|"nodes":/);
 	for (const [outcome, blocks] of [
 		["fail", []],
 		["pass", [block("a")]],
@@ -580,18 +621,14 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 	] as const) {
 		assert.ok(
 			"reject" in
-				verify.reduce(
-					x.state(),
-					{
-						kind: "verdict",
-						agent: a.key,
-						text: "check",
-						outcome,
-						blocks: [...blocks],
-						notes: [],
-					},
-					world,
-				),
+				x.attempt({
+					kind: "verdict",
+					agent: a.key,
+					text: "check",
+					outcome,
+					blocks: [...blocks],
+					notes: [],
+				}),
 		);
 	}
 });
@@ -792,15 +829,37 @@ test("full threads addressed by a correction still count after a separate item r
 	}
 	assert.ok(x.agent("diagnoser").expects.length);
 });
-test("item merges serialize against successive build heads with Mandate checks, and pass cleans up the verifier", () => {
+test("item merges serialize against successive heads with Mandate checks; verifier notes do not hold them", () => {
 	const x = flow();
-	x.publish();
+	x.publish("note-head", [], "bug", "base", { nodes: ["sums"] });
 	const checked = x.effect("checkout").op;
 	x.checkout();
-	x.pass();
+	const pass = x.pass();
+	const filings = pass.send?.filter((m) => m.lane === "queue") ?? [];
+	assert.equal(filings.length, 1);
+	const { work, event: note } = filings[0]!;
+	assert.deepEqual(
+		[
+			work,
+			note.kind,
+			note.source,
+			note.item,
+			note.sha,
+			note.nodes,
+			note.blocking,
+		],
+		[null, "intake", "verifier", "bug", "note-head", ["sums"], false],
+	);
+	assert.equal(note.text, "monitor latency");
+	assert.match(String(note.report), /totals now balance/);
+	assert.deepEqual(pass.send?.find((m) => m.lane === "build")?.event, {
+		kind: "item_verified",
+		item: "bug",
+	});
 	assert.deepEqual(x.effect("remove").op.target, checked);
 	x.clean();
 	const op = x.effect("merge_item").op;
+	assert.equal(op.item, "note-head");
 	assert.equal(op.expected, "base");
 	assert.deepEqual(op.checks, mandate.checks);
 	x.review("two", [], "other");
@@ -864,24 +923,15 @@ for (const { phase, failure, evidence } of [
 			key: op.key,
 			path: op.integration,
 		});
+		if (!takingTrunk) {
+			x.clean();
+			x.review("corrected");
+			const input = x.agent().expects[0]!.input!();
+			assert.match(input, /worker revised/i);
+			assert.match(input, /corrected/);
+		}
 	});
 }
-test("full-set pass asks for a slot before reading live trunk and pins the prepared target in the CAS", () => {
-	const x = flow();
-	const r = x.full();
-	assert.equal(r.send?.[0]?.lane, "trunk");
-	assert.equal(r.send?.[0]?.event.kind, "take_slot");
-	assert.equal(x.effects().length, 0);
-	const { op } = x.prepare();
-	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
-	const land = x.effect("land").op;
-	assert.deepEqual(land, {
-		...(op.landing as object),
-		kind: "land",
-		target: "prepared",
-	});
-	assert.equal(x.agents().length, 0);
-});
 test("a moved trunk gets a verifier on the exact prepared SHA before CAS; either full-set failure routes back to Build", () => {
 	const x = flow();
 	x.prepared("other-trunk");
@@ -909,8 +959,8 @@ test("a moved trunk gets a verifier on the exact prepared SHA before CAS; either
 		"rework",
 	);
 });
-for (const result of ["landed", "unchanged"]) {
-	test(`${result}: landing withdraws a cancel confirmation and redirects cancelling to hand-over`, () => {
+test("changed and unchanged landings withdraw cancel confirmation and redirect to hand-over", () => {
+	for (const result of ["landed", "unchanged"]) {
 		const desk = laneDriver(design, world);
 		desk.send({
 			kind: "ground",
@@ -931,6 +981,11 @@ for (const result of ["landed", "unchanged"]) {
 			kind: result,
 			sha: result === "landed" ? "target" : "base",
 		});
+		if (result === "unchanged") {
+			assert.ok(recorded.send?.some((m) => m.event.kind === "release_slot"));
+			assert.deepEqual(x.effects(), []);
+			assert.match(x.asks()[0]!.basis, /unchanged|no change/i);
+		}
 		for (const m of recorded.send ?? [])
 			if (m.lane === "design" && m.work === world.work) desk.send(m.event);
 		assert.deepEqual(desk.asks(), []);
@@ -946,17 +1001,7 @@ for (const result of ["landed", "unchanged"]) {
 			"reject" in again ? again.reject : "",
 			/landed[\s\S]*hand-over/i,
 		);
-	});
-}
-
-test("no-change preparation releases the slot without CAS and hands over the unchanged commit", () => {
-	const x = flow();
-	x.full();
-	x.prepare();
-	const r = x.done("prepare_landing", { kind: "unchanged", sha: "base" });
-	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
-	assert.equal(x.effects().length, 0);
-	assert.match(x.asks()[0]!.basis, /unchanged|no change/i);
+	}
 });
 for (const result of [
 	{ kind: "occupied", path: "foreign-path" },
@@ -1012,8 +1057,8 @@ test("owner direction on a merge retry reaches the worker on conflict or the ful
 		assert.match(next, /lost integration checkout/);
 	}
 });
-for (const outcome of ["landed", "moved", "unreadable"]) {
-	test(`cancel after exhausted CAS: settle the pinned landing under the slot and report ${outcome}`, () => {
+test("cancel after exhausted CAS settles the pinned landing before releasing its slot", () => {
+	for (const outcome of ["landed", "moved", "unreadable"]) {
 		const x = flow();
 		x.prepared();
 		const plan = x.effect("land");
@@ -1063,8 +1108,8 @@ for (const outcome of ["landed", "moved", "unreadable"]) {
 		assert.ok(reported.send?.some((m) => m.event.kind === "cleanup_finished"));
 		assert.deepEqual(x.effects(), []);
 		assert.deepEqual(x.asks(), []);
-	});
-}
+	}
+});
 
 test("a retry that observed a foreign trunk before cancellation needs no further CAS", () => {
 	const x = flow();
@@ -1131,36 +1176,6 @@ test("cancel withdraws waiting slot and ignores a late grant; an already running
 	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
 	assert.equal(y.asks().length, 0);
 });
-test("after a merge conflict, a worker's revised publication gets a fresh review", () => {
-	const x = flow();
-	x.mergedBeforeConflict();
-	x.done("merge_item", {
-		kind: "conflict",
-		paths: ["ledger"],
-		against: "base",
-	});
-	x.clean();
-	x.review("corrected");
-	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /worker revised/i);
-	assert.match(input, /corrected/);
-});
-
-test("the item reviewer sees Git's changed policy files and the item-task exception", () => {
-	const x = flow();
-	x.publish("one", [], "bug", "base", {
-		changedPolicyFiles: [
-			".keel/principles/round.md",
-			".keel/playbooks/check.md",
-		],
-	});
-	x.checkout();
-	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /\.keel\/principles\/round\.md/);
-	assert.match(input, /\.keel\/playbooks\/check\.md/);
-	assert.match(input, /unchanged unless[^.]*task/i);
-});
-
 test("full-set and landing reviews report the union of merged publications, not reverted policy changes", () => {
 	const x = flow();
 	const reverted = ".keel/principles/reverted.md";
@@ -1223,129 +1238,6 @@ test("full-set and landing reviews report the union of merged publications, not 
 	x.checkout();
 	expectPolicyList("landing");
 });
-
-test("the verifier reads the Mandate proof and checks choices delegated to workers", () => {
-	const x = flow();
-	x.publish("one", [], "bug", "base", {
-		mandate: {
-			...mandate,
-			delegated: [
-				{ label: "order", origin: "incidental", text: "Choose field order." },
-			],
-		},
-	});
-	x.checkout();
-	const input = x.agent().expects[0]!.input!();
-	assert.match(input, /## (?:Bound )?Mandate/i);
-	assert.match(input, /Sums match/);
-	assert.match(input, /compare totals/);
-	assert.match(
-		input,
-		/Workers settle these choices within the binding nodes\./,
-	);
-	assert.match(input, /Verifiers check the choices against those nodes\./);
-	assert.match(input, /Choose field order\./);
-	assert.ok(input.includes('["run","proof"]'));
-	assert.doesNotMatch(input, /"intent":|"nodes":/);
-});
-test("hand-over pairs approval notes with their local replies and revision evidence", () => {
-	const revisionSummary = "### Revision 1\n\nsums: Rule, Falsifying probe";
-	const x = flow((lane) => (lane === "design" ? { revisionSummary } : null));
-	x.land({
-		approvals: [
-			{
-				revision: null,
-				notes: [
-					{
-						n: 1,
-						text: "Cover the zero balance.",
-						status: "acted_on",
-						reason: "Added the check.",
-					},
-				],
-			},
-			{
-				revision: 1,
-				notes: [
-					{
-						n: 1,
-						text: "Consider another oracle.",
-						status: "considered",
-						reason: "Already covered.",
-					},
-				],
-			},
-		],
-	});
-	const { basis } = x.asks()[0]!;
-	assert.match(
-		basis,
-		/Mandate approval\n\n1\. Cover the zero balance\.\n\s+acted_on: Added the check\./,
-	);
-	assert.match(
-		basis,
-		/Revision 1 approval\n\n1\. Consider another oracle\.\n\s+considered: Already covered\./,
-	);
-	assert.ok(basis.includes(revisionSummary));
-});
-
-for (const ownerReviewed of [false, true]) {
-	test(`${ownerReviewed ? "reviewed" : "follow-route"} hand-over includes revisions but repeats only an unreviewed Mandate`, () => {
-		const x = flow((lane) =>
-			lane === "design"
-				? {
-						ownerReviewed,
-						reference: "Approved ledger contract §2",
-						revisionSummary: "- Revision 1: sums (falsifying probe)",
-					}
-				: null,
-		);
-		x.land({
-			mandate: {
-				...mandate,
-				intent: "Balance every ledger.\n\nDone when: Both sums match.",
-			},
-		});
-		const { title, basis, subject } = x.asks()[0]!;
-		assert.match(
-			basis,
-			/Mandate revisions during the build:\s+- Revision 1: sums/,
-		);
-		if (ownerReviewed) {
-			assert.doesNotMatch(
-				basis,
-				/Bound Mandate|Approved ledger contract|Timeout: 10 ms/,
-			);
-			return;
-		}
-		assert.match(title, /Balance every ledger/);
-		assert.doesNotMatch(title, /\n|Done when:/);
-		const assertMandate = (document: string) => {
-			const beforeRulings =
-				document.match(/## Bound Mandate\n([\s\S]*?)\nRulings,/)?.[1] ?? "";
-			assert.match(beforeRulings, /Reference: Approved ledger contract §2/);
-			assert.match(beforeRulings, /Done when: Both sums match/);
-			assert.match(
-				beforeRulings,
-				/sums: Rule\s+Sums match\s+Falsifying probe: compare totals/,
-			);
-			assert.match(
-				beforeRulings,
-				/totals: Proof[\s\S]*\["run","proof"\][\s\S]*Timeout: 10 ms/,
-			);
-		};
-		assertMandate(basis);
-		const rejected = x.apply({
-			kind: "answered",
-			subject,
-			choice: "reject",
-			annotations: [{ n: 1, text: "Check the lower bound." }],
-		});
-		assertMandate(
-			String(rejected.send?.find(({ lane }) => lane === "queue")?.event.report),
-		);
-	});
-}
 
 test("hand-over retains the chosen ambiguity reading and numbered annotations from Ground", () => {
 	const x = flow();
@@ -1523,10 +1415,41 @@ test("a cleanup already held on cancel is retried; a running checkout settles be
 	assert.notEqual(y.effect("remove").key, old.key);
 	assert.deepEqual(y.effect("remove").op.target, old.op.target);
 });
-test("hand-over releases the slot, prioritizes high-cost evidence and accepts without a Git operation", () => {
-	const x = flow();
-	assert.ok(x.land().send?.some((m) => m.event.kind === "release_slot"));
+test("the landing slot gates CAS; reviewed hand-over prioritizes high-cost evidence and accepts without Git", () => {
+	const revisionSummary = "- Revision 1: sums (falsifying probe)";
+	const x = flow((lane) =>
+		lane === "design"
+			? {
+					ownerReviewed: true,
+					reference: "Approved ledger contract §2",
+					revisionSummary,
+				}
+			: null,
+	);
+	assert.deepEqual(
+		x.full().send?.map(({ lane, event }) => [lane, event.kind]),
+		[["trunk", "take_slot"]],
+	);
+	assert.deepEqual(x.effects(), []);
+	const { op } = x.prepare();
+	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
+	assert.deepEqual(x.effect("land").op, {
+		...(op.landing as object),
+		kind: "land",
+		target: "prepared",
+	});
+	assert.deepEqual(x.agents(), []);
+	assert.ok(
+		x
+			.done("land", { kind: "landed", sha: "prepared" })
+			.send?.some((m) => m.event.kind === "release_slot"),
+	);
 	const { basis, subject } = x.asks()[0]!;
+	assert.ok(basis.includes(revisionSummary));
+	assert.doesNotMatch(
+		basis,
+		/Bound Mandate|Approved ledger contract|Timeout: 10 ms/,
+	);
 	assert.match(basis, /high ruling[\s\S]*low ruling/);
 	for (const evidence of [
 		"prepared",

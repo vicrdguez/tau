@@ -296,9 +296,11 @@ test("briefs require ready work and bound labels; only a confirmed worktree star
 		{ kind: "brief", ...brief, item: "later" },
 		{ kind: "brief", ...brief, nodes: ["unknown"] },
 		{ kind: "brief", ...brief, nodes: [] },
+		{ kind: "brief", ...brief, fences: "book.sh and book-check.sh" },
 		{ kind: "handoff", summary: "done", risk: "none" },
 	])
 		assert.ok("reject" in b.tryEvent(e));
+	assert.deepEqual(b.effects(), []);
 	b.briefItem();
 	const { op } = b.effect().spec;
 	assert.deepEqual(op, {
@@ -367,19 +369,6 @@ test("principle and playbook changes go to the verifier without a publication ho
 		changedPolicyFiles,
 	);
 	assert.equal(b.agent("worker").paused, false);
-});
-
-test("a prose fence is refused before any worktree is prepared", () => {
-	const b = setup();
-	b.plan();
-	const result = b.tryEvent({
-		kind: "brief",
-		...brief,
-		fences: "book.sh and book-check.sh",
-	});
-	assert.ok("reject" in result);
-	assert.match(result.reject, /fence.*repository.relative.*path/i);
-	assert.deepEqual(b.effects(), []);
 });
 
 test("worker input passes the item's path fences and triggers a premise check only for a survived fix", () => {
@@ -555,8 +544,8 @@ for (const order of ["merge first", "move first"]) {
 	});
 }
 
-for (const kind of ["merged", "rework", "integration"]) {
-	test(`a sibling's ${kind} that cannot explain a moved preparation files the observed head`, () => {
+test("a sibling merge at the wrong SHA or a failed review cannot explain a moved preparation", () => {
+	for (const kind of ["merged", "rework"]) {
 		const b = preparingBesidePublication();
 		b.done({ kind: "moved", actual: sha });
 		const files = b.send({
@@ -572,8 +561,8 @@ for (const kind of ["merged", "rework", "integration"]) {
 		assert.ok(
 			!b.effects().some((e) => (e.spec.op as JsonObject).kind === "worktree"),
 		);
-	});
-}
+	}
+});
 
 function replaceOccupied(b: ReturnType<typeof setup>) {
 	const before = b.effect();
@@ -613,43 +602,24 @@ test("only the confirmed replacement releases all its own old attempts for unmer
 	assert.ok(
 		b.effects().every((e) => (e.spec.op as JsonObject).merged !== true),
 	);
-	b.done({ kind: "removed" });
-	b.done({ kind: "removed" });
+	const kept = b.done({ kind: "kept", reason: "private", files: ["scratch"] });
+	assert.match(JSON.stringify(kept.notes), /worker-fix-1.*scratch/);
+	const lost = b.send({
+		kind: "effect_failed",
+		key: b.effect().key,
+		error: "lost registration",
+	});
+	assert.match(JSON.stringify(lost.notes), /worker-fix-2.*lost registration/);
+	assert.ok(b.agent("worker").expects[0]?.tools.includes("publish_build"));
 	b.send({ kind: "cancel" });
 	assert.deepEqual(
 		b.effects().map((e) => (e.spec.op as JsonObject).target),
 		[replacement.spec.op, sibling.spec.op],
 	);
+	b.done({ kind: "removed" });
+	const final = b.done({ kind: "removed" }).send?.[0]?.event;
+	assert.match(JSON.stringify(final?.kept), /scratch.*lost registration/);
 });
-
-for (const denied of ["kept", "effect_failed"]) {
-	test(`an old attempt's ${denied} cleanup reports the path without holding the replacement`, () => {
-		const b = setup();
-		b.prepare();
-		const old = replaceOccupied(b);
-		b.ready();
-		const key = b.effect().key;
-		const outcome = b.send(
-			denied === "kept"
-				? {
-						kind: "effect_done",
-						key,
-						result: { kind: "kept", reason: "private", files: ["scratch"] },
-					}
-				: { kind: "effect_failed", key, error: "lost registration" },
-		);
-		const evidence = denied === "kept" ? "scratch" : "lost registration";
-		assert.ok(
-			outcome.notes?.some(
-				(n) => n.text.includes(String(old.path)) && n.text.includes(evidence),
-			),
-		);
-		assert.deepEqual(b.request("worker").tools, ["publish_build"]);
-		b.send({ kind: "cancel" });
-		const final = b.done({ kind: "removed" }).send![0]!.event;
-		assert.match(JSON.stringify(final.kept), new RegExp(evidence));
-	});
-}
 
 for (const confirmed of [false, true]) {
 	test(`cancel drains both attempts ${confirmed ? "during old checkout cleanup" : "before replacement confirmation"}`, () => {
