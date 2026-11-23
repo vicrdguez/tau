@@ -502,26 +502,6 @@ test("decline records every still-owed annotation, not already answered notes, a
 			),
 		);
 });
-test("decline writes still-owed approval notes from earlier rounds, with each round identified", () => {
-	const x = review();
-	x.answer("mandate/1", "rework");
-	x.publish();
-	// An earlier approving answer exists in saved history but was not handed to Build.
-	const prior = x.state().rounds[0]!.answer!;
-	prior.choice = "approve";
-	prior.annotations = [
-		{ n: 1, text: "Older approval note.", range: null, excerpt: null },
-	];
-	const r = x.answer("mandate/2", "decline", [note(1, "New reason.")]);
-	assert.match(
-		r.notes?.[0]?.text ?? "",
-		/Round 1[\s\S]*1\. Older approval note\.[^\n]*not pursued/i,
-	);
-	assert.match(
-		r.notes?.[0]?.text ?? "",
-		/Round 2[\s\S]*1\. New reason\.[^\n]*not pursued/i,
-	);
-});
 test("a stopped draft resumes with its annotation debt under a new draft token, never as Ground", () => {
 	const x = review();
 	x.answer("mandate/1", "rework", [note(1, "Clarify callers.")]);

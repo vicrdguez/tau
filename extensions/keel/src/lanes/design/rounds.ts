@@ -312,32 +312,20 @@ export const approvalNotes = (a: Answer) =>
 	a.annotations.map((n) => n.text + passage(n));
 export const notPursued = (a: Answer) =>
 	a.annotations.map((n) => annotation(n, ": not pursued")).join("\n");
-export function declineText(history: Round[]) {
+export function declineText(round: number, answer: Answer) {
 	return declined({
-		annotations:
-			history
-				.map(({ answer }, i) =>
-					(answer?.choice === "approve" || answer?.choice === "decline") &&
-					answer.annotations.length
-						? `### Round ${i + 1}\n\n${notPursued(answer)}`
-						: "",
-				)
-				.filter(Boolean)
-				.join("\n\n") || "None.",
+		annotations: answer.annotations.length
+			? `### Round ${round}\n\n${notPursued(answer)}`
+			: "None.",
 	});
 }
-export function binding(a: Audit, history: Round[]): Mandate {
-	const d = history.at(-1)!.draft;
+export function binding(a: Audit, d: Draft, approved: Answer): Mandate {
 	const ns = nodes(d, a, "Ruling").filter(
 		(n) => n.label !== "intent" && n.section !== "Proof",
 	);
 	return {
 		encodeRequired: d.seams.length > 0 || d.nodes.length > 0,
-		approvalNotes: history.flatMap((r) =>
-			r.answer?.choice === "approve"
-				? r.answer.annotations.map((n) => n.text + passage(n))
-				: [],
-		),
+		approvalNotes: approvalNotes(approved),
 		delegated: d.riders
 			.filter((r) => r.disposition === "open")
 			.map(({ label, text, origin }) => ({ label, text, origin })),

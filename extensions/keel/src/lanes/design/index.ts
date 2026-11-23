@@ -1254,14 +1254,13 @@ export const design: Lane<State> = {
 				const ask = mandateAsk(s);
 				if (ask.subject !== e.subject || !ask.choices.includes(e.choice))
 					return { state: s };
-				const rounds = s.rounds.with(-1, {
-					...s.rounds.at(-1)!,
-					answer: reviewAnswer(e, ask.basis),
-				});
+				const answer = reviewAnswer(e, ask.basis);
+				const round = { ...s.rounds.at(-1)!, answer };
+				const rounds = s.rounds.with(-1, round);
 				const next = { ...s, rounds, seq: s.seq + 1 };
 				switch (e.choice) {
 					case "approve": {
-						const mandate = binding(s.audit!, rounds);
+						const mandate = binding(s.audit!, round.draft, answer);
 						return {
 							state: { ...next, phase: "bound", mandate },
 							send: [toBuild(w.work!, { kind: "bound", mandate })],
@@ -1270,7 +1269,7 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: { ...next, phase: "closed", cancelRequested: false },
-							notes: [{ agent: null, text: declineText(rounds) }],
+							notes: [{ agent: null, text: declineText(rounds.length, answer) }],
 						};
 					case "arena":
 					case "arena_fresh":
