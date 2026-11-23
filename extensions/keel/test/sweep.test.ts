@@ -47,13 +47,14 @@ test("JSON replies recover fenced and inline arrays, but not invalid text", () =
 	const findings = [{ text: "Missing proof.", report: "Test at [sha-1]." }];
 	const json = JSON.stringify(findings);
 	assert.deepEqual(
-		replyJson(`Findings:\n\n\`\`\`json\n${json}\n\`\`\`\n`),
+		replyJson(`Draft: []\n\n\`\`\`json\n${json}\n\`\`\`\n`),
 		findings,
 	);
-	assert.deepEqual(
-		replyJson(`Checking [old notes. Actual result: ${json} Done.`),
-		findings,
-	);
+	for (const prefix of ["[old notes", "[invalid candidate]"])
+		assert.deepEqual(
+			replyJson(`${prefix}. Actual result: ${json} Done.`),
+			findings,
+		);
 	assert.equal(replyJson("[no valid findings]"), null);
 });
 

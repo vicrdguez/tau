@@ -399,18 +399,14 @@ test("a classified item hold gates verifier tools and keeps siblings running unt
 	);
 	assert.ok(
 		"reject" in
-			verify.reduce(
-				x.state(),
-				{
-					kind: "verdict",
-					agent: first.key,
-					outcome: "pass",
-					text: "old evidence",
-					blocks: [],
-					notes: [],
-				},
-				world,
-			),
+			x.attempt({
+				kind: "verdict",
+				agent: first.key,
+				outcome: "pass",
+				text: "old evidence",
+				blocks: [],
+				notes: [],
+			}),
 	);
 	const stalled = x.apply({
 		kind: "agent_stalled",
@@ -421,6 +417,12 @@ test("a classified item hold gates verifier tools and keeps siblings running unt
 	});
 	assert.deepEqual(stalled.send, []);
 	x.apply({ kind: "queue_release", cause: "first" });
+	assert.deepEqual(
+		x.agents().map((a) => a.key),
+		["verify/sibling"],
+	);
+	x.apply(findingHold("second", "sibling"));
+	x.apply({ kind: "queue_release", cause: "second", except: ["bug"] });
 	assert.deepEqual(
 		x.agents().map((a) => a.key),
 		["verify/sibling"],

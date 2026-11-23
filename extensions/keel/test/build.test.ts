@@ -354,31 +354,11 @@ test("dirty and unrelated work cannot publish", () => {
 	assert.equal(b.request("worker").token, exp.token);
 });
 
-test("principle and playbook changes go to the verifier without a publication hold", () => {
-	const b = setup();
-	b.working();
-	const changedPolicyFiles = [
-		".keel/principles/round.md",
-		".keel/playbooks/check.md",
-	];
-	const result = b.pub({ ...clean, changedPolicyFiles });
-	assert.equal(result.send?.length, 1);
-	assert.equal(result.send?.[0]?.lane, "verify");
-	assert.deepEqual(
-		result.send?.[0]?.event.changedPolicyFiles,
-		changedPolicyFiles,
-	);
-	assert.equal(b.agent("worker").paused, false);
-});
-
-test("worker input passes the item's path fences and triggers a premise check only for a survived fix", () => {
+test("build returns re-open the same worker; only a survived rework fix requests a premise check", () => {
 	const b = setup();
 	b.plan();
-	b.send({
-		kind: "brief",
-		...brief,
-		fences: "./src/money/./tick.ts\n\n tests/tie.ts ",
-	});
+	b.briefItem("fix", { fences: "./src/money/./tick.ts\n\n tests/tie.ts " });
+	const paths = ["src/money/tick.ts", "tests/tie.ts"];
 	const policy = [
 		{
 			name: "money",
@@ -386,31 +366,46 @@ test("worker input passes the item's path fences and triggers a premise check on
 		},
 	];
 	b.done({ kind: "worktree", base: repo.trunkHead, principles: policy });
-	const expectation = () => b.agent("worker").expects[0]!;
-	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
-	assert.notEqual(expectation().situation, "survived_fix");
-	assert.deepEqual(b.agent("worker").projectPrinciples, policy);
-	assert.deepEqual(b.pub().send![0]!.event.paths, [
-		"src/money/tick.ts",
-		"tests/tie.ts",
-	]);
-	const back = {
-		kind: "rework",
-		item: "fix",
-		evidence: "wrong at ties",
-		threads: ["tie"],
-	};
-	b.send(back);
-	assert.notEqual(expectation().situation, "survived_fix");
-	b.pub(undefined, ["tie"]);
-	b.send(back);
-	assert.equal(expectation().situation, "survived_fix");
-	assert.deepEqual(b.agent("worker").projectPrinciples, policy);
-	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
-	b.pub(undefined, ["tie"]);
-	b.send({ ...back, kind: "integration", threads: [] });
-	assert.notEqual(expectation().situation, "survived_fix");
-	assert.doesNotMatch(b.request("worker").text, /Threads:\s*\n/i);
+	const worker = b.agent("worker");
+	const cited = { ...ruling, principles: ["prove-it-works"] };
+	b.send({ kind: "ruling", agent: worker.key, ruling: cited });
+	assert.deepEqual(worker.expects[0]?.paths, paths);
+	assert.notEqual(worker.expects[0]?.situation, "survived_fix");
+	assert.deepEqual(worker.projectPrinciples, policy);
+	const first = b.pub().send![0]!;
+	assert.deepEqual(
+		[first.lane, first.event.kind, first.event.sha, first.event.head],
+		["verify", "published", sha, repo.trunkHead],
+	);
+	assert.deepEqual(first.event.paths, paths);
+	assert.deepEqual(first.event.rulings, [cited]);
+	assert.match(String(first.event.brief), /works at ties[\s\S]*patched/);
+
+	let previous = worker.expects[0]!.token;
+	for (const [kind, evidence, threads, survived] of [
+		["rework", "wrong rounding", ["tie"], false],
+		["rework", "the rounding fix failed", ["tie"], true],
+		["integration", "merge conflict in book", [], false],
+	] as const) {
+		b.send({ kind, item: "fix", evidence, threads: [...threads] });
+		const resumed = b.agent("worker");
+		const [turn] = resumed.expects;
+		assert.ok(turn);
+		assert.equal(resumed.key, worker.key);
+		assert.notEqual(turn.token, previous);
+		previous = turn.token;
+		assert.equal(turn.situation === "survived_fix", survived);
+		assert.deepEqual(turn.paths, paths);
+		assert.deepEqual(resumed.projectPrinciples, policy);
+		const input = turn.input!();
+		assert.ok(input.includes(evidence), kind);
+		if (threads.length) assert.match(input, /tie/);
+		else assert.doesNotMatch(input, /Threads:\s*\n/i);
+		assert.deepEqual(
+			b.pub(undefined, [...threads]).send![0]!.event.addresses,
+			threads,
+		);
+	}
 });
 
 test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
@@ -421,41 +416,23 @@ test("the verifier receives the repo's comparison base, not the current head or 
 	b.pub();
 	b.send({ kind: "merged", item: "fix", head: merged });
 	const inherited = "f".repeat(40);
-	const p = b.pub({ ...clean, base: inherited }).send![0]!.event;
-	assert.equal(p.head, merged);
-	assert.equal(p.base, inherited);
-});
-
-test("rework and integration reach the original worker with fresh expectations; only observed publications advance", () => {
-	const b = setup();
-	b.working();
-	const worker = b.agent("worker");
-	const cited = { ...ruling, principles: ["prove-it-works"] };
-	b.send({ kind: "ruling", agent: worker.key, ruling: cited });
-	const first = b.pub().send![0]!;
-	assert.equal(first.lane, "verify");
-	assert.equal(first.event.kind, "published");
-	assert.deepEqual(first.event.rulings, [cited]);
-	assert.equal(first.event.sha, sha);
-	assert.equal(first.event.head, repo.trunkHead);
-	assert.match(String(first.event.brief), /works at ties/);
-	assert.match(String(first.event.brief), /patched/);
-	let prev = worker.expects[0]!.token;
-	for (const [kind, evidence] of [
-		["rework", "wrong rounding"],
-		["integration", "merge conflict in book"],
-	] as const) {
-		b.send({ kind, item: "fix", evidence, threads: ["tie"] });
-		assert.equal(b.agent("worker").key, worker.key);
-		const req = b.request("worker");
-		assert.ok(req.text.includes(evidence));
-		assert.match(req.text, /tie/);
-		assert.notEqual(req.token, prev);
-		prev = req.token;
-		assert.deepEqual(b.pub(undefined, ["tie"]).send![0]!.event.addresses, [
-			"tie",
-		]);
-	}
+	const changedPolicyFiles = [
+		".keel/principles/round.md",
+		".keel/playbooks/check.md",
+	];
+	const result = b.pub({ ...clean, base: inherited, changedPolicyFiles });
+	assert.equal(result.send?.length, 1);
+	const [publication] = result.send!;
+	assert.equal(publication?.lane, "verify");
+	assert.deepEqual(
+		[
+			publication?.event.head,
+			publication?.event.base,
+			publication?.event.changedPolicyFiles,
+		],
+		[merged, inherited, changedPolicyFiles],
+	);
+	assert.equal(b.agent("worker").paused, false);
 });
 
 for (const outcome of ["occupied", "moved", "effect_failed"]) {
