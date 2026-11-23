@@ -18,6 +18,7 @@ import type { ServerOptions } from "./index.js";
 import { acquireLock } from "./lock.js";
 import { type Outcome, refuse } from "./refusals.js";
 import { safeMessage } from "./task-reports.js";
+import { openTelemetry, type Telemetry } from "./telemetry.js";
 
 export const PROJECT = "^[a-z0-9][a-z0-9-]{0,62}$";
 const NAME = new RegExp(PROJECT);
@@ -33,12 +34,14 @@ export type OpenProject = {
 	readonly store: Store;
 	readonly registry: Registry;
 	readonly log: ConversationId;
+	readonly telemetry: Telemetry | undefined;
 	record: Project;
 };
 type Opened = {
 	readonly name: string;
 	readonly store: Store;
 	readonly registry: Registry;
+	readonly telemetry: Telemetry | undefined;
 	readonly selection: { defaults: Extension[] };
 	readonly lock: { release(): void };
 };
@@ -67,6 +70,7 @@ async function shut(opened: Opened) {
 	try {
 		await opened.store.harness.close(context);
 	} finally {
+		await opened.telemetry?.close();
 		opened.lock.release();
 	}
 }
@@ -266,6 +270,10 @@ export class Projects {
 		const directory = path.join(this.#root, name);
 		await mkdir(directory, { recursive: true });
 		const lock = acquireLock(path.join(directory, "store.lock"));
+		const telemetry = await openTelemetry(
+			path.join(directory, "telemetry.sqlite"),
+			name,
+		);
 		try {
 			const registry = createRegistry();
 			const selection: Opened["selection"] = { defaults: [] };
@@ -288,13 +296,15 @@ export class Projects {
 							);
 					},
 					settings: () => ({ extensions: selection.defaults }),
+					...(telemetry === undefined ? {} : { telemetry: telemetry.adapter }),
 					...(env === undefined ? {} : { env }),
 					...(now === undefined ? {} : { now }),
 				},
 				context,
 			);
-			return { name, store, registry, selection, lock };
+			return { name, store, registry, selection, lock, telemetry };
 		} catch (error) {
+			await telemetry?.close();
 			lock.release();
 			throw error;
 		}

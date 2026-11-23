@@ -29,6 +29,7 @@ Every refusal has string `code` and `message` fields. The table lists all additi
 | `unknown_project` | 404 | The project is not open. |
 | `unknown_conversation` | 404 | The conversation does not exist in the project. |
 | `unknown_decision` | 404 | The decision does not exist in the project. |
+| `unknown_trace` | 404 | The trace does not exist in the project. |
 | `conflict` | 409 | A binding conflict carries `project: ProjectView`. An answer conflict carries `decision: Decision` with status `answered`. |
 | `not_open` | 409 | The decision is not open. `open?: Decision` identifies a current open decision when present. |
 | `stale_basis` | 409 | The answer uses an old basis. |
@@ -42,6 +43,7 @@ Every refusal has string `code` and `message` fields. The table lists all additi
 | `busy` | 409 | The conversation is busy or the server is stopping. |
 | `idle` | 409 | Input requiring a running conversation found none. |
 | `event_log` | 409 | A call tried to run work in the event log. |
+| `telemetry_unavailable` | 409 | The project opened without telemetry. |
 | `too_large` | 413 | The request body exceeds 1 MiB. |
 
 ## Transcript
@@ -71,7 +73,7 @@ Repeating that request returns the same project with `repeated` set to `true`. A
 
 `input` and `continue` require a nonempty `requestId`. The host prefixes it with `client:<device>:` before submission. A resend in the same conversation from the same device with the same ID returns the first submission. A retry uses the same body. Each device has its own ID namespace.
 
-A page's `next` is an opaque cursor. The client supplies it as `cursor` to the same call and project. A history cursor also carries its conversation and query bounds, and supplied bounds must match the cursor. A cursor records its position rather than naming server memory, so it remains usable after a restart. History defaults to descending order. `minEntryId` and `maxEntryId` are inclusive.
+A page's `next` is an opaque cursor. The client supplies it as `cursor` to the same call and project. A history cursor also carries its conversation and query bounds. A traces cursor carries its filters. Any supplied filters or bounds must match the saved ones. A cursor records its position rather than naming server memory, so it remains usable after a restart. History defaults to descending order. `minEntryId` and `maxEntryId` are inclusive.
 
 ## Streams
 
@@ -250,6 +252,44 @@ type TaskState =
 	}
 	| { status: "sleeping"; checkpoint: JsonValue; until: number }
 	| { status: "completing" | "terminal"; outcome: TaskOutcome };
+```
+
+### Telemetry
+
+`metrics` returns `StoredMetric` rows. Each row describes one 10-second interval and one set of attribute values. A nonfinite measurement makes its row's `sum`, `min`, and `max` null. `traces` and `trace` return `StoredTrace` records. Span times are epoch milliseconds at microsecond resolution. An event's `timeMs` is relative to its span's start.
+
+```ts
+type AttributeValue = string | number | boolean | string[] | number[] | boolean[];
+type SpanAttributes = Record<string, AttributeValue>;
+type StoredMetric = {
+	intervalMs: number;
+	name: string;
+	kind: "counter" | "upDownCounter" | "histogram";
+	unit?: string;
+	attributes: SpanAttributes;
+	count: number;
+	sum: number | null;
+	min: number | null;
+	max: number | null;
+};
+type StoredSpan = {
+	id: string;
+	traceId: string;
+	parentId?: string;
+	name: string;
+	startedMs: number;
+	endedMs: number;
+	attributes: SpanAttributes;
+	events: { name: string; timeMs: number; attributes: SpanAttributes }[];
+	links: { traceId: string; spanId: string; attributes?: SpanAttributes }[];
+	status:
+		| { status: "ok" }
+		| { status: "error"; error?: { name: string; message: string } };
+};
+type StoredTrace = {
+	traceId: string;
+	spans: StoredSpan[];
+};
 ```
 
 ### Messages

@@ -2,7 +2,7 @@
 
 | Failure | Test |
 | --- | --- |
-| A seventh package path becomes importable. | exports.test.ts |
+| An eighth package path becomes importable. | exports.test.ts |
 | A runtime name or type differs from the README in either direction. | exports.test.ts |
 | A name is available through two entries. | exports.test.ts |
 | A re-export changes identity or its documented origin. | exports.test.ts |
