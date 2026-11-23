@@ -180,57 +180,54 @@ const start = defineLaneTool({
 async function withAccess(cwd: string, t: TestContext) {
 	const x = await toy({
 		lanes: [
-			defineLane(
-				{
-					name: "access",
-					state: accessState,
-					asks: () => [],
-					effects: () => [],
-					view: (s) => s,
-					onFact: (state) => ({ state }),
-					reduce: (_s, e) => ({ state: { phase: e.kind } }),
-					agents: ({ phase }) => {
-						if (phase === "workers")
-							return ["pinned", "empty"].map((key) => ({
-								key: agentKey(key),
-								role: "worker" as const,
-								cwd,
-								paused: false,
-								projectPrinciples:
-									key === "empty"
-										? []
-										: [
-												{
-													name: "ticks",
-													body: "---\ndescription: Prepared statement.\nroles: [worker]\n---\nPrepared body.",
-												},
-											],
-								expects:
-									key === "empty"
-										? []
-										: [
-												{
-													token: token(key, 1),
-													tools: [],
-													input: () => "Rework.",
-												},
-											],
-							}));
-						return phase === "retired" || phase === "entry"
-							? []
-							: [
-									{
-										key: agentKey("designer"),
-										role: "designer",
-										cwd,
-										paused: phase === "paused",
-										expects: [],
-									},
-								];
-					},
+			defineLane({
+				name: "access",
+				state: accessState,
+				asks: () => [],
+				effects: () => [],
+				view: (s) => s,
+				onFact: (state) => ({ state }),
+				reduce: (_s, e) => ({ state: { phase: e.kind } }),
+				agents: ({ phase }) => {
+					if (phase === "workers")
+						return ["pinned", "empty"].map((key) => ({
+							key: agentKey(key),
+							role: "worker" as const,
+							cwd,
+							paused: false,
+							projectPrinciples:
+								key === "empty"
+									? []
+									: [
+											{
+												name: "ticks",
+												body: "---\ndescription: Prepared statement.\nroles: [worker]\n---\nPrepared body.",
+											},
+										],
+							expects:
+								key === "empty"
+									? []
+									: [
+											{
+												token: token(key, 1),
+												tools: [],
+												input: () => "Rework.",
+											},
+										],
+						}));
+					return phase === "retired" || phase === "entry"
+						? []
+						: [
+								{
+									key: agentKey("designer"),
+									role: "designer",
+									cwd,
+									paused: phase === "paused",
+									expects: [],
+								},
+							];
 				},
-				{ version: 1, sample: accessState.initial },
-			),
+			}),
 		],
 		tools: [start],
 		plainTools: principleTools,

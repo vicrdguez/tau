@@ -120,19 +120,7 @@ export interface Lane<S extends JsonObject> {
 }
 
 /** Keep each reducer paired with its own document type in a heterogeneous registry. */
-export function defineLane<S extends JsonObject, F extends JsonObject>(
-	lane: Lane<S>,
-	fixture: { version: number; sample: () => F } & ([S, F] extends [F, S]
-		? unknown
-		: never),
-) {
-	if (
-		fixture?.version !== lane.state.version ||
-		typeof fixture.sample !== "function"
-	)
-		throw new Error(
-			`Missing or outdated state fixture for ${lane.name} v${lane.state.version}`,
-		);
+export function defineLane<S extends JsonObject>(lane: Lane<S>) {
 	return {
 		name: lane.name,
 		scope: lane.state.scope,

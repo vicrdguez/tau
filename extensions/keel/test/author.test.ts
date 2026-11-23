@@ -16,10 +16,6 @@ const plan = defineState({
 	scope: "conversation",
 	initial: () => ({ phase: "empty", root: "", answered: [] as string[] }),
 });
-const fixture = {
-	version: 1,
-	sample: () => ({ phase: "", root: "", answered: [] as string[] }),
-};
 const lane: Lane<ReturnType<typeof plan.initial>> = {
 	name: "plan",
 	state: plan,
@@ -69,31 +65,28 @@ const queue = defineState({
 	scope: "session",
 	initial: () => ({ log: [] as string[] }),
 });
-const queueLane = defineLane(
-	{
-		name: "queue",
-		state: queue,
-		view: (s) => s,
-		agents: () => [],
-		effects: () => [],
-		asks: () => [],
-		onFact: (state) => ({ state }),
-		reduce(s, e, w) {
-			if (e.kind === "seed")
-				return {
-					state: s,
-					send: [
-						{ lane: "plan", work: "new", event: { kind: String(e.action) } },
-					],
-				};
-			const current = w.view("plan", e.work as WorkId) as { phase: string };
+const queueLane = defineLane({
+	name: "queue",
+	state: queue,
+	view: (s) => s,
+	agents: () => [],
+	effects: () => [],
+	asks: () => [],
+	onFact: (state) => ({ state }),
+	reduce(s, e, w) {
+		if (e.kind === "seed")
 			return {
-				state: { log: [...s.log, `${e.observed}/${current.phase}/${e.work}`] },
+				state: s,
+				send: [
+					{ lane: "plan", work: "new", event: { kind: String(e.action) } },
+				],
 			};
-		},
+		const current = w.view("plan", e.work as WorkId) as { phase: string };
+		return {
+			state: { log: [...s.log, `${e.observed}/${current.phase}/${e.work}`] },
+		};
 	},
-	{ version: 1, sample: () => ({ log: [] as string[] }) },
-);
+});
 const adopt = defineLaneTool({
 	lane: "plan",
 	roles: ["designer"],
@@ -137,7 +130,7 @@ const principle = defineTool({
 });
 async function setup(t: TestContext) {
 	const x = await toy({
-		lanes: [defineLane(lane, fixture), queueLane],
+		lanes: [defineLane(lane), queueLane],
 		tools: [adopt, file, brief],
 		plainTools: [{ roles: ["designer"], tool: principle }],
 		sections: [

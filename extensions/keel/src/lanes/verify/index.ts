@@ -31,7 +31,6 @@ import {
 	effects,
 	handoverEvidence,
 } from "./declarations.ts";
-import { verifyFixture } from "./fixture.ts";
 import type { FindingNote, Publication } from "./public.ts";
 import {
 	type Block,
@@ -880,4 +879,4 @@ export const verify: Lane<State> = {
 	reduce: (s, e, w) => transition(s, w).reduce(e as Event),
 	onFact: (s, e, w) => transition(s, w).onFact(e),
 };
-export const verifyLane = defineLane(verify, verifyFixture);
+export const verifyLane = defineLane(verify);

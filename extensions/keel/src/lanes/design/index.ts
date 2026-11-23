@@ -88,7 +88,6 @@ import {
 	synthesisError,
 	synthesisSources,
 } from "./rounds.ts";
-import { designV1 } from "./v1.ts";
 
 export const designTools = [
 	...experimentTools,
@@ -1394,4 +1393,4 @@ export const design: Lane<State> = {
 		];
 	},
 };
-export const designLane = defineLane(design, designV1);
+export const designLane = defineLane(design);

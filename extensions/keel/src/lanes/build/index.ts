@@ -58,7 +58,6 @@ import {
 	validatePlan,
 	workerKey,
 } from "./state.ts";
-import { buildV1 } from "./v1.ts";
 
 export { buildTools } from "./tools.ts";
 
@@ -850,4 +849,4 @@ const build: Lane<Build> = {
 			? cleanupEffects(s)
 			: [...plans(s, w).map((p) => p.effect), ...cleanupEffects(s)],
 };
-export const buildLane = defineLane(build, buildV1);
+export const buildLane = defineLane(build);
