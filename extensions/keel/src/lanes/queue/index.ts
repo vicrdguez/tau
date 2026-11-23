@@ -285,7 +285,7 @@ export const queueLane = defineLane({
 		...triage.asks(state.triage),
 	],
 	view: (state) => ({
-		patternRulings: state.triage.patterns,
+		patternRulings: triage.patternRulings(state.triage),
 		priorFindings: state.triage.entries.flatMap((f) =>
 			f.intake.source === "sweeper"
 				? [

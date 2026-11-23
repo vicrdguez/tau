@@ -75,15 +75,11 @@ export type Finding = {
 	group: number | null;
 	disposition: string | null;
 	triageDirection: string;
+	// Only the head of an answered pattern decision records its exact answer basis and order.
+	ruling: { order: number; evidence: string } | null;
 };
 export type Queue = {
 	entries: Finding[];
-	patterns: {
-		name: string;
-		finding: number;
-		evidence: string;
-		status: "blessed" | "revoked";
-	}[];
 	context: string;
 	attempt: number;
 	direction: string;
@@ -91,7 +87,6 @@ export type Queue = {
 };
 export const initial = (): Queue => ({
 	entries: [],
-	patterns: [],
 	context: "",
 	attempt: 0,
 	direction: "",

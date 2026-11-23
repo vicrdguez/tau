@@ -205,7 +205,9 @@ export function intake(
 				"Only a worker or verifier's own item can block. File an unlikely edge case without blocking.",
 		};
 	const pattern = e.pattern?.trim() || null;
-	const precedent = q.patterns.find((p) => p.name === pattern);
+	const precedent = pattern
+		? patternRulings(q).find((p) => p.name === pattern)
+		: undefined;
 	const counterexample = e.source === "owner" || e.source === "sweeper";
 	if (precedent?.status === "blessed" && !counterexample)
 		return {
@@ -245,6 +247,7 @@ export function intake(
 		group: null,
 		disposition: null,
 		triageDirection: "",
+		ruling: null,
 	};
 	if (
 		precedent?.status === "revoked" &&
@@ -565,6 +568,14 @@ export function onFact(
 			bless: "blessed",
 			revoke: "pattern revoked",
 		}[fact.choice] ?? fact.choice;
+	const ruling = pattern
+		? {
+				order:
+					1 +
+					q.entries.reduce((max, f) => Math.max(max, f.ruling?.order ?? 0), 0),
+				evidence: text,
+			}
+		: null;
 	const state: Queue = {
 		...q,
 		entries: q.entries.map((entry) => {
@@ -577,6 +588,7 @@ export function onFact(
 				return {
 					...entry,
 					...next,
+					ruling: entry === first ? ruling : null,
 					triageDirection:
 						annotations &&
 						entry.intake.work !== null &&
@@ -587,17 +599,6 @@ export function onFact(
 			}
 			return entry;
 		}),
-		patterns: pattern
-			? [
-					...q.patterns.filter((p) => p.name !== pattern),
-					{
-						name: pattern,
-						finding: first.id,
-						evidence: text,
-						status: fact.choice === "bless" ? "blessed" : "revoked",
-					},
-				]
-			: q.patterns,
 	};
 	if (revising)
 		return {
@@ -633,6 +634,28 @@ export function onFact(
 			),
 		);
 	return { state, send: [...send, ...releases(related, annotations)] };
+}
+
+export function patternRulings(q: Queue) {
+	const ordered = q.entries
+		.filter((f) => f.ruling)
+		.sort((a, b) => b.ruling!.order - a.ruling!.order);
+	const seen = new Set<string>();
+	return ordered
+		.flatMap((f) => {
+			const name = f.intake.pattern!;
+			if (seen.has(name)) return [];
+			seen.add(name);
+			return [
+				{
+					name,
+					finding: f.id,
+					evidence: f.ruling!.evidence,
+					status: f.disposition === "blessed" ? "blessed" : "revoked",
+				},
+			];
+		})
+		.reverse();
 }
 
 function actions(classification: Investigation["classification"]) {
@@ -672,7 +695,7 @@ function triageBasis(
 				: choices,
 		findings: [
 			first.intake.pattern &&
-				q.patterns.find(
+				patternRulings(q).find(
 					(p) => p.name === first.intake.pattern && p.status === "blessed",
 				) &&
 				`This pattern is blessed until you revoke it.`,
@@ -755,7 +778,7 @@ function investigationText(q: Queue, f: Finding) {
 				)
 				.join("\n") || "None.",
 		patterns:
-			q.patterns
+			patternRulings(q)
 				.map((p) => `- ${p.name} (${p.status}, finding #${p.finding})`)
 				.join("\n") || "None.",
 	});
