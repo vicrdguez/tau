@@ -30,7 +30,7 @@ type Seat = AgentChange & {
 	tools: readonly ToolRegistration[];
 	instructions: string;
 };
-export type DispatchOwner = Pick<
+type DispatchOwner = Pick<
 	ToolExecutionApi,
 	"taskId" | "conversationId" | "commit" | "conversation" | "now"
 >;

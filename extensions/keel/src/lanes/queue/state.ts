@@ -11,9 +11,9 @@ export const classes = [
 	"unapproved_pattern",
 	"no_action",
 ] as const;
-export type Classification = (typeof classes)[number];
-export const workChoices = ["build", "defer", "drop"] as const;
-export const patternChoices = ["bless", "revoke", "defer"] as const;
+type Classification = (typeof classes)[number];
+const workChoices = ["build", "defer", "drop"] as const;
+const patternChoices = ["bless", "revoke", "defer"] as const;
 export type Investigation = {
 	classification: Classification;
 	nodes: string[];
@@ -28,7 +28,7 @@ export type Investigated = Investigation & {
 	kind: "investigated";
 	finding: number;
 };
-export type PlanItem = {
+type PlanItem = {
 	id: string;
 	goal: string;
 	stage: string;

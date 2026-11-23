@@ -5,7 +5,7 @@ import type { AgentKey, Token, WorkId } from "./ids.ts";
 import { defineState } from "./state.ts";
 
 export type Address = { lane: string; work: WorkId | null };
-export type AskSlot = Address & {
+type AskSlot = Address & {
 	local: string;
 	decision: DecisionId;
 	signature: string;
@@ -19,7 +19,7 @@ export type AgentSlot = {
 	status: "active" | "paused" | "retired";
 	open: { token: Token; tools: string[]; unsolicited: boolean }[];
 };
-export type EffectSlot = {
+type EffectSlot = {
 	task: TaskId;
 	interrupt: ConversationId | null;
 	status: "planned" | "running" | "stopping" | "cancelled" | "done";

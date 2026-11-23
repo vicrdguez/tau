@@ -10,7 +10,7 @@ import type { Approval, Ruling } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
 
 export type Block = { thread: string; ground: string; evidence: string };
-export type Scope = "item" | "full" | "landing";
+type Scope = "item" | "full" | "landing";
 export type Review = {
 	item: string;
 	scope: Scope;
@@ -41,7 +41,7 @@ export type Review = {
 	changedPolicyFiles: string[];
 	playbook: string | null;
 };
-export type Verdict = {
+type Verdict = {
 	item: string;
 	scope: Scope;
 	sha: Sha;

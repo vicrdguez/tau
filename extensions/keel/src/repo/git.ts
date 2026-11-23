@@ -88,7 +88,7 @@ export const nodeExec: Exec = (argv, cwd, { env, timeoutMs }) =>
 export function hasCode(error: unknown, code: string) {
 	return error instanceof Error && "code" in error && error.code === code;
 }
-export function environment(): NodeJS.ProcessEnv {
+function environment(): NodeJS.ProcessEnv {
 	return {
 		...Object.fromEntries(
 			Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),

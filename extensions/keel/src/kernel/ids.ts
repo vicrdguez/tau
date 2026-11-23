@@ -1,7 +1,7 @@
 import type { ConversationId } from "tau/durable";
 
 declare const brand: unique symbol;
-export type Brand<T, B extends string> = T & { readonly [brand]: B };
+type Brand<T, B extends string> = T & { readonly [brand]: B };
 export type WorkId = Brand<ConversationId, "WorkId">;
 export type AgentKey = Brand<string, "AgentKey">;
 export type EffectKey = Brand<string, "EffectKey">;

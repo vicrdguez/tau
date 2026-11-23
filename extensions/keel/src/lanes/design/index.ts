@@ -1269,7 +1269,9 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: { ...next, phase: "closed", cancelRequested: false },
-							notes: [{ agent: null, text: declineText(rounds.length, answer) }],
+							notes: [
+								{ agent: null, text: declineText(rounds.length, answer) },
+							],
 						};
 					case "arena":
 					case "arena_fresh":

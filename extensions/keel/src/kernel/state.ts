@@ -1,6 +1,6 @@
 import { defineDoc, type JsonObject } from "tau/durable";
 
-export type StateScope = "session" | "conversation" | "task";
+type StateScope = "session" | "conversation" | "task";
 type Migration<S> = (value: unknown, fromVersion: number) => S;
 type Spec<S> = {
 	readonly kind: `keel.${string}`;

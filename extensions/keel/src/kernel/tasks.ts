@@ -35,17 +35,17 @@ import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
 import { ledger, project } from "./storage.ts";
 
-export type EffectInput = Address & {
+type EffectInput = Address & {
 	key: EffectKey;
 	spec: JsonObject;
 	root: string;
 	delayMs?: number;
 };
-export type StopInput = Address & {
+type StopInput = Address & {
 	key: AgentKey;
 	conversation: ConversationId;
 };
-export type DeliverInput = StopInput & {
+type DeliverInput = StopInput & {
 	token: Token;
 	text: string;
 	data?: JsonObject;

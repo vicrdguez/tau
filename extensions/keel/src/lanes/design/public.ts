@@ -32,7 +32,7 @@ export function repliesCover(count: number, replies: Reply[]) {
 	);
 }
 
-export type RiderOrigin = "evidence" | "incidental" | "seeded";
+type RiderOrigin = "evidence" | "incidental" | "seeded";
 export type Mandate = {
 	encodeRequired: boolean;
 	approvalNotes: string[];

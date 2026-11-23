@@ -376,7 +376,7 @@ async function inspectLinked(
 	return { head, admin, wt, detached: "detached" in entry };
 }
 
-export async function ensureWorktree(
+async function ensureWorktree(
 	g: Git,
 	repo: RepoInfo,
 	target: Worker | Checkout,

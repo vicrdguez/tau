@@ -124,7 +124,7 @@ export function releaseQueueHold(
 		: [];
 }
 
-export const record = (i: Item) =>
+const record = (i: Item) =>
 	i.verified || i.stage === "cleaning" || i.stage === "merged";
 
 function replacementPlan(

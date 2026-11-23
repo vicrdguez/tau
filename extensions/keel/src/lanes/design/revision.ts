@@ -62,7 +62,7 @@ export const active = (r: Revision) =>
 	r.phase !== "applied" && r.phase !== "declined";
 const owed = (r: RevisionRound | undefined) =>
 	r?.answer?.choice === "rework" ? r.answer.annotations : [];
-export const revisionToken = (seq: number) => token("revision", seq);
+const revisionToken = (seq: number) => token("revision", seq);
 
 export function propose(
 	base: Mandate,
