@@ -291,7 +291,7 @@ test("hand-over rejection files each nonblank annotation as an ordinary owner fi
 		annotations: [
 			{ n: 1, text: "Check the lower bound." },
 			{ n: 2, text: " " },
-			{ n: 3, text: "Check the upper bound." },
+			{ n: 3, text: "Check the lower bound." },
 		],
 	});
 	const filings = result.send!.filter((m) => m.lane === "queue");
@@ -304,12 +304,13 @@ test("hand-over rejection files each nonblank annotation as an ordinary owner fi
 		]),
 		[
 			["intake", "owner", "prepared", "Check the lower bound."],
-			["intake", "owner", "prepared", "Check the upper bound."],
+			["intake", "owner", "prepared", "Check the lower bound."],
 		],
 	);
 	assert.deepEqual(open!.choices, ["accept", "reject"]);
 	assert.match(open!.basis, /Accept the result on trunk, or reject it/);
 	assert.match(open!.basis, /filed as a finding/);
+	assert.notEqual(filings[0]?.event.report, filings[1]?.event.report);
 	for (const { event } of filings) {
 		assert.equal(event.blocking, false);
 		assert.match(String(event.report), /Balance every ledger/);
