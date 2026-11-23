@@ -114,7 +114,9 @@ test("Ground requires an audit and unique observations before opening the design
 		{ ...audit, gaps: audit.contradictions },
 	])
 		assert.ok("reject" in x.attempt({ ...start, audit: invalid }));
-	x.send(start);
+	assert.deepEqual(x.send(start).measures, [
+		{ name: "keel.work.started", value: 1, attributes: { route: "precedent" } },
+	]);
 	assert.equal(x.turn()?.situation, "shape");
 	assert.deepEqual(x.asks(), []);
 	for (const value of [
@@ -201,6 +203,13 @@ test("approving binds riders proposed to bind, delegates open riders and preserv
 			n: 1,
 			text: "Use exact counts.",
 			range: { start: anchor, end: anchor + rule.probe.length },
+		},
+	]);
+	assert.deepEqual(approved.measures, [
+		{
+			name: "keel.mandate.rounds",
+			value: 1,
+			attributes: { outcome: "approve" },
 		},
 	]);
 	assert.equal(approved.send?.length, 1);
@@ -405,10 +414,26 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 });
 test("decline records every still-owed annotation, not already answered notes, and withdraws all work", () => {
 	const x = review();
-	x.answer("mandate/1", "rework", [note(1, "Already addressed.")]);
+	assert.deepEqual(
+		x.answer("mandate/1", "rework", [note(1, "Already addressed.")]).measures ??
+			[],
+		[],
+	);
 	x.publish(draft, [reply(1)]);
 	const annotations = [note(1, "Too much surface."), note(2, "No caller.")];
 	const r = x.answer("mandate/2", "decline", annotations);
+	assert.deepEqual(r.measures, [
+		{
+			name: "keel.mandate.rounds",
+			value: 2,
+			attributes: { outcome: "decline" },
+		},
+		{
+			name: "keel.work.duration",
+			value: 0,
+			attributes: { outcome: "declined" },
+		},
+	]);
 	assert.equal(r.send?.length ?? 0, 0);
 	assert.equal(x.state().phase, "closed");
 	assert.deepEqual(x.asks(), []);

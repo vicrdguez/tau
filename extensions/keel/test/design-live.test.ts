@@ -305,9 +305,17 @@ test("revision review shows the delta; approval sends it but only matching activ
 	assert.ok(!ask!.basis.includes(untouched.rule));
 	assert.deepEqual(x.mandate(), old);
 	const at = ask!.basis.indexOf(correction.probe);
-	const proposed = x.answer(ask!.subject, "approve", [
+	const approved = x.answer(ask!.subject, "approve", [
 		{ ...note, range: { start: at, end: at + correction.probe.length } },
-	]).send?.[0];
+	]);
+	assert.deepEqual(approved.measures, [
+		{
+			name: "keel.revision.rounds",
+			value: 1,
+			attributes: { outcome: "approve" },
+		},
+	]);
+	const proposed = approved.send?.[0];
 	const next = {
 		...old,
 		approvalNotes: [`${note.text}\n> ${correction.probe}`],
@@ -402,7 +410,7 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	const x = pending();
 	x.send(publish);
 	const first = x.asks()[0]!.subject;
-	x.answer(first, "rework", [note]);
+	assert.deepEqual(x.answer(first, "rework", [note]).measures ?? [], []);
 	assert.deepEqual(x.asks(), []);
 	assert.ok(x.input().includes(`1. ${note.text}`));
 	assert.ok("reject" in x.attempt(publish));
@@ -453,6 +461,13 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	assert.ok(previous?.includes(correction.probe));
 	assert.deepEqual(x.answer(first, "approve").send ?? [], []);
 	assert.equal(x.asks()[0]?.subject, second.subject);
+	assert.deepEqual(x.answer(second.subject, "decline").measures, [
+		{
+			name: "keel.revision.rounds",
+			value: 2,
+			attributes: { outcome: "decline" },
+		},
+	]);
 });
 
 test("a cause joining review withdraws the unanswered text; the new review attributes both reports without inventing history", () => {

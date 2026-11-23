@@ -15,6 +15,7 @@ import {
 	defineLaneTool,
 	type Expectation,
 	type Lane,
+	type Measure,
 	prose,
 	type World,
 } from "../../kernel/lane.ts";
@@ -195,7 +196,7 @@ type DesignerPhase =
 	| "drafting"
 	| "answering"
 	| "experiment_comparing";
-type State = {
+type DesignState = {
 	phase:
 		| DesignerPhase
 		| "entry"
@@ -231,6 +232,7 @@ type State = {
 	heldTurn: DesignerPhase | null;
 	seq: number;
 };
+type State = DesignState | (DesignState & { startedAt: number });
 const doc = defineState<State>({
 	kind: "keel.design",
 	scope: "conversation",
@@ -352,6 +354,25 @@ function labels(value: unknown): value is string[] {
 		new Set(value).size === value.length &&
 		value.every((n) => typeof n === "string" && !!n.trim())
 	);
+}
+
+function duration(
+	s: State,
+	now: number,
+	outcome: Extract<
+		Measure,
+		{ name: "keel.work.duration" }
+	>["attributes"]["outcome"],
+): Measure[] {
+	return "startedAt" in s
+		? [
+				{
+					name: "keel.work.duration",
+					value: now - s.startedAt,
+					attributes: { outcome },
+				},
+			]
+		: [];
 }
 
 function finishCancellation(s: State, w: World): Accepted<State> {
@@ -988,6 +1009,7 @@ export const design: Lane<State> = {
 						(s.seed.reference && reference !== s.seed.reference))
 				)
 					return { reject: "Keep the queue seed's route and reference." };
+				let accepted: Accepted<State>;
 				switch (e.route) {
 					case "follow": {
 						const proposed = e.mandate as Draft | undefined;
@@ -1005,7 +1027,7 @@ export const design: Lane<State> = {
 							nodes: proposed.nodes,
 							checks: proposed.checks,
 						};
-						return {
+						accepted = {
 							state: {
 								...s,
 								phase: "bound",
@@ -1015,6 +1037,7 @@ export const design: Lane<State> = {
 							},
 							send: [...started, toBuild(w.work!, { kind: "bound", mandate })],
 						};
+						break;
 					}
 					case "precedent": {
 						const audit = e.audit as Audit | undefined;
@@ -1023,7 +1046,7 @@ export const design: Lane<State> = {
 								reject:
 									"Report what exists and label each Ground gap or contradiction once.",
 							};
-						return {
+						accepted = {
 							state: {
 								...s,
 								phase: "framing",
@@ -1033,6 +1056,7 @@ export const design: Lane<State> = {
 							},
 							send: started,
 						};
+						break;
 					}
 					case "ambiguous": {
 						const readings = e.readings as string[] | undefined;
@@ -1047,7 +1071,7 @@ export const design: Lane<State> = {
 							return {
 								reject: "Give two distinct readings with different outcomes.",
 							};
-						return {
+						accepted = {
 							state: {
 								...s,
 								phase: "ambiguous",
@@ -1057,10 +1081,23 @@ export const design: Lane<State> = {
 							},
 							send: started,
 						};
+						break;
 					}
 					default:
 						return { reject: "Unknown Ground route." };
 				}
+				if ("startedAt" in s) return accepted;
+				return {
+					...accepted,
+					state: { ...accepted.state, startedAt: w.now },
+					measures: [
+						{
+							name: "keel.work.started",
+							value: 1,
+							attributes: { route: e.route },
+						},
+					],
+				};
 			}
 			case "landed":
 				return s.phase === "bound"
@@ -1094,6 +1131,7 @@ export const design: Lane<State> = {
 						},
 					},
 					notes: cancelledAnnotations(s, w),
+					measures: duration(s, w.now, "cancelled"),
 				};
 			}
 			case "closed":
@@ -1104,6 +1142,10 @@ export const design: Lane<State> = {
 						direction: "",
 						cancelRequested: false,
 					},
+					...(s.phase === "landed" &&
+						(e.outcome === "accepted" || e.outcome === "rejected") && {
+							measures: duration(s, w.now, e.outcome),
+						}),
 				};
 			default:
 				return { reject: "Unknown Design event: " + e.kind };
@@ -1137,8 +1179,21 @@ export const design: Lane<State> = {
 				e.key !== arenaEffect(currentArena(s), s.arenas.length).key
 			)
 				return { state: s };
-			const { arena, phase } = settleArena(currentArena(s), e);
-			return { state: setArena({ ...s, phase, seq: s.seq + 1 }, arena) };
+			const current = currentArena(s);
+			const { arena, phase } = settleArena(current, e);
+			const run = arena.runs[current.runs.length - 1]!;
+			return {
+				state: setArena({ ...s, phase, seq: s.seq + 1 }, arena),
+				measures: run.outcome!.results.map((r, i) => ({
+					name: "keel.arena.seat",
+					value: 1,
+					attributes: {
+						stage: run.stage,
+						model: run.jobs[i]!.model,
+						outcome: r.error === null ? "ok" : "error",
+					},
+				})),
+			};
 		}
 		if (e.kind === "answered") {
 			if (s.cancelRequested && e.subject === subject("cancel")) {
@@ -1188,9 +1243,18 @@ export const design: Lane<State> = {
 					return { state: s };
 				const answer = reviewAnswer(e, ask.basis);
 				const round = { ...revision.rounds.at(-1)!, answer };
-				const state = amend(s, index, {
-					rounds: [...revision.rounds.slice(0, -1), round],
-				});
+				const rounds = [...revision.rounds.slice(0, -1), round];
+				const state = amend(s, index, { rounds });
+				const measures: Measure[] =
+					e.choice === "approve" || e.choice === "decline"
+						? [
+								{
+									name: "keel.revision.rounds",
+									value: rounds.filter((r) => r.answer).length,
+									attributes: { outcome: e.choice },
+								},
+							]
+						: [];
 				const release = (disposition: string) => [
 					...revision.causes.map((cause) =>
 						toBuild(w.work!, { kind: "queue_release", cause }),
@@ -1207,6 +1271,7 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: amend(state, index, { phase: "declined" }),
+							measures,
 							send: release("revision declined"),
 							notes: [{ agent: null, text: declinedRevision(answer) }],
 						};
@@ -1216,10 +1281,12 @@ export const design: Lane<State> = {
 								state: amend({ ...state, seq: s.seq + 1 }, index, {
 									phase: "applied",
 								}),
+								measures,
 								send: release("revision applied (no Mandate change)"),
 							};
 						return {
 							state: amend(state, index, { phase: "approved" }),
+							measures,
 							send: [
 								toBuild(w.work!, {
 									kind: "propose_revision",
@@ -1246,6 +1313,7 @@ export const design: Lane<State> = {
 					return {
 						state: { ...s, phase: "closed", cancelRequested: false },
 						notes: cancelledAnnotations(s, w),
+						measures: duration(s, w.now, "declined"),
 					};
 				const { arena, phase } = retryArena(
 					current,
@@ -1263,17 +1331,29 @@ export const design: Lane<State> = {
 				const round = { ...s.rounds.at(-1)!, answer };
 				const rounds = s.rounds.with(-1, round);
 				const next = { ...s, rounds, seq: s.seq + 1 };
+				const measures: Measure[] =
+					e.choice === "approve" || e.choice === "decline"
+						? [
+								{
+									name: "keel.mandate.rounds",
+									value: rounds.filter((r) => r.answer).length,
+									attributes: { outcome: e.choice },
+								},
+							]
+						: [];
 				switch (e.choice) {
 					case "approve": {
 						const mandate = binding(s.audit!, round.draft, answer);
 						return {
 							state: { ...next, phase: "bound", mandate },
+							measures,
 							send: [toBuild(w.work!, { kind: "bound", mandate })],
 						};
 					}
 					case "decline":
 						return {
 							state: { ...next, phase: "closed", cancelRequested: false },
+							measures: [...measures, ...duration(s, w.now, "declined")],
 							notes: [
 								{ agent: null, text: declineText(rounds.length, answer) },
 							],
@@ -1300,6 +1380,7 @@ export const design: Lane<State> = {
 			if (e.choice === "decline")
 				return {
 					state: { ...s, phase: "closed", cancelRequested: false },
+					measures: duration(s, w.now, "declined"),
 				};
 			if (e.choice !== "first" && e.choice !== "second") return { state: s };
 			const direction = [
@@ -1336,6 +1417,13 @@ export const design: Lane<State> = {
 			});
 			const state = { ...s, direction: "", hold: { cause, basis, evidence } };
 			return {
+				measures: [
+					{
+						name: "keel.hold",
+						value: 1,
+						attributes: { lane: "design", cause: e.cause },
+					},
+				],
 				state: revising
 					? amend(state, index, { phase: "held" })
 					: {

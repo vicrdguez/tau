@@ -12,6 +12,7 @@ import {
 	type KernelEvent,
 	type Lane,
 	type LaneEvent,
+	type Measure,
 	type Message,
 	type Note,
 	type Reduction,
@@ -90,7 +91,8 @@ function transition(prev: State, world: World) {
 	// A reduction owns its draft. Refusing an inconsistent verdict leaves the prior state intact.
 	const s = structuredClone(prev),
 		send: Message[] = [],
-		notes: Note[] = [];
+		notes: Note[] = [],
+		measures: Measure[] = [];
 	const work = world.work!;
 	const queue = world.view("queue") as {
 		findingsFor?(id: typeof work): string;
@@ -154,6 +156,7 @@ function transition(prev: State, world: World) {
 	}
 	function hold(
 		item: string,
+		reason: Extract<Measure, { name: "keel.hold" }>["attributes"]["cause"],
 		evidence: string,
 		resume: string,
 		job: string | null = null,
@@ -166,6 +169,11 @@ function transition(prev: State, world: World) {
 			resume,
 		});
 		s.holds.push({ cause, item, evidence, job, basis });
+		measures.push({
+			name: "keel.hold",
+			value: 1,
+			attributes: { lane: "verify", cause: reason },
+		});
 		recordHold({
 			kind: "holding_report",
 			lane: "verify",
@@ -260,6 +268,11 @@ function transition(prev: State, world: World) {
 		enqueue("full", { kind: "land", ...s.plan!, target: s.target! });
 	}
 	function landed(sha: Sha, unchanged: boolean) {
+		measures.push({
+			name: "keel.landing",
+			value: 1,
+			attributes: { result: unchanged ? "unchanged" : "landed" },
+		});
 		release();
 		const design = world.view("design") as {
 			ownerReviewed: boolean;
@@ -391,6 +404,7 @@ function transition(prev: State, world: World) {
 						c.direction = "";
 						hold(
 							c.item,
+							e.cause,
 							`${e.agent}: ${e.cause}. ${e.lastWords}`,
 							resumption.stalled({ agent: e.agent }).trim(),
 						);
@@ -450,7 +464,7 @@ function transition(prev: State, world: World) {
 								[],
 							);
 					}
-					deliver("design", { kind: "closed" });
+					deliver("design", { kind: "closed", outcome: s.handover.status });
 					send.push(toBuild(work, { kind: "closed" }));
 					break;
 				}
@@ -467,6 +481,18 @@ function transition(prev: State, world: World) {
 		const op = j.op,
 			c = find(j.item)!;
 		if (op.kind === "land") s.landingUnconfirmed = !r;
+		if (
+			(op.kind === "merge_item" || op.kind === "take_trunk") &&
+			(r?.kind === "conflict" ||
+				r?.kind === "checks_failed" ||
+				(op.kind === "merge_item" && r?.kind === "merged") ||
+				(op.kind === "take_trunk" && r?.kind === "combined"))
+		)
+			measures.push({
+				name: "keel.integration",
+				value: 1,
+				attributes: { result: r.kind },
+			});
 		if (s.cancelled) {
 			discard(j);
 			if (op.kind === "land") {
@@ -498,6 +524,7 @@ function transition(prev: State, world: World) {
 		) {
 			hold(
 				j.item,
+				r ? r.kind : "effect_failed",
 				`${op.kind}: ${JSON.stringify(op)}\n${JSON.stringify(r ?? e)}`,
 				resumption.pinned({ operation: op.kind }).trim(),
 				j.key,
@@ -566,6 +593,7 @@ function transition(prev: State, world: World) {
 						s.jobs.push(j);
 						hold(
 							"full",
+							"moved",
 							"The pinned trunk branch is absent.",
 							resumption.trunk,
 							j.key,
@@ -783,6 +811,11 @@ function transition(prev: State, world: World) {
 					diagnose,
 					notes: e.notes,
 				});
+				measures.push({
+					name: "keel.verdict",
+					value: 1,
+					attributes: { scope: c.scope, outcome: e.outcome },
+				});
 				for (const text of e.notes)
 					file(
 						"verifier",
@@ -807,8 +840,16 @@ function transition(prev: State, world: World) {
 				if (e.outcome === "pass") {
 					retire(c);
 					c.phase = c.scope === "item" ? "ready" : "passed";
-					if (c.scope === "item")
+					if (c.scope === "item") {
+						measures.push({
+							name: "keel.item.reviews",
+							value: s.verdicts.filter(
+								(v) => v.scope === "item" && v.item === c.item,
+							).length,
+							attributes: {},
+						});
 						send.push(toBuild(work, { kind: "item_verified", item: c.item }));
+					}
 					break;
 				}
 				for (const id of ids) {
@@ -849,7 +890,7 @@ function transition(prev: State, world: World) {
 				c.direction = "";
 				const diagnosis = `Two claimed fixes failed on ${v.diagnose.join(", ")}. ${JSON.stringify(v.blocks)}\nPremise: ${e.premise}\nTest: ${e.test}\nResult: ${e.result}`;
 				s.diagnoses.push(`${c.item} @ ${c.sha}: ${diagnosis}`);
-				hold(c.item, diagnosis, resumption.diagnosis);
+				hold(c.item, "nonconvergent", diagnosis, resumption.diagnosis);
 				break;
 			}
 			case "slot_granted":
@@ -887,7 +928,7 @@ function transition(prev: State, world: World) {
 				deliver("trunk", { kind: "take_slot", work });
 			} else if (full.scope === "landing" && s.slot === "held") cas();
 		}
-		return { state: s, send, notes };
+		return { state: s, send, notes, ...(measures.length && { measures }) };
 	}
 	return { reduce, onFact };
 }

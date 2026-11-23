@@ -13,6 +13,7 @@ import type { Measure } from "./metrics.ts";
 import type { StateDef } from "./state.ts";
 
 export { prose } from "tau";
+export type { Measure } from "./metrics.ts";
 export { type Args, defineLaneTool } from "./tool.ts";
 
 /** Tools and messages use lane-defined kinds. These facts come from the kernel. */

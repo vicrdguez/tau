@@ -136,7 +136,7 @@ function pending(s: State, w = world) {
 		jobs: spec.jobs as { seat: string; question: string; model: string }[],
 	};
 }
-function complete(s: State, answers: Record<string, string | null>, w = world) {
+function settle(s: State, answers: Record<string, string | null>, w = world) {
 	const planned = effect(s, w);
 	return step(
 		s,
@@ -146,8 +146,9 @@ function complete(s: State, answers: Record<string, string | null>, w = world) {
 			result: dispatchResult(planned, (seat) => answers[seat] ?? null),
 		},
 		w,
-	).state;
+	);
 }
+const complete = (...args: Parameters<typeof settle>) => settle(...args).state;
 
 test("Ground opens framing, not review or direct Mandate publication; candidate plans pin one shared question and the resolved models", () => {
 	const s = grounded();
@@ -281,7 +282,30 @@ test("a timed-out child or a candidate that omits its unasked decisions cannot s
 	]) {
 		const s = candidateTurn();
 		const { key, jobs } = pending(s);
-		const failed = complete(s, { ...candidates, [seats[1]!]: answer });
+		const { state: failed, measures } = settle(s, {
+			...candidates,
+			[seats[1]!]: answer,
+		});
+		assert.deepEqual(measures, [
+			{
+				name: "keel.arena.seat",
+				value: 1,
+				attributes: {
+					stage: "candidates",
+					model: "alpha/first",
+					outcome: "ok",
+				},
+			},
+			{
+				name: "keel.arena.seat",
+				value: 1,
+				attributes: {
+					stage: "candidates",
+					model: "beta/second",
+					outcome: "error",
+				},
+			},
+		]);
 		assert.deepEqual(design.effects(failed, world), []);
 		assert.match(
 			ask(failed).basis,
@@ -291,11 +315,13 @@ test("a timed-out child or a candidate that omits its unasked decisions cannot s
 		const retried = owner(failed, "retry").state;
 		assert.notEqual(pending(retried).key, key);
 		assert.deepEqual(pending(retried).jobs, jobs.slice(1));
-		assert.deepEqual(
-			step(retried, { kind: "effect_failed", key, error: "Late failure" })
-				.state,
-			retried,
-		);
+		const late = step(retried, {
+			kind: "effect_failed",
+			key,
+			error: "Late failure",
+		});
+		assert.deepEqual(late.state, retried);
+		assert.deepEqual(late.measures ?? [], []);
 		assert.equal(
 			pending(complete(retried, candidates)).jobs[0]?.seat,
 			"arena_judge",
@@ -342,7 +368,15 @@ test("retry checks the failed seat's current provider against the actual success
 		pending(revised).jobs.map(({ seat, model }) => [seat, model]),
 		[[seats[1], "gamma/fixed"]],
 	);
-	const judge = pending(complete(revised, candidates)).jobs[0]!;
+	const receipt = settle(revised, candidates);
+	assert.deepEqual(receipt.measures, [
+		{
+			name: "keel.arena.seat",
+			value: 1,
+			attributes: { stage: "candidates", model: "gamma/fixed", outcome: "ok" },
+		},
+	]);
+	const judge = pending(receipt.state).jobs[0]!;
 	assert.ok(judge.question.includes(candidate(seats[0]!)));
 });
 
@@ -358,7 +392,16 @@ test("judge and challenger retries use current models without invalidating seats
 			},
 			{ ...world, options: { ...world.options, ...overrides } },
 		).state;
-	const failedJudge = complete(judgeTurn(), { arena_judge: null });
+	const { state: failedJudge, measures } = settle(judgeTurn(), {
+		arena_judge: null,
+	});
+	assert.deepEqual(measures, [
+		{
+			name: "keel.arena.seat",
+			value: 1,
+			attributes: { stage: "judge", model: "judge/review", outcome: "error" },
+		},
+	]);
 	const badJudge = retry(failedJudge, { arena_judge: "design/judge" });
 	assert.match(
 		ask(badJudge).basis,
@@ -381,7 +424,19 @@ test("judge and challenger retries use current models without invalidating seats
 		pending(retriedChallenge).jobs.map(({ seat, model }) => [seat, model]),
 		[["arena_challenger", "alpha/challenger"]],
 	);
-	assert.equal(answeringTurn(retriedChallenge).phase, "answering");
+	const settled = settle(retriedChallenge, { arena_challenger: objections });
+	assert.deepEqual(settled.measures, [
+		{
+			name: "keel.arena.seat",
+			value: 1,
+			attributes: {
+				stage: "challenger",
+				model: "alpha/challenger",
+				outcome: "ok",
+			},
+		},
+	]);
+	assert.equal(settled.state.phase, "answering");
 });
 
 test("candidate headings are case-insensitive and nested defaults reach the judge; it may use decimal scores in a fenced report", () => {

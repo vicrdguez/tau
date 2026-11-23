@@ -36,7 +36,10 @@ const answer = (
 
 test("following precedent binds once without asking the owner", () => {
 	const x = run();
-	const { send } = x.send(follow);
+	const { send, measures } = x.send(follow);
+	assert.deepEqual(measures, [
+		{ name: "keel.work.started", value: 1, attributes: { route: "follow" } },
+	]);
 	assert.deepEqual(send, [
 		{
 			lane: "build",
@@ -92,7 +95,15 @@ test("Ground presents two readings; the owner can send one back with direction o
 		assert.ok(
 			"reject" in x.attempt({ ...ambiguous, readings: ["one", "one"] }),
 		);
-		assert.deepEqual(x.send(ambiguous).send ?? [], []);
+		const opened = x.send(ambiguous);
+		assert.deepEqual(opened.send ?? [], []);
+		assert.deepEqual(opened.measures, [
+			{
+				name: "keel.work.started",
+				value: 1,
+				attributes: { route: "ambiguous" },
+			},
+		]);
 		const [ask] = x.asks();
 		assert.ok(ask);
 		for (const reading of ambiguous.readings)
@@ -100,9 +111,16 @@ test("Ground presents two readings; the owner can send one back with direction o
 		const event = answer(ask.subject, choice, [
 			{ n: 1, text: "Include auctions." },
 		]);
-		const { send } = x.send(event);
+		const { send, measures } = x.send(event);
 		assert.deepEqual(x.asks(), []);
 		if (choice === "decline") {
+			assert.deepEqual(measures, [
+				{
+					name: "keel.work.duration",
+					value: 0,
+					attributes: { outcome: "declined" },
+				},
+			]);
 			assert.deepEqual(send ?? [], []);
 			assert.equal(x.agents()[0]?.expect, null);
 		} else {
@@ -112,7 +130,10 @@ test("Ground presents two readings; the owner can send one back with direction o
 			const directed = x.state();
 			x.send(event);
 			assert.deepEqual(x.state(), directed);
-			assert.equal(x.send(follow).send?.[0]?.event.kind, "bound");
+			assert.deepEqual(measures ?? [], []);
+			const bound = x.send(follow);
+			assert.equal(bound.send?.[0]?.event.kind, "bound");
+			assert.deepEqual(bound.measures ?? [], []);
 		}
 	}
 });
@@ -129,10 +150,16 @@ test("a stopped Ground turn files a hold; resume carries direction and ignores t
 		token,
 		lastWords: "Still reading.",
 	};
-	x.send(stall);
+	assert.deepEqual(x.send(stall).measures, [
+		{
+			name: "keel.hold",
+			value: 1,
+			attributes: { lane: "design", cause: "stopped" },
+		},
+	]);
 	assert.match(x.asks()[0]!.basis, /design reports:\nstopped: Still reading/);
 	assert.equal(x.agents()[0]?.expect, null);
-	x.send(stall);
+	assert.deepEqual(x.send(stall).measures ?? [], []);
 	assert.equal(x.asks().length, 1);
 	x.send(holdingChoice(x.asks()[0]!, "resume", "Check venue A."));
 	const next = x.agents()[0]!.expect!;
@@ -172,6 +199,32 @@ test("the desk requests one confirmation, keeps working on continue, and cancels
 		assert.deepEqual(terminal.asks(), []);
 		assert.ok("reject" in terminal.attempt(request));
 	}
+});
+
+test("cancellation measures time since the first Ground and old work closes without a sample", () => {
+	const clock = { ...laneWorld(), now: 0 };
+	const x = laneDriver(design, clock);
+	x.send(ambiguous);
+	clock.now = 7;
+	x.send(answer(x.asks()[0]!.subject, "second"));
+	x.send(follow);
+	clock.now = 20;
+	assert.deepEqual(x.send({ kind: "cancel" }).measures, [
+		{
+			name: "keel.work.duration",
+			value: 20,
+			attributes: { outcome: "cancelled" },
+		},
+	]);
+	assert.deepEqual(x.send({ kind: "cancel" }).measures ?? [], []);
+	const old = design.reduce(
+		{ ...design.state.initial(), phase: "landed" },
+		{ kind: "closed", outcome: "accepted" },
+		clock,
+	);
+	assert.ok(!("reject" in old));
+	assert.equal(old.state.phase, "closed");
+	assert.deepEqual(old.measures ?? [], []);
 });
 
 test("cancellation reports retained changes once, after both lanes have cleaned up", () => {
