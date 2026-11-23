@@ -6,7 +6,7 @@ The extension name must match its folder. The [host reference](host.md#options) 
 
 ## Imports and helpers
 
-Import Tau's extension author API from `tau`, `tau/durable`, `tau/schema`, and `tau/chord`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
+Import Tau's extension author API from `tau`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
 
 ```ts
 function options<T extends JsonObject>(
@@ -110,6 +110,47 @@ await runtime.commit(async tx => {
 	await handle?.submit(tx, { type: "input", content, requestId: causeId });
 }, context);
 ```
+
+## Record metrics
+
+In a tool or task phase, use `context.telemetry.metrics` to record measurements. Use `defineTelemetrySchema` to describe your metrics and spans, and export the schema as `telemetry` so clients can discover it. Each metric and span name starts with the extension name followed by a dot.
+
+```ts
+import {
+	createTypedMetrics,
+	defineTelemetrySchema,
+	NOOP_TELEMETRY_METRICS,
+} from "tau/telemetry";
+
+const schema = defineTelemetrySchema({
+	version: 1,
+	spans: {},
+	metrics: {
+		"example.review.loops": {
+			kind: "counter",
+			description: "Completed review loops.",
+			attributes: {},
+		},
+	},
+});
+export { schema as telemetry };
+```
+
+In the phase, use `createTypedMetrics` to type-check the metric name and attributes. `NOOP_TELEMETRY_METRICS` lets the same code run when recording is unavailable.
+
+```ts
+const metrics = createTypedMetrics(
+	context.telemetry.metrics ?? NOOP_TELEMETRY_METRICS,
+	[schema],
+);
+metrics.counter("example.review.loops").add(1);
+```
+
+Record only finite measurements. Use metric attributes with few distinct values, such as an outcome or choice. Put IDs on spans with `context.telemetry.setAttributes` instead of making a metric series for each ID.
+
+Record after the commit that makes the fact true returns. If a replay finds that the change already landed, skip the sample. This records each sample at most once. A crash between the commit and recording can lose the sample.
+
+To measure the cost of a unit of work, read `UsageDoc` from `tau/durable` for each conversation in that unit. Sum the `cost.total` values in the documents' `models` and `tools` buckets.
 
 ## Write a workflow
 
