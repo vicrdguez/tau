@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { holdingChoice } from "./fixtures/drive.ts";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
 import { explorerDispatch } from "../src/roles/dispatch.ts";
@@ -7,6 +6,7 @@ import {
 	reviewDriver as run,
 	designWorld as world,
 } from "./fixtures/design-review.ts";
+import { holdingChoice } from "./fixtures/drive.ts";
 
 const reference = "Approved line format, ADR 4";
 const seed = {

@@ -20,7 +20,7 @@ for (const move of ["pause", "cancel"] as const) {
 			dispatch: { roles: ["worker"], resolve: () => seat },
 		});
 		t.after(() => x.harness.close(ctx));
-		await x.send("manual");
+		await x.send("agent");
 		const [id] = await x.agents();
 		assert.ok(id);
 		await x.send(move);

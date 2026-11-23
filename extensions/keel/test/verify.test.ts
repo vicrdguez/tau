@@ -6,8 +6,8 @@ import { design } from "../src/lanes/design/index.ts";
 import { verify } from "../src/lanes/verify/index.ts";
 import { principleInputs } from "../src/principles/index.ts";
 import {
-	holdingChoice,
 	drive,
+	holdingChoice,
 	laneDriver,
 	laneWorld,
 } from "./fixtures/drive.ts";

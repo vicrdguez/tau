@@ -4,7 +4,7 @@ import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
 import { replyJson } from "../src/reply-json.ts";
 import { dispatchResult } from "./fixtures/design-review.ts";
-import { holdingChoice, drive, laneWorld } from "./fixtures/drive.ts";
+import { drive, holdingChoice, laneWorld } from "./fixtures/drive.ts";
 
 const world = laneWorld({
 	options: {

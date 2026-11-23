@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { holdingChoice } from "./fixtures/drive.ts";
 import { test } from "node:test";
 import { type Draft, draftError } from "../src/lanes/design/draft.ts";
 import {
@@ -12,6 +11,7 @@ import {
 	reviewDriver,
 	synthesis,
 } from "./fixtures/design-review.ts";
+import { holdingChoice } from "./fixtures/drive.ts";
 
 const audit = {
 	exists: "The importer builds documents.",

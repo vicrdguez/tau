@@ -68,7 +68,8 @@ function setup(
 		const driver = laneDriver(lane, laneWorld({ options: { max_workers } }));
 		const { agents, effects, done } = driver;
 		const send = (event: LaneEvent) => driver.send(event).send ?? [];
-		const coord = () => agents().find((a) => a.role === "coordinator")?.expect;
+		const coord = () =>
+			agents().find((a) => a.role === "coordinator")?.expect ?? undefined;
 		const workers = () => agents().filter((a) => a.role === "worker");
 		const worker = (item: string) =>
 			workers().find((a) => a.key.startsWith(`worker/${item}/`));
