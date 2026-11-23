@@ -8,4 +8,4 @@ Give each rule a distinct label. Pair it with the probe that would show it false
 
 ## Proof
 
-Give each proof a distinct label in `id`, its command as an argument vector, and its positive timeout in milliseconds. Choose commands that can safely run again in a disposable checkout.
+Give each proof a distinct label in `id`, its command as an argument vector, and its positive timeout in milliseconds. Choose commands that can safely run again in a disposable checkout. Keel runs each command exactly as written, in a fresh checkout with nothing installed, so the command must include any setup it needs.
