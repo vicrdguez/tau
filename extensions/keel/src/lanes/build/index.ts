@@ -417,9 +417,7 @@ function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 		}
 		case "agent_stalled": {
 			const agent = agents(s).find(
-				(a) =>
-					a.key === e.agent &&
-					a.expects.some((x) => e.tokens.includes(x.token)),
+				(a) => a.key === e.agent && a.expect?.token === e.token,
 			);
 			if (!agent) return { state };
 			const id =

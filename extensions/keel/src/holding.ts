@@ -38,6 +38,7 @@ export function holdingAsk(
 		title: basis.split("\n", 1)[0] ?? basis,
 		basis,
 		choices: ["resume", "cancel"],
+		works: [work],
 	};
 }
 

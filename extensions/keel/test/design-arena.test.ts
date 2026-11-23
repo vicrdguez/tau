@@ -151,7 +151,7 @@ function complete(s: State, answers: Record<string, string | null>, w = world) {
 
 test("Ground opens framing, not review or direct Mandate publication; candidate plans pin one shared question and the resolved models", () => {
 	const s = grounded();
-	assert.deepEqual(design.agents(s, world)[0]?.expects[0]?.tools, [
+	assert.deepEqual(design.agents(s, world)[0]?.expect?.tools, [
 		"frame_arena",
 		"start_experiment",
 	]);
@@ -270,7 +270,7 @@ function owner(
 	});
 }
 function input(s: State) {
-	return design.agents(s, world)[0]?.expects[0]?.input?.() ?? "";
+	return design.agents(s, world)[0]?.expect?.input?.() ?? "";
 }
 
 test("a timed-out child or a candidate that omits its unasked decisions cannot start judging; retries get a new plan key and old facts do not advance it", () => {
@@ -804,7 +804,7 @@ test("resuming an interrupted challenger response keeps the objections instead o
 	const held = step(s, {
 		kind: "agent_stalled",
 		agent: "designer",
-		tokens: [design.agents(s, world)[0]!.expects[0]!.token],
+		token: design.agents(s, world)[0]!.expect!.token,
 		cause: "stopped",
 		lastWords: "Still checking the evidence.",
 	});

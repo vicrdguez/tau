@@ -290,16 +290,14 @@ export function agents(s: Build): AgentDecl[] {
 			role: "coordinator",
 			cwd: null,
 			paused: held(s, null),
-			expects:
+			expect:
 				c.tool && !held(s, null)
-					? [
-							{
-								token: token(c.tool, c.seq),
-								tools: [c.tool],
-								input: () => coordInput(s),
-							},
-						]
-					: [],
+					? {
+							token: token(c.tool, c.seq),
+							tools: [c.tool],
+							input: () => coordInput(s),
+						}
+					: null,
 		},
 	];
 	for (const i of s.items) {
@@ -310,22 +308,20 @@ export function agents(s: Build): AgentDecl[] {
 			cwd: i.worker!.path,
 			projectPrinciples: i.projectPrinciples,
 			paused: parked(s, i),
-			expects:
+			expect:
 				i.stage === "building" && !parked(s, i)
-					? [
-							{
-								token: token("publish", i.seq),
-								tools: ["publish_build"],
-								paths: i.brief!.fences,
-								situation:
-									i.input === "rework" &&
-									i.threads.some((id) => i.publication?.addresses.includes(id))
-										? "survived_fix"
-										: i.input,
-								input: () => workerInput(s, i),
-							},
-						]
-					: [],
+					? {
+							token: token("publish", i.seq),
+							tools: ["publish_build"],
+							paths: i.brief!.fences,
+							situation:
+								i.input === "rework" &&
+								i.threads.some((id) => i.publication?.addresses.includes(id))
+									? "survived_fix"
+									: i.input,
+							input: () => workerInput(s, i),
+						}
+					: null,
 		});
 	}
 	return out;

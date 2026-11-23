@@ -140,7 +140,7 @@ test("an investigator cannot close a project finding as no action", () => {
 		q.investigation(1, "no_action", { nodes: [], recommendation: "no_action" }),
 	);
 	assert.match("reject" in result ? result.reject : "", /work/);
-	const [turn] = q.agents()[0]!.expects;
+	const turn = q.agents()[0]!.expect;
 	assert.match(turn!.input!(), /project finding[\s\S]*no_action/);
 	q.classify(1, "sets_precedent", { nodes: [] });
 	assert.equal(q.ask().length, 1);
@@ -309,7 +309,7 @@ test("links through another finding replace only their own decision and retain t
 	q.classify(1, "sets_precedent");
 	q.classify(2, "sets_precedent", { cause: "flag semantics" });
 	const [first, unrelated] = q.ask();
-	const next = q.agents()[0]!.expects[0]!.input!();
+	const next = q.agents()[0]!.expect!.input!();
 	assert.match(next, /#1.*triage.*sets_precedent.*rounding point/);
 	assert.match(next, /#2.*triage.*sets_precedent.*flag semantics/);
 	q.classify(3, "sets_precedent", { sameAs: 1, cause: "" });
@@ -421,12 +421,12 @@ test("an identical re-filing after defer is investigated once and can reopen the
 	q.file();
 	q.file();
 	assert.match(
-		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		q.agents()[0]?.expect?.input?.() ?? "",
 		/Investigate finding #2/,
 	);
 	q.classify(2, "determined", { sameAs: 1, cause: "" });
 	assert.notEqual(q.ask()[0]?.subject, first);
-	assert.equal(q.agents()[0]?.expects.length, 0);
+	assert.equal(q.agents()[0]?.expect, null);
 });
 
 test("the investigator can close a non-blocking observation with a reason but not a blocked filer or the owner's finding", () => {
@@ -582,8 +582,8 @@ test("a backlogged investigation opens on the current plan and Mandate, not thos
 	);
 	for (let i = 0; i < 2; i++) assert.deepEqual(q.file(ownerFiling), []);
 	assert.deepEqual(q.ask(), []);
-	assert.equal(q.agents().flatMap((a) => a.expects).length, 1);
-	const original = q.agents()[0]!.expects[0]!.input!();
+	assert.equal(q.agents().filter((a) => a.expect).length, 1);
+	const original = q.agents()[0]!.expect!.input!();
 	for (const part of [
 		"commit-one",
 		filing.text,
@@ -598,7 +598,7 @@ test("a backlogged investigation opens on the current plan and Mandate, not thos
 	q.classify();
 	q.answer("drop");
 	assert.match(q.view().findingsFor(filing.work), /\(dropped\)/);
-	const input = q.agents()[0]!.expects[0]!.input!();
+	const input = q.agents()[0]!.expect!.input!();
 	assert.match(input, /Backlogged note/);
 	assert.match(input, /Revised ledger plan/);
 	assert.match(input, /Round after posting/);
@@ -753,7 +753,7 @@ test("owner and sweep counterexamples can replace a blessing; worker citations f
 		q.file({ work: 5, text: "Use blessed pattern", pattern }),
 		[],
 	);
-	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+	assert.equal(q.agents().filter((a) => a.expect).length, 0);
 	for (const [source, text] of [
 		["owner", "Rounding last leaks a cent"],
 		["sweeper", "Proof agrees"],
@@ -793,7 +793,7 @@ test("owner and sweep counterexamples can replace a blessing; worker citations f
 		q.file({ work: 5, text: "Use the newly blessed pattern", pattern }),
 		[],
 	);
-	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+	assert.equal(q.agents().filter((a) => a.expect).length, 0);
 	assert.deepEqual(
 		q.view().patternRulings.map(({ name, status }) => [name, status]),
 		[[pattern, "blessed"]],
@@ -868,7 +868,7 @@ test("A-4: a pattern ruling leaves the other decision and the uninvestigated fil
 	assert.deepEqual(q.ask(), [second]);
 	assert.match(second.basis, /flush drops a record/);
 	assert.match(
-		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		q.agents()[0]?.expect?.input?.() ?? "",
 		/helper races with statistics/,
 	);
 	assert.equal(q.answer("revoke", second.subject)[0]?.work, "new");
@@ -936,7 +936,7 @@ test("an investigation must answer the head finding and name its evidence, autho
 		assert.ok("reject" in q.attempt(report), JSON.stringify(report));
 	assert.deepEqual(q.ask(), []);
 	assert.match(
-		q.agents()[0]?.expects[0]?.input?.() ?? "",
+		q.agents()[0]?.expect?.input?.() ?? "",
 		/Which rounding boundary/,
 	);
 });
@@ -974,22 +974,22 @@ for (const choice of ["resume", "cancel"])
 		const q = queue();
 		q.file();
 		const a = q.agents()[0]!;
-		const tok = a.expects[0]!.token;
+		const tok = a.expect!.token;
 		q.send({
 			kind: "agent_stalled",
 			cause: "stopped",
 			agent: a.key,
-			tokens: [tok],
+			token: tok,
 			lastWords: "waiting for evidence",
 		});
-		assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+		assert.equal(q.agents().filter((a) => a.expect).length, 0);
 		assert.match(q.ask()[0]!.basis, /waiting for evidence/);
 		const basis = q.ask()[0]!.basis;
 		assert.deepEqual(q.ask()[0]!.choices, ["resume", "cancel"]);
 		assert.match(basis, /Cancel drops the finding/);
 		q.file({ text: "Independently check the decimal parser" });
 		q.answer(choice);
-		const exp = q.agents()[0]?.expects[0];
+		const exp = q.agents()[0]?.expect;
 		const input = exp?.input?.() ?? "";
 		if (choice === "resume") {
 			assert.match(input, /## Finding #1[\s\S]*Which rounding boundary\?/);

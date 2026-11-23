@@ -503,7 +503,7 @@ export function onFact(
 			!q.stall &&
 			f &&
 			fact.agent === investigator &&
-			fact.tokens.includes(turn(f, q))
+			fact.token === turn(f, q)
 		)
 			return {
 				state: {
@@ -793,18 +793,16 @@ export function agents(q: Queue): AgentDecl[] {
 			role: "investigator",
 			cwd: null,
 			paused: q.stall !== null,
-			expects:
+			expect:
 				f && !q.stall
-					? [
-							{
-								token: turn(f, q),
-								tools: ["report_investigation"],
-								works: queuedWorks(q),
-								situation: "investigate",
-								input: () => investigationText(q, f),
-							},
-						]
-					: [],
+					? {
+							token: turn(f, q),
+							tools: ["report_investigation"],
+							works: queuedWorks(q),
+							situation: "investigate",
+							input: () => investigationText(q, f),
+						}
+					: null,
 		},
 	];
 }

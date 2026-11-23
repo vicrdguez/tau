@@ -308,7 +308,7 @@ test("a changed Mandate quotes the original owner passage and refuses old answer
 	x.send({
 		kind: "agent_stalled",
 		agent: "designer",
-		tokens: [t],
+		token: t,
 		cause: "stopped",
 		lastWords: "reading",
 	});

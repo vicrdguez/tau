@@ -68,8 +68,7 @@ function setup(
 		const driver = laneDriver(lane, laneWorld({ options: { max_workers } }));
 		const { agents, effects, done } = driver;
 		const send = (event: LaneEvent) => driver.send(event).send ?? [];
-		const coord = () =>
-			agents().find((a) => a.role === "coordinator")?.expects[0];
+		const coord = () => agents().find((a) => a.role === "coordinator")?.expect;
 		const workers = () => agents().filter((a) => a.role === "worker");
 		const worker = (item: string) =>
 			workers().find((a) => a.key.startsWith(`worker/${item}/`));
@@ -170,7 +169,7 @@ test("a blocking filer holds only itself, classification extends that cause, and
 	] as const) {
 		b.workOn(item, label);
 	}
-	const token = b.worker("filer")?.expects[0]?.token;
+	const token = b.worker("filer")?.expect?.token;
 	b.send(hold("queue/1", "filer"));
 	assert.deepEqual(
 		b
@@ -190,9 +189,9 @@ test("a blocking filer holds only itself, classification extends that cause, and
 	);
 	b.send(release("queue/1", "Keep the existing report"));
 	assert.equal(b.worker("filer")?.paused, false);
-	assert.notEqual(b.worker("filer")?.expects[0]?.token, token);
+	assert.notEqual(b.worker("filer")?.expect?.token, token);
 	assert.match(
-		b.worker("filer")?.expects[0]?.input?.() ?? "",
+		b.worker("filer")?.expect?.input?.() ?? "",
 		/Keep the existing report/,
 	);
 	assert.equal(b.worker("related")?.paused, true);
@@ -384,11 +383,11 @@ test("revision activation and the edited plan take effect together, retaining a 
 	b.finish("dependency");
 	assert.equal(b.worker("affected")?.key, "worker/affected/1");
 	assert.match(
-		b.worker("affected")?.expects[0]?.input?.() ?? "",
+		b.worker("affected")?.expect?.input?.() ?? "",
 		/New ledger crossing/,
 	);
 	assert.match(
-		b.worker("affected")?.expects[0]?.input?.() ?? "",
+		b.worker("affected")?.expect?.input?.() ?? "",
 		/Correct the ledger crossing/,
 	);
 	b.finish("affected");
@@ -488,7 +487,7 @@ test("a held unverified publication is superseded before release; its original w
 	b.finish("dependency");
 	assert.equal(b.worker("pending")?.paused, false);
 	assert.match(
-		b.worker("pending")?.expects[0]?.input?.() ?? "",
+		b.worker("pending")?.expect?.input?.() ?? "",
 		/New ledger crossing/,
 	);
 	const republication = b.publish("pending", [
@@ -553,11 +552,11 @@ test("a stalled worker resumes with both the revision instructions and the owner
 		kind: "agent_stalled",
 		agent: worker.key,
 		cause: "stopped",
-		tokens: [worker.expects[0]!.token],
+		token: worker.expect!.token,
 		lastWords: "need direction",
 	});
 	b.send(holdingChoice(b.asks()[0]!, "resume", "Start with negatives."));
-	const input = b.worker(item.id)!.expects[0]!.input!();
+	const input = b.worker(item.id)!.expect!.input!();
 	assert.match(input, /Correct the ledger crossing/);
 	assert.match(input, /Start with negatives/);
 });
@@ -574,7 +573,7 @@ test("a worker whose publication is superseded is told the Mandate changed, not 
 		threads: [],
 		reason: "mandate_revision",
 	});
-	const input = b.worker("ledger")!.expects[0]!.input!();
+	const input = b.worker("ledger")!.expect!.input!();
 	assert.match(input, /^The Mandate changed/);
 	assert.match(input, /The ledger crossing changed/);
 	assert.doesNotMatch(input, /Verification found a defect/);
@@ -606,7 +605,7 @@ test("a blocked defect filer waits for all planned items to merge and then start
 	b.done({ kind: "worktree", base: tip, principles: [] }, preparation?.key);
 	assert.match(b.worker("ledger")?.key ?? "", /ledger\/2$/);
 	assert.match(
-		b.worker("ledger")?.expects[0]?.input?.() ?? "",
+		b.worker("ledger")?.expect?.input?.() ?? "",
 		/Restore decimal input/,
 	);
 });

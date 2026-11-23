@@ -14,7 +14,7 @@ const plan = defineState({
 	kind: "keel.plan",
 	version: 1,
 	scope: "conversation",
-	initial: () => ({ phase: "empty", root: "", answered: [] as string[] }),
+	initial: () => ({ phase: "empty", root: "" }),
 });
 const lane: Lane<ReturnType<typeof plan.initial>> = {
 	name: "plan",
@@ -30,32 +30,21 @@ const lane: Lane<ReturnType<typeof plan.initial>> = {
 						role: "designer",
 						cwd: null,
 						paused: s.phase === "paused",
-						expects:
+						expect:
 							s.phase === "seeded"
-								? [
-										{
-											token: token("seed", 1),
-											tools: ["start"],
-											input: () => "Ground the queue seed",
-										},
-									]
-								: s.phase === "two"
-									? ["A", "B"]
-											.filter((k) => !s.answered.includes(token(k, 1)))
-											.map((k) => ({
-												token: token(k, 1),
-												tools: ["brief"],
-												input: () => `Prepare ${k}`,
-											}))
-									: [],
+								? {
+										token: token("seed", 1),
+										tools: ["start"],
+										input: () => "Ground the queue seed",
+									}
+								: null,
 					},
 				],
 	effects: () => [],
 	onFact: (state) => ({ state }),
 	reduce(s, e, world) {
 		if (e.kind === "reject") return { reject: "not adopted" };
-		if (e.kind === "brief")
-			return { state: { ...s, answered: [...s.answered, String(e.token)] } };
+
 		return { state: { ...s, phase: e.kind, root: world.root } };
 	},
 };
@@ -113,15 +102,7 @@ const file = defineLaneTool({
 	},
 	event: (_, observed, self) => ({ kind: "file", observed, work: self.work }),
 });
-const brief = defineLaneTool({
-	lane: "plan",
-	roles: ["designer"],
-	name: "brief",
-	description: "Brief the current item",
-	parameters: obj({}),
-	terminate: true,
-	event: (_, __, self) => ({ kind: "brief", token: self.token }),
-});
+
 const principle = defineTool({
 	name: "principle",
 	description: "Read",
@@ -131,7 +112,7 @@ const principle = defineTool({
 async function setup(t: TestContext) {
 	const x = await toy({
 		lanes: [defineLane(lane), queueLane],
-		tools: [adopt, file, brief],
+		tools: [adopt, file],
 		plainTools: [{ roles: ["designer"], tool: principle }],
 		sections: [
 			{
@@ -234,32 +215,7 @@ test("queue seed creates a different anchored work; rejected seed leaks no conve
 		"grounded",
 	);
 });
-test("when two handoffs for the same tool are open, the latest input cannot disambiguate them", async (t) => {
-	const { x, call } = await setup(t);
-	await x.deliver("plan", x.root.id, { kind: "two" });
-	for (const delivery of await x.tasks("keel.deliver"))
-		await x.harness.abortTask(delivery.id, ctx);
-	// Both inputs precede the assistant. Drive placement directly rather than racing two watchers.
-	for (const key of ["A", "B"])
-		await x.harness.commit(
-			(tx) =>
-				tx.appendEntry(x.root.id, {
-					kind: "keel.input",
-					data: { token: token(key, 1) },
-				}),
-			ctx,
-		);
-	const result = await call("brief");
-	assert.equal(result.isError, true);
-	assert.match(
-		JSON.stringify(result.content),
-		/Ambiguous open expectation for brief/,
-	);
-	assert.deepEqual(
-		(await x.harness.snapshot(stateDoc(plan), x.root.id, ctx))?.answered,
-		[],
-	);
-});
+
 test("a plain tool admits only an active bound agent", async (t) => {
 	const { x, call } = await setup(t);
 	assert.equal((await call("principle")).isError, true, "unbound entry");

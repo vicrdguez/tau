@@ -17,7 +17,7 @@ export type AgentSlot = {
 	stop: TaskId | null;
 	cwd: string | null;
 	status: "active" | "paused" | "retired";
-	open: { token: Token; tools: string[]; unsolicited: boolean }[];
+	open: { token: Token; tools: string[] } | null;
 };
 type EffectSlot = {
 	task: TaskId;

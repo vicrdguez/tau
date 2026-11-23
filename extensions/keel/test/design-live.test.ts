@@ -277,7 +277,7 @@ test("triage pins the route and authority; follow binds directly, precedent stil
 	seeded.send({
 		kind: "agent_stalled",
 		agent: "designer",
-		tokens: [seeded.turn()!.token],
+		token: seeded.turn()!.token,
 		cause: "stopped",
 		lastWords: "Reading docs",
 	});
@@ -410,7 +410,7 @@ test("rework preserves numbered direction and issues a fresh review; a stalled r
 	x.send({
 		kind: "agent_stalled",
 		agent: "designer",
-		tokens: [token],
+		token,
 		cause: "failed",
 		lastWords: "Checking the premise",
 	});

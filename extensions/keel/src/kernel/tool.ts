@@ -158,11 +158,11 @@ async function assistantEntry(tx: Tx, api: ToolExecutionApi) {
 	return input.assistant as EntryId;
 }
 
-/** undefined = malformed call/input (refuse); null = no Keel input precedes this call. */
+/** A missing or malformed tag cannot admit an expected call. */
 async function callToken(
 	tx: Tx,
 	api: ToolExecutionApi,
-): Promise<string | null | undefined> {
+): Promise<string | undefined> {
 	const assistant = await assistantEntry(tx, api);
 	if (assistant === undefined) return undefined;
 	// pi.tool persists its assistant EntryId as a JSON number. Later queued inputs
@@ -189,7 +189,7 @@ async function callToken(
 		}
 		cursor = page.next;
 	} while (cursor);
-	return null;
+	return undefined;
 }
 
 type Refusal = { reject: string };
@@ -245,7 +245,7 @@ async function admit(
 	tx: Tx,
 	conversation: ConversationId,
 	spec: Header,
-	token: string | null | undefined,
+	token?: string,
 ): Promise<Self | Refusal> {
 	const { binding } = await tx.doc(stateDoc(BindingState), conversation);
 	if (spec.gate === "adopt" && !binding) {
@@ -283,14 +283,10 @@ async function admit(
 	const { lane, work, key: agent, role } = active.binding;
 	let matched: Token | null = null;
 	if (spec.gate !== "standing") {
-		const eligible = slot.open.filter((e) => e.tools.includes(spec.name));
-		if (eligible.length > 1)
-			return { reject: `Ambiguous open expectation for ${spec.name}` };
-		const match = eligible.find((e) =>
-			token === null
-				? e.unsolicited && role === "designer" && work === conversation
-				: e.token === token,
-		);
+		const match =
+			slot.open?.token === token && slot.open?.tools.includes(spec.name)
+				? slot.open
+				: null;
 		if (!match)
 			return { reject: `No matching open expectation for ${spec.name}` };
 		matched = match.token;
@@ -313,18 +309,13 @@ export async function dispatchCaller(
 	roles: readonly RoleName[],
 ) {
 	const { binding } = await tx.doc(stateDoc(BindingState), conversation);
-	const self = await admit(
-		tx,
-		conversation,
-		{
-			lane: "design",
-			roles,
-			...(binding
-				? { gate: "standing", name: "dispatch" }
-				: { gate: "adopt", name: "ground" }),
-		},
-		null,
-	);
+	const self = await admit(tx, conversation, {
+		lane: "design",
+		roles,
+		...(binding
+			? { gate: "standing", name: "dispatch" }
+			: { gate: "adopt", name: "ground" }),
+	});
 	if ("reject" in self) throw new Error(self.reject);
 	return { self, bound: binding !== null };
 }
@@ -374,7 +365,8 @@ export function wrapTool(
 		const saved = await api.snapshot(receipt, api.taskId, context);
 		if (saved) return output(saved);
 		const first = await api.commit(async (tx) => {
-			const token = spec.gate === "standing" ? null : await callToken(tx, api);
+			const token =
+				spec.gate === "standing" ? undefined : await callToken(tx, api);
 			const self = await admit(tx, api.conversationId, spec, token);
 			if ("reject" in self)
 				return {

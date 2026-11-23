@@ -29,7 +29,7 @@ export type KernelEvent =
 	| {
 			kind: "agent_stalled";
 			agent: AgentKey;
-			tokens: Token[];
+			token: Token;
 			cause: "failed" | "stopped" | "unfulfilled";
 			lastWords: string;
 			refusal?: string;
@@ -45,7 +45,7 @@ export type Ask = {
 	title: string;
 	basis: string;
 	choices: readonly [string, ...string[]];
-	/** For project decisions: works that depend on this answer. */
+	/** Place this question on the project desk; these works depend on its answer. */
 	works?: readonly (WorkId | null)[];
 };
 /** A token identifies one situation in this conversation. Use a new sequence on re-entry. */
@@ -57,8 +57,7 @@ export type Expectation = {
 	/** Facts for the composition root's input policy, never inferred from input text. */
 	situation?: string;
 	paths?: readonly string[];
-	/** Null: no delivery. Only the anchor designer may answer without preceding tagged input. */
-	input: (() => string) | null;
+	input: () => string;
 };
 export type AgentDecl = {
 	key: AgentKey;
@@ -67,7 +66,7 @@ export type AgentDecl = {
 	/** Project policy pinned when this conversation is created. Omit to read the checkout live. */
 	projectPrinciples?: readonly ProjectPrincipleFile[];
 	paused: boolean;
-	expects: readonly Expectation[];
+	expect: Expectation | null;
 };
 /** A key names one immutable plan across retries. Retired project keys are never reused. */
 export type EffectDecl = {

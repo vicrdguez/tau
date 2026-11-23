@@ -128,22 +128,19 @@ export function agents(s: State): AgentDecl[] {
 				role: c.phase === "diagnose" ? "diagnoser" : "verifier",
 				cwd: c.checkout!.path,
 				paused,
-				expects: paused
-					? []
-					: [
-							{
-								token: token(agentFor(c), c.turn),
-								tools: [
-									c.phase === "diagnose"
-										? "publish_diagnosis"
-										: "publish_verdict",
-								],
-								paths: c.paths,
-								situation:
-									c.phase === "diagnose" ? "diagnosis" : "verification",
-								input: () => input(s, c),
-							},
-						],
+				expect: paused
+					? null
+					: {
+							token: token(agentFor(c), c.turn),
+							tools: [
+								c.phase === "diagnose"
+									? "publish_diagnosis"
+									: "publish_verdict",
+							],
+							paths: c.paths,
+							situation: c.phase === "diagnose" ? "diagnosis" : "verification",
+							input: () => input(s, c),
+						},
 			};
 		});
 }

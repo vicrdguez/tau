@@ -204,16 +204,14 @@ async function withAccess(cwd: string, t: TestContext) {
 												body: "---\ndescription: Prepared statement.\nroles: [worker]\n---\nPrepared body.",
 											},
 										],
-							expects:
+							expect:
 								key === "empty"
-									? []
-									: [
-											{
-												token: token(key, 1),
-												tools: [],
-												input: () => "Rework.",
-											},
-										],
+									? null
+									: {
+											token: token(key, 1),
+											tools: [],
+											input: () => "Rework.",
+										},
 						}));
 					return phase === "retired" || phase === "entry"
 						? []
@@ -223,7 +221,7 @@ async function withAccess(cwd: string, t: TestContext) {
 									role: "designer",
 									cwd,
 									paused: phase === "paused",
-									expects: [],
+									expect: null,
 								},
 							];
 				},

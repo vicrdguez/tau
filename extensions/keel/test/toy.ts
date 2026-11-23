@@ -128,8 +128,7 @@ const toyLane = defineLane({
 					},
 					notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
 				};
-			case "manual":
-				return { state: { ...s, agents: 2, turn: -1 } };
+
 			case "quiet":
 				return { state: { ...s, turn: 0 } };
 			case "pause":
@@ -192,28 +191,28 @@ const toyLane = defineLane({
 	asks: (s) =>
 		s.ask === null
 			? []
-			: Array.from({ length: s.ask === "A" ? 2 : 1 }, () => ({
-					subject: subject("review"),
-					basis: s.ask!,
-					title: "Review",
-					choices: ["accept"] as const,
-				})),
+			: [
+					{
+						subject: subject("review"),
+						basis: s.ask!,
+						title: "Review",
+						choices: ["accept"] as const,
+					},
+				],
 	agents: (s) =>
 		Array.from({ length: s.agents }, (_, i) => ({
 			key: agentKey(`worker/${i}`),
 			role: s.ask === "designers" ? "designer" : "worker",
 			cwd: null,
 			paused: s.paused,
-			expects:
+			expect:
 				s.turn === 0
-					? []
-					: [
-							{
-								token: token(`worker/${i}`, Math.abs(s.turn)),
-								tools: ["publish"],
-								input: s.turn < 0 ? null : () => "work",
-							},
-						],
+					? null
+					: {
+							token: token(`worker/${i}`, s.turn),
+							tools: ["publish"],
+							input: () => "work",
+						},
 		})),
 	effects: (s) =>
 		s.effect ? [{ key: effectKey("once"), spec: { value: "outside" } }] : [],

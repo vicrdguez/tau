@@ -101,7 +101,7 @@ function setup(max_workers = 1) {
 				facts,
 			});
 		const request = (role: string) => {
-			const exp = agent(role).expects[0];
+			const exp = agent(role).expect;
 			assert.ok(exp?.input);
 			return { token: exp.token, tools: exp.tools, text: exp.input() };
 		};
@@ -331,7 +331,7 @@ test("briefs use spare worker slots but never start pending dependencies or exce
 	b.briefItem();
 	assert.match(b.request("coordinator").text, /other/);
 	b.briefItem("other");
-	assert.equal(b.agent("coordinator").expects.length, 0);
+	assert.equal(b.agent("coordinator").expect, null);
 	assert.equal(b.effects().length, 2);
 });
 
@@ -371,8 +371,8 @@ test("build returns re-open the same worker; only a survived rework fix requests
 	const worker = b.agent("worker");
 	const cited = { ...ruling, principles: ["prove-it-works"] };
 	b.send({ kind: "ruling", agent: worker.key, ruling: cited });
-	assert.deepEqual(worker.expects[0]?.paths, paths);
-	assert.notEqual(worker.expects[0]?.situation, "survived_fix");
+	assert.deepEqual(worker.expect?.paths, paths);
+	assert.notEqual(worker.expect?.situation, "survived_fix");
 	assert.deepEqual(worker.projectPrinciples, policy);
 	const first = b.pub().send![0]!;
 	assert.deepEqual(
@@ -383,7 +383,7 @@ test("build returns re-open the same worker; only a survived rework fix requests
 	assert.deepEqual(first.event.rulings, [cited]);
 	assert.match(String(first.event.brief), /works at ties[\s\S]*patched/);
 
-	let previous = worker.expects[0]!.token;
+	let previous = worker.expect!.token;
 	for (const [kind, evidence, threads, survived] of [
 		["rework", "wrong rounding", ["tie"], false],
 		["rework", "the rounding fix failed", ["tie"], true],
@@ -391,7 +391,7 @@ test("build returns re-open the same worker; only a survived rework fix requests
 	] as const) {
 		b.send({ kind, item: "fix", evidence, threads: [...threads] });
 		const resumed = b.agent("worker");
-		const [turn] = resumed.expects;
+		const turn = resumed.expect;
 		assert.ok(turn);
 		assert.equal(resumed.key, worker.key);
 		assert.notEqual(turn.token, previous);
@@ -578,7 +578,7 @@ test("only the confirmed replacement releases all its own old attempts for unmer
 		error: "lost registration",
 	});
 	assert.match(JSON.stringify(lost.notes), /worker-fix-2.*lost registration/);
-	assert.ok(b.agent("worker").expects[0]?.tools.includes("publish_build"));
+	assert.ok(b.agent("worker").expect?.tools.includes("publish_build"));
 	b.send({ kind: "cancel" });
 	assert.deepEqual(
 		b.effects().map((e) => (e.spec.op as JsonObject).target),
@@ -697,7 +697,7 @@ for (const role of ["coordinator", "worker"]) {
 		const stop = () => ({
 			kind: "agent_stalled",
 			agent: b.agent(role).key,
-			tokens: [b.request(role).token],
+			token: b.request(role).token,
 			cause: "stopped",
 			lastWords: "need review",
 		});
@@ -707,7 +707,7 @@ for (const role of ["coordinator", "worker"]) {
 		assert.match(b.asks()[0]!.basis, /stopped[\s\S]*need review/);
 		assert.deepEqual(b.send(old).send ?? [], []);
 		b.resume("continue now");
-		assert.notEqual(b.request(role).token, old.tokens[0]);
+		assert.notEqual(b.request(role).token, old.token);
 		assert.deepEqual(b.send(old).send ?? [], []);
 		assert.match(b.request(role).text, /continue now/);
 		if (role === "coordinator") {
@@ -884,7 +884,7 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 	);
 	b.done({ kind: "occupied", path: "private path" });
 	assert.match(b.asks()[0]!.basis, /private path/);
-	assert.equal(b.agent("coordinator").expects.length, 0);
+	assert.equal(b.agent("coordinator").expect, null);
 	assert.deepEqual(b.effects(), []);
 	b.resume("leave my notes intact");
 	assert.deepEqual(b.effect().spec.op, op);

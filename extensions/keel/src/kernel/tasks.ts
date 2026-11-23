@@ -96,8 +96,7 @@ async function agentSlot(tx: Tx, input: StopInput) {
 
 async function openAgent(tx: Tx, input: DeliverInput) {
 	const slot = await agentSlot(tx, input);
-	return slot?.status === "active" &&
-		slot.open.some((expect) => expect.token === input.token)
+	return slot?.status === "active" && slot.open?.token === input.token
 		? slot
 		: undefined;
 }
@@ -470,7 +469,7 @@ export function makeTasks(hooks: Hooks) {
 								{
 									kind: "agent_stalled",
 									agent: input.key,
-									tokens: [input.token],
+									token: input.token,
 									cause: "failed",
 									lastWords: "",
 								},
@@ -512,7 +511,7 @@ export function makeTasks(hooks: Hooks) {
 										: [],
 								)
 								.join("\n") ?? "";
-						const tools = slot.open.find((e) => e.token === input.token)!.tools;
+						const tools = slot.open!.tools;
 						const refusal = await turnRefusal(tx, input, tools, settled.answer);
 						await apply(
 							tx,
@@ -520,7 +519,7 @@ export function makeTasks(hooks: Hooks) {
 							{
 								kind: "agent_stalled",
 								agent: input.key,
-								tokens: [input.token],
+								token: input.token,
 								...(refusal && { refusal }),
 								cause:
 									settled.reason === "aborted"

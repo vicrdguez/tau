@@ -71,7 +71,7 @@ function flow(view = world.view) {
 	};
 	const done = (kind: string, result: LaneEvent) =>
 		driver.done(result, effect(kind).key);
-	const agents = () => driver.agents().filter((a) => a.expects.length > 0);
+	const agents = () => driver.agents().filter((a) => a.expect !== null);
 	const agent = (role = "verifier") => {
 		const a = agents().find((a) => a.role === role);
 		assert.ok(a, `expected ${role}`);
@@ -418,7 +418,7 @@ test("a classified item hold gates verifier tools and keeps siblings running unt
 	const stalled = x.apply({
 		kind: "agent_stalled",
 		agent: first.key,
-		tokens: [first.expects[0]!.token],
+		token: first.expect!.token,
 		cause: "stopped",
 		lastWords: "stale",
 	});
@@ -440,8 +440,8 @@ test("a classified item hold gates verifier tools and keeps siblings running unt
 		direction: "Before proceeding, inspect the test.",
 	});
 	const resumed = x.agents().find((a) => a.key === first.key)!;
-	assert.notEqual(resumed.expects[0]?.token, first.expects[0]?.token);
-	assert.match(resumed.expects[0]!.input!(), /inspect the test/);
+	assert.notEqual(resumed.expect?.token, first.expect?.token);
+	assert.match(resumed.expect!.input!(), /inspect the test/);
 });
 
 test("diagnosed rework waits for the last queue hold regardless of answer order", () => {
@@ -594,7 +594,7 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 	x.checkout();
 	const a = x.agent();
 	assert.equal(a.cwd, op.path);
-	const input = a.expects[0]!.input!();
+	const input = a.expect!.input!();
 	for (const expected of [
 		"one",
 		"Diff base: worker-base",
@@ -659,14 +659,14 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	x.apply({
 		kind: "agent_stalled",
 		agent: a.key,
-		tokens: [a.expects[0]!.token],
+		token: a.expect!.token,
 		cause: "stopped",
 		lastWords: "checking that premise",
 	});
 	assert.match(x.asks()[0]!.basis, /checking that premise/);
 	x.resume("Diagnoser only: inspect floats");
 	const diagnosis = x.agent("diagnoser");
-	const exp = diagnosis.expects[0]!;
+	const exp = diagnosis.expect!;
 	const request = principleInputs.render(
 		{ role: diagnosis.role, cwd: diagnosis.cwd!, situation: exp.situation },
 		exp.input!(),
@@ -724,14 +724,14 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 test("an item verifier binds policy for the published fences, without leaking them into full-set review", () => {
 	const x = flow();
 	x.review();
-	assert.deepEqual(x.agent().expects[0]!.paths, ["ledger/amounts.ts"]);
+	assert.deepEqual(x.agent().expect!.paths, ["ledger/amounts.ts"]);
 	x.pass();
 	x.clean();
 	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
 	x.clean();
 	x.handoff();
 	x.checkout();
-	assert.deepEqual(x.agent().expects[0]!.paths ?? [], []);
+	assert.deepEqual(x.agent().expect!.paths ?? [], []);
 });
 test("unaddressed reappearances and unrelated blocks never spend a fix; superseding a failed checkout removes its original target", () => {
 	const x = flow();
@@ -819,7 +819,7 @@ test("full threads addressed by a correction still count after a separate item r
 		x.checkout();
 		x.fail("cross-book");
 	}
-	assert.ok(x.agent("diagnoser").expects.length);
+	assert.ok(x.agent("diagnoser").expect);
 });
 test("item merges serialize against successive heads with Mandate checks; verifier notes do not hold them", () => {
 	const x = flow();
@@ -919,7 +919,7 @@ for (const { phase, failure, evidence } of [
 		if (!takingTrunk) {
 			x.clean();
 			x.review("corrected");
-			const input = x.agent().expects[0]!.input!();
+			const input = x.agent().expect!.input!();
 			assert.match(input, /worker revised/i);
 			assert.match(input, /corrected/);
 		}
@@ -1012,7 +1012,7 @@ for (const result of [
 		assert.notEqual(retried.key, op.key);
 		assert.equal(retried.op.sha, "one");
 		x.checkout();
-		assert.match(x.agent().expects[0]!.input!(), /test the premise/);
+		assert.match(x.agent().expect!.input!(), /test the premise/);
 	});
 test("owner direction on a merge retry reaches the worker on conflict or the full verifier on success", () => {
 	for (const conflict of [false, true]) {
@@ -1042,7 +1042,7 @@ test("owner direction on a merge retry reaches the worker on conflict or the ful
 			x.clean();
 			x.handoff();
 			x.checkout();
-			next = x.agent().expects[0]!.input!();
+			next = x.agent().expect!.input!();
 		}
 		assert.match(next, /test the premise/);
 		assert.match(next, /lost integration checkout/);
@@ -1194,7 +1194,7 @@ test("full-set and landing reviews report the union of merged publications, not 
 	});
 	merge("merged");
 	function expectPolicyList(scope: string) {
-		const input = x.agent().expects[0]!.input!();
+		const input = x.agent().expect!.input!();
 		const list = input.match(
 			/Changed principles and playbooks reported by Git:\n([^\n]+(?:\n[^\n]+)*)/,
 		);
@@ -1279,7 +1279,7 @@ test("verifier resume uses a fresh token and fresh direction; duplicate, stale a
 	const stop = () => ({
 		kind: "agent_stalled",
 		agent: x.agent().key,
-		tokens: [x.agent().expects[0]!.token],
+		token: x.agent().expect!.token,
 		cause: "stopped",
 		lastWords: "compare failed",
 	});
@@ -1291,12 +1291,12 @@ test("verifier resume uses a fresh token and fresh direction; duplicate, stale a
 	assert.equal(x.asks().length, 1);
 	x.resume("inspect rounding");
 	const next = stop();
-	assert.notDeepEqual(next.tokens, old.tokens);
+	assert.notDeepEqual(next.token, old.token);
 	assert.ok(!x.apply(old).send?.length);
-	assert.match(x.agent().expects[0]!.input!(), /inspect rounding/);
+	assert.match(x.agent().expect!.input!(), /inspect rounding/);
 	x.apply(next);
 	x.resume("inspect carries");
-	const input = x.agent().expects[0]!.input!();
+	const input = x.agent().expect!.input!();
 	assert.match(input, /inspect carries/);
 	assert.doesNotMatch(input, /inspect rounding/);
 	const fulfilled = stop();

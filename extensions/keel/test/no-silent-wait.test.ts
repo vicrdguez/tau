@@ -197,7 +197,7 @@ for (const choice of ["resume", "cancel"])
 			{
 				kind: "agent_stalled",
 				agent: agentKey("investigator"),
-				tokens: [token("investigate/2", 0)],
+				token: token("investigate/2", 0),
 				cause: "stopped",
 				lastWords: "",
 			},
@@ -260,7 +260,7 @@ test("designer stall asks to resume the same turn or cancel the work", async (t)
 		await s.fact("design", {
 			kind: "agent_stalled",
 			agent: agentKey("designer"),
-			tokens: [token("ground", 1)],
+			token: token("ground", 1),
 			cause: "stopped",
 			lastWords: "Reading the rules.",
 		});
@@ -332,13 +332,13 @@ for (const stop of ["coordinator", "worker", "verifier", "checkout"] as const) {
 				)?.agents;
 				const turn = Object.entries(slot ?? {}).find(([k]) =>
 					k.endsWith(`:${key}`),
-				)?.[1].open[0];
+				)?.[1].open;
 				assert.ok(turn);
 				await x.fact(
 					{
 						kind: "agent_stalled",
 						agent: agentKey(key),
-						tokens: [turn.token],
+						token: turn.token,
 						cause: "stopped",
 						lastWords: "Need owner direction.",
 					},

@@ -1324,7 +1324,7 @@ export const design: Lane<State> = {
 			e.kind === "agent_stalled" &&
 			turn &&
 			e.agent === agentKey("designer") &&
-			e.tokens.includes(turn.token)
+			e.token === turn.token
 		) {
 			const cause = turn.token.replace("@", "/");
 			const evidence = [e.cause, e.lastWords].join(": ");
@@ -1405,7 +1405,7 @@ export const design: Lane<State> = {
 				role: "designer",
 				cwd: null,
 				paused: false,
-				expects: turn ? [turn] : [],
+				expect: turn ?? null,
 			},
 		];
 	},

@@ -96,7 +96,7 @@ export async function reconcile(
 				conversation,
 				role: agent.role,
 				cwd: agent.cwd,
-				open: [],
+				open: null,
 				used: [],
 				stop: null,
 				status: agent.paused ? "paused" : "active",
@@ -109,75 +109,64 @@ export async function reconcile(
 		slot.status = agent.paused ? "paused" : "active";
 		if (!agent.paused) slot.stop = null;
 		slot.cwd = agent.cwd ?? frame.root;
-		const open: AgentSlot["open"] = [];
-		for (const exp of agent.paused ? [] : agent.expects) {
-			if (open.some((e) => e.token === exp.token))
-				throw new Error(`Duplicate expectation: ${exp.token}`);
-			open.push({
+		const exp = agent.paused ? null : agent.expect;
+		const previous = slot.open?.token;
+		slot.open = exp && { token: exp.token, tools: [...exp.tools] };
+		if (!exp || previous === exp.token) continue;
+		if (slot.used.includes(exp.token))
+			throw new Error(`Reused token ${exp.token} on ${key}`);
+		slot.used.push(exp.token);
+		const text = exp.input();
+		const rendered = renderInput?.(
+			{
+				role: agent.role,
+				cwd: slot.cwd,
+				situation: exp.situation,
+				paths: exp.paths,
+				projectPrinciples:
+					(await tx.doc(stateDoc(BindingState), slot.conversation))
+						.projectPrinciples ?? undefined,
+			},
+			text,
+		) ?? { text };
+		await tx.createTask(
+			tasks.deliver,
+			{
+				...address,
+				key: agent.key,
+				conversation: slot.conversation,
 				token: exp.token,
-				tools: [...exp.tools],
-				unsolicited: exp.input === null,
-			});
-			if (!slot.open.some((e) => e.token === exp.token)) {
-				if (slot.used.includes(exp.token))
-					throw new Error(`Reused token ${exp.token} on ${key}`);
-				slot.used.push(exp.token);
-				if (!exp.input) continue;
-				const text = exp.input();
-				const rendered = renderInput?.(
-					{
-						role: agent.role,
-						cwd: slot.cwd,
-						situation: exp.situation,
-						paths: exp.paths,
-						projectPrinciples:
-							(await tx.doc(stateDoc(BindingState), slot.conversation))
-								.projectPrinciples ?? undefined,
-					},
-					text,
-				) ?? { text };
-				await tx.createTask(
-					tasks.deliver,
-					{
-						...address,
-						key: agent.key,
-						conversation: slot.conversation,
-						token: exp.token,
-						...rendered,
-					},
-					background(slot.conversation),
-				);
-			}
-		}
-		slot.open = open;
+				...rendered,
+			},
+			background(slot.conversation),
+		);
 	}
 	for (const [key, slot] of Object.entries(slots.agents)) {
 		if (!key.startsWith(prefix) || active.has(key) || slot.status === "retired")
 			continue;
 		if (slot.status === "active") await stop(key.slice(prefix.length), slot);
 		slot.status = "retired";
-		slot.open = [];
+		slot.open = null;
 	}
 
 	// A project lane can ask or schedule an effect before it needs an agent.
-	const anchor = async () => {
-		if (work !== null) return work;
+	const anchor = async (projectDesk = false) => {
+		if (work !== null && !projectDesk) return work;
 		p.anchor ??= (
 			await tx.createConversation({ ownership: { kind: "ownerless" } })
 		).id;
 		return p.anchor;
 	};
-	const asking = new Map<string, string>();
+	const asking = new Set<string>();
 	for (const ask of asks) {
 		const subject = subjectKey(work, lane, ask.subject);
 		const signature = createHash("sha256")
 			.update(JSON.stringify([ask.title, ask.basis, ask.choices]))
 			.digest("hex");
-		if (asking.has(subject) && asking.get(subject) !== signature)
-			throw new Error(`Conflicting asks for ${subject}`);
-		asking.set(subject, signature);
+		if (asking.has(subject)) throw new Error(`Duplicate ask for ${subject}`);
+		asking.add(subject);
 		if (p.asks[subject]?.signature === signature) continue;
-		const conversation = await anchor();
+		const conversation = await anchor(ask.works !== undefined);
 		const basis = await tx.appendEntry(basisEntry, conversation, {
 			data: { text: ask.basis },
 		});

@@ -218,7 +218,7 @@ export async function route(
 			projectDecls.some(
 				({ asks, agents }) =>
 					asks.some(owns) ||
-					agents.some((a) => !a.paused && a.expects.some(owns)),
+					agents.some((a) => !a.paused && a.expect && owns(a.expect)),
 			)
 		)
 			continue;
@@ -234,7 +234,7 @@ export async function route(
 				const d = f.declarations();
 				return (
 					d.asks.length ||
-					d.agents.some((a) => !a.paused && a.expects.length) ||
+					d.agents.some((a) => !a.paused && a.expect) ||
 					d.effects.some(
 						(e) => effects[slotKey(f.lane, e.key)]?.status !== "done",
 					)

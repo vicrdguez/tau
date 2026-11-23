@@ -104,9 +104,9 @@ test("Ground presents two readings; the owner can send one back with direction o
 		assert.deepEqual(x.asks(), []);
 		if (choice === "decline") {
 			assert.deepEqual(send ?? [], []);
-			assert.deepEqual(x.agents()[0]?.expects, []);
+			assert.equal(x.agents()[0]?.expect, null);
 		} else {
-			const input = x.agents()[0]?.expects[0]?.input?.() ?? "";
+			const input = x.agents()[0]?.expect?.input?.() ?? "";
 			assert.match(input, /Use the exchange minimum/);
 			assert.match(input, /Include auctions/);
 			const directed = x.state();
@@ -121,21 +121,21 @@ test("a stopped Ground turn files a hold; resume carries direction and ignores t
 	const x = run();
 	x.send(ambiguous);
 	x.send(answer(x.asks()[0]!.subject, "first"));
-	const { token } = x.agents()[0]!.expects[0]!;
+	const { token } = x.agents()[0]!.expect!;
 	const stall = {
 		kind: "agent_stalled",
 		agent: "designer",
 		cause: "stopped",
-		tokens: [token],
+		token,
 		lastWords: "Still reading.",
 	};
 	x.send(stall);
 	assert.match(x.asks()[0]!.basis, /design reports:\nstopped: Still reading/);
-	assert.deepEqual(x.agents()[0]?.expects, []);
+	assert.equal(x.agents()[0]?.expect, null);
 	x.send(stall);
 	assert.equal(x.asks().length, 1);
 	x.send(holdingChoice(x.asks()[0]!, "resume", "Check venue A."));
-	const next = x.agents()[0]!.expects[0]!;
+	const next = x.agents()[0]!.expect!;
 	assert.notEqual(next.token, token);
 	assert.match(next.input?.() ?? "", /Still reading[\s\S]*Check venue A/);
 	assert.deepEqual(x.send(stall).send ?? [], []);

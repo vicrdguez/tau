@@ -9,9 +9,7 @@ export const current = {
 			stop: null,
 			cwd: "/work",
 			status: "active",
-			open: [
-				{ token: token("worker", 2), tools: ["publish"], unsolicited: false },
-			],
+			open: { token: token("worker", 2), tools: ["publish"] },
 		},
 	},
 	effects: {

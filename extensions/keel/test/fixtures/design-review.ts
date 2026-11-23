@@ -70,7 +70,7 @@ export function reviewDriver(world: World = designWorld) {
 			x.send({ kind: "answer_challenger", dispositions: [] });
 		}
 	};
-	const turn = () => x.agents()[0]?.expects[0];
+	const turn = () => x.agents()[0]?.expect;
 	return {
 		...x,
 		frame,

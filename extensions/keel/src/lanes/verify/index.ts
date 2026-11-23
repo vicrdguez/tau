@@ -385,7 +385,7 @@ function transition(prev: State, world: World) {
 						(c) =>
 							(c.phase === "verify" || c.phase === "diagnose") &&
 							agentFor(c) === e.agent &&
-							e.tokens.includes(token(e.agent, c.turn)),
+							e.token === token(e.agent, c.turn),
 					);
 					if (c && !held(s, c.item)) {
 						c.direction = "";
