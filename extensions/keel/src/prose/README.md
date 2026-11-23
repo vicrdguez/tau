@@ -14,4 +14,4 @@ A `{{name}}` is a slot. Keel fills it with a fact it already knows, so no file a
 
 A playbook is `playbooks/<name>.md`. Files it refers to live in `playbooks/<name>/`.
 
-`principles/` and `playbooks/` began as copies from [pstack](https://github.com/backnotprop/pstack), under the licence in `LICENSE-pstack`. The principles are in keel form. The playbooks are still as imported and are adapted when a lane starts to use them.
+`principles/` and `playbooks/` began as copies from [pstack](https://github.com/backnotprop/pstack), under the licence in `LICENSE-pstack`. The principles are in keel form. The playbooks keep their imported substance with pstack and harness operation removed, and are adapted when a lane starts to use them.
