@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { type TestContext, test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
 	createRegistry,
@@ -22,6 +21,7 @@ import {
 	dispatchTool,
 	fanOut,
 } from "../src/dispatch/index.ts";
+import { latch } from "./toy.ts";
 
 async function stopped(signal: AbortSignal | undefined): Promise<never> {
 	assert.ok(signal);
@@ -129,8 +129,10 @@ async function setup(t: TestContext, timeoutMs?: number) {
 test("toy extension injects seat models and closed tools; join keeps job order despite completion order", {
 	timeout: 3000,
 }, async (t) => {
+	const quickStarted = latch<void>();
+	const releaseSlow = latch<void>();
+	t.after(() => releaseSlow.resolve());
 	const x = await setup(t);
-	const completion: string[] = [];
 	x.slow.setResponses([
 		async (context) => {
 			const system = context.messages.filter((m) => m.role === "system");
@@ -139,21 +141,35 @@ test("toy extension injects seat models and closed tools; join keeps job order d
 				system.flatMap((m) => m.toolsAdded?.map(({ name }) => name) ?? []),
 				["recursion_probe"],
 			);
-			await delay(75);
-			completion.push("slow");
+			await releaseSlow.promise;
 			return fauxAssistantMessage("first answer");
 		},
 	]);
 	x.quick.setResponses([
 		() => {
-			completion.push("quick");
+			quickStarted.resolve();
 			return fauxAssistantMessage("second answer");
 		},
 	]);
 	await x.start();
+	await quickStarted.promise;
+	const children = await Promise.all(
+		(await x.owned()).map(({ id }) => x.harness.conversation(id, ctx)),
+	);
+	const quick = (
+		await Promise.all(
+			children.map(async (child) =>
+				(await child?.agent(ctx))?.model?.provider === "quick"
+					? child
+					: undefined,
+			),
+		)
+	).find(Boolean);
+	assert.ok(quick);
+	await quick.waitForIdle(ctx);
+	releaseSlow.resolve();
 	const result = await x.result();
 	assert.equal(result.error, false);
-	assert.deepEqual(completion, ["quick", "slow"]);
 	assert.deepEqual(
 		(JSON.parse(result.text) as DispatchResult[]).map(({ seat, answer }) => [
 			seat,

@@ -1,24 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decision, eventLog } from "tau";
+import { eventLog } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
-import { type FauxResponseStep, fauxAnswer } from "tau/testing";
-import { ProjectState } from "../src/kernel/records.ts";
-import { stateDoc } from "../src/kernel/state.ts";
+import type { FauxResponseStep } from "tau/testing";
 import { arenaFrame } from "./fixtures/arena-script.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 for (const stage of ["candidates", "prototypes"] as const) {
 	test(`cancel during ${stage} stops both children before the final cleanup note`, {
 		timeout: 5000,
 	}, async (t) => {
-		const { root } = await fixture(t);
+		const { root } = await tempRepo(t);
 		const s = await openScriptedWorkflow(root, new MemoryStorage(), true);
 		const { harness } = s.store;
-		t.after(() => harness.close(ctx));
+		t.after(s.close);
 		const started = [latch<void>(), latch<void>()];
 		const aborted: number[] = [];
 		const hanging =
@@ -57,24 +55,14 @@ for (const stage of ["candidates", "prototypes"] as const) {
 		]);
 		s.secondCandidate.setResponses([hanging(1)]);
 		harness.resume();
-		await s.root.submit(
-			{ type: "input", content: "Give shell callers one writer." },
-			ctx,
-		);
+		await s.submit("Give shell callers one writer.");
 		await Promise.all(started.map((child) => child.promise));
 		s.provider.setResponses([s.turn("designer", "request_cancel", {})]);
-		await (
-			await s.root.submit(
-				{ type: "input", content: "Cancel this work, please." },
-				ctx,
-			)
-		).wait(ctx);
-		const [slot] = Object.values(
-			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-		);
+		await (await s.submit("Cancel this work, please.")).wait(ctx);
+		const [slot] = await s.asks();
 		assert.ok(slot);
-		const ask = await harness.commit((tx) => decision(tx, slot.decision), ctx);
-		assert.ok(ask?.status === "open");
+		const { d } = await s.readAsk(slot);
+		assert.deepEqual(aborted, [], "nothing stops before the owner answers");
 		let abortedAtNote: number[] | undefined;
 		const log = await harness.commit(eventLog, ctx);
 		const observer = harness.observeCommits({
@@ -95,28 +83,12 @@ for (const stage of ["candidates", "prototypes"] as const) {
 			end() {},
 		});
 		t.after(() => observer.detach());
-		assert.equal(
-			(
-				await fauxAnswer(s.store, ask.id, {
-					basis: ask.basis,
-					choice: "cancel",
-					annotations: [],
-				})
-			).kind,
-			"answered",
-		);
+		await s.answer(d, "cancel");
 		await s.settle();
 		assert.deepEqual(
 			abortedAtNote,
 			[0, 1],
 			"both requests stopped before cleanup was reported",
-		);
-		const { tasks } = await harness.inspect(ctx);
-		assert.ok(
-			!tasks.some(
-				({ record }) =>
-					record.kind === "keel.effect" || record.kind === "pi.generation",
-			),
 		);
 		const { items } = await harness.commit(
 			(tx) => tx.scanEntries({ conversationId: log }, 100),

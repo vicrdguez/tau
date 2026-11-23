@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { fauxAssistantMessage } from "tau/testing";
 import { toy } from "./toy.ts";
 
 const seat = {
@@ -28,23 +28,13 @@ for (const move of ["pause", "cancel"] as const) {
 		await x.finish("keel.stop");
 		const worker = await x.harness.conversation(id, ctx);
 		assert.ok(worker);
-		x.provider.setResponses([
-			fauxAssistantMessage([fauxToolCall("dispatch", { jobs: [job] })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
-		]);
-		await worker.submit({ type: "input", content: "delegate" }, ctx);
-		await worker.waitForIdle(ctx);
+		const { result } = await x.request(worker, "dispatch", { jobs: [job] });
 		const tool = (await x.tasks("pi.tool")).find(
 			(t) => t.conversationId === id,
 		);
 		assert.ok(tool);
-		const ret = (await worker.entries({}, 100, undefined, ctx)).items
-			.flatMap(({ model }) => model ?? [])
-			.find((m) => m.role === "toolResult");
-		assert.ok(ret?.role === "toolResult" && ret.isError);
-		assert.match(JSON.stringify(ret.content), /not the active bound agent/);
+		assert.ok(result?.isError);
+		assert.match(JSON.stringify(result.content), /not the active bound agent/);
 		assert.deepEqual(
 			(
 				await x.harness.commit(
