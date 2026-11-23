@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ConversationId, JsonObject } from "tau/durable";
-import { workId } from "../src/kernel/ids.ts";
-import type { LaneEvent, World } from "../src/kernel/lane.ts";
+import type { JsonObject } from "tau/durable";
 import { buildLane, buildTools } from "../src/lanes/build/index.ts";
 import type { buildView } from "../src/lanes/build/state.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
-import { drive } from "./fixtures/drive.ts";
+import { startBuild } from "./fixtures/build.ts";
+import { laneDriver, laneWorld } from "./fixtures/drive.ts";
 
 const mandate: Mandate = {
 	delegated: [],
@@ -17,8 +16,7 @@ const mandate: Mandate = {
 	nodes: [{ label: "price", rule: "round once", probe: "0.05" }],
 	checks: [{ id: "prove", argv: ["make", "test"], timeoutMs: 5000 }],
 };
-const work = workId(32 as ConversationId);
-const root = "/repo";
+const { work, root } = laneWorld();
 const repo = {
 	root,
 	commonDir: "/repo/.git",
@@ -52,65 +50,21 @@ const clean = {
 	changedPolicyFiles: [],
 };
 function setup(max_workers = 1) {
-	const world: World = {
-		work,
-		root,
-		now: 0,
-		view: () => null,
-		options: {
-			design: "a/a",
-			verify: "b/b",
-			queue: "c/c",
-			build: "d/d",
-			base: "main",
-			trunk: "trunk",
-			max_workers,
-		},
-	};
+	const world = laneWorld({ options: { max_workers } });
 	return buildLane.use((lane) => {
-		let s = lane.state.initial();
-		const tryEvent = (e: LaneEvent) => drive(lane, s, e, world);
-		function send(e: LaneEvent) {
-			const result = tryEvent(e);
-			if ("reject" in result) assert.fail(result.reject);
-			s = result.state;
-			return result;
-		}
-		const agents = () => lane.agents(s, world);
+		const driver = laneDriver(lane, world);
+		const { send, done, effects, agents } = driver;
 		const agent = (role: string) => {
 			const a = agents().find((a) => a.role === role);
 			assert.ok(a);
 			return a;
 		};
-		const effects = () => lane.effects(s, world);
 		const effect = () => {
 			const e = effects()[0];
 			assert.ok(e);
 			return e;
 		};
-		const done = (result: JsonObject) =>
-			send({ kind: "effect_done", key: effect().key, result });
-		function start(bound: Mandate = mandate) {
-			send({
-				kind: "bound",
-				mandate: bound,
-			});
-			assert.deepEqual(effect().spec, {
-				kind: "read_repo",
-				base: "main",
-				trunk: "trunk",
-			});
-			assert.deepEqual(agents(), []);
-			done({ kind: "repo", repo });
-			const { op } = effect().spec;
-			assert.deepEqual(op, {
-				kind: "start_build",
-				key: effect().key,
-				branch: "keel/32/build",
-			});
-			assert.deepEqual(agents(), []);
-			done({ kind: "started", base: repo.trunkHead });
-		}
+		const start = (bound = mandate) => startBuild(driver, bound, repo);
 		function plan(items: JsonObject[] = [item]) {
 			start();
 			send({ kind: "plan", items });
@@ -137,9 +91,10 @@ function setup(max_workers = 1) {
 			return { token: exp.token, tools: exp.tools, text: exp.input() };
 		};
 		return {
+			...driver,
 			world,
 			publication: () =>
-				(lane.view(s) as ReturnType<typeof buildView>).publicationOf(
+				(driver.view() as ReturnType<typeof buildView>).publicationOf(
 					agent("worker").key,
 				),
 			start,
@@ -147,23 +102,31 @@ function setup(max_workers = 1) {
 			prepare,
 			working,
 			pub,
-			tryEvent,
-			send,
-			done,
-			agents,
+			tryEvent: driver.attempt,
 			agent,
 			request,
-			effects,
 			effect,
-			identity: [lane.state.kind, lane.state.version, lane.state.scope],
 		};
 	});
 }
 
-test("Build v1 discovers the repo and starts the build before opening planning", () => {
+test("Build discovers the repo and starts the build before opening planning", () => {
 	const b = setup();
-	assert.deepEqual(b.identity, ["keel.build", 1, "conversation"]);
-	b.start();
+	b.send({ kind: "bound", mandate });
+	assert.deepEqual(b.effect().spec, {
+		kind: "read_repo",
+		base: "main",
+		trunk: "trunk",
+	});
+	assert.deepEqual(b.agents(), []);
+	b.done({ kind: "repo", repo });
+	assert.deepEqual(b.effect().spec.op, {
+		kind: "start_build",
+		key: b.effect().key,
+		branch: "keel/32/build",
+	});
+	assert.deepEqual(b.agents(), []);
+	b.done({ kind: "started", base: repo.trunkHead });
 	const r = b.request("coordinator");
 	assert.deepEqual(r.tools, ["publish_plan"]);
 	assert.match(r.text, /repair pricing/);

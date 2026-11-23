@@ -1,22 +1,14 @@
 import assert from "node:assert/strict";
 import { type TestContext, test } from "node:test";
-import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
-import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import {
-	agentKey,
-	effectKey,
-	subject,
-	token,
-	workId,
-} from "../src/kernel/ids.ts";
+import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { agentKey, subject, token } from "../src/kernel/ids.ts";
 import type { KernelEvent, LaneEvent } from "../src/kernel/lane.ts";
-import { ProjectState, WorkState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { buildDoc } from "../src/lanes/build/state.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo } from "./fixtures/repo.ts";
 
 const sha = "a".repeat(40);
 const rule = (label: string) => ({
@@ -47,75 +39,33 @@ async function start(
 		true,
 	);
 	const { harness } = s.store;
-	t.after(() => harness.close(ctx));
-	const work = workId(s.root.id);
-	const commit = <T>(fn: Parameters<typeof harness.commit<T>>[0]) =>
-		harness.commit(fn, ctx);
-	const send = (lane: string, event: LaneEvent) =>
-		commit((tx) =>
-			s.transact(tx, { lane, work: lane === "queue" ? null : work, event }, 1),
-		);
+	t.after(s.close);
+	const { work, commit, send, asks } = s;
 	const must = async (lane: string, event: LaneEvent) => {
 		const r = await send(lane, event);
 		assert.ok(!("reject" in r), JSON.stringify(r));
 	};
-	const fact = (fact: KernelEvent, lane = "build") =>
-		commit((tx) =>
-			s.transact(tx, { lane, work: lane === "queue" ? null : work, fact }, 1),
-		);
-	const asks = async () =>
-		Object.values(
-			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-		);
+	const fact = (fact: KernelEvent, lane = "build") => s.fact(lane, fact);
 	async function readAsk(local: string) {
 		const slot = (await asks()).find((a) => a.local.startsWith(local));
 		assert.ok(slot, `No ${local} decision`);
-		return commit(async (tx) => {
-			const d = await decision(tx, slot.decision);
-			assert.ok(d && d.status === "open");
-			const entry = await tx.entry(d.basis);
-			return { slot, d, text: (entry?.data as { text: string }).text };
-		});
+		return s.readAsk(slot);
 	}
 	async function answer(local: string, choice: string, text?: string) {
 		const { slot, d } = await readAsk(local);
-		await commit((tx) =>
-			s.transact(
-				tx,
-				{
-					lane: slot.lane,
-					work: slot.work,
-					fact: {
-						kind: "answered",
-						subject: subject(slot.local),
-						decision: d.id,
-						choice,
-						annotations: text ? [{ n: 1, text }] : [],
-					},
-				},
-				1,
-			),
+		await fact(
+			{
+				kind: "answered",
+				subject: subject(slot.local),
+				decision: d.id,
+				choice,
+				annotations: text ? [{ n: 1, text }] : [],
+			},
+			slot.lane,
 		);
 	}
-	async function done(prefix: string, result: JsonObject) {
-		const effects =
-			(await harness.snapshot(stateDoc(WorkState), work, ctx))?.effects ?? {};
-		const key = Object.keys(effects).findLast((k) =>
-			k.startsWith(`build:${prefix}`),
-		);
-		assert.ok(key, `No ${prefix} effect`);
-		await commit((tx) =>
-			s.transact(
-				tx,
-				{
-					lane: "build",
-					work,
-					fact: { kind: "effect_done", key: effectKey(key.slice(6)), result },
-				},
-				1,
-			),
-		);
-	}
+	const done = (prefix: string, result: JsonObject) =>
+		s.done("build", prefix, result);
 	async function brief(id: string, label = "wire") {
 		await must("build", {
 			kind: "brief",
@@ -530,10 +480,9 @@ test("cancelling a stalled investigation of a non-blocking note exposes the work
 });
 
 test("a coordinator stall after resume shows the refused plan's error, not a prior turn's error", async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const s = await openScriptedWorkflow(root, new MemoryStorage(), true);
-	const { harness } = s.store;
-	t.after(() => harness.close(ctx));
+	t.after(s.close);
 	const noPlan = fauxAssistantMessage("I could not publish a plan.");
 	s.provider.setResponses([
 		s.turn("designer", "ground", {
@@ -544,28 +493,15 @@ test("a coordinator stall after resume shows the refused plan's error, not a pri
 		noPlan,
 		noPlan,
 	]);
-	await (
-		await s.root.submit({ type: "input", content: mandate.intent }, ctx)
-	).wait(ctx);
+	await (await s.submit(mandate.intent)).wait(ctx);
 	await s.settle();
 	async function openHolding() {
-		const slots = (await harness.snapshot(stateDoc(ProjectState), ctx))!.asks;
-		const open = Object.values(slots);
+		const open = await s.asks();
 		assert.equal(open.length, 1);
-		return harness.commit(async (tx) => {
-			const d = await decision(tx, open[0]!.decision);
-			assert.ok(d && d.status === "open");
-			assert.deepEqual(d.choices, ["resume", "cancel"]);
-			return { d, text: (await tx.entry(d.basis))?.data as { text: string } };
-		}, ctx);
+		return s.readAsk(open[0]!);
 	}
 	async function resume(d: Awaited<ReturnType<typeof openHolding>>["d"]) {
-		const answer = await fauxAnswer(s.store, d.id, {
-			basis: d.basis,
-			choice: "resume",
-			annotations: [],
-		});
-		assert.equal(answer.kind, "answered");
+		await s.answer(d, "resume");
 		await s.settle();
 	}
 	const first = await openHolding();
@@ -579,13 +515,13 @@ test("a coordinator stall after resume shows the refused plan's error, not a pri
 	]);
 	await resume(first.d);
 	const stalled = await openHolding();
-	assert.match(stalled.text.text, /I could not publish a plan/);
-	assert.match(stalled.text.text, /A dependency is missing from the plan\./);
+	assert.match(stalled.text, /I could not publish a plan/);
+	assert.match(stalled.text, /A dependency is missing from the plan\./);
 
 	s.provider.setResponses([noPlan, noPlan]);
 	await resume(stalled.d);
 	assert.doesNotMatch(
-		(await openHolding()).text.text,
+		(await openHolding()).text,
 		/A dependency is missing from the plan\./,
 	);
 });

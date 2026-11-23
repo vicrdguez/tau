@@ -19,8 +19,8 @@ import { ProjectState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { sweepDispatch } from "../src/roles/dispatch.ts";
 import { runRepoEffect } from "../src/workflow.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture, git } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo, git } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 const started = 1_800_000_000_000;
@@ -91,7 +91,7 @@ test("sweep accepts array replies with fences or surrounding prose", async () =>
 test("a durable sweep fires once per tick around SIGKILL, files real playbook drift during a landing, and re-arms while idle", {
 	timeout: 35_000,
 }, async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const file = join(root, ".git", "sweep.sqlite");
 	await mkdir(join(root, ".keel", "playbooks"), { recursive: true });
 	await writeFile(

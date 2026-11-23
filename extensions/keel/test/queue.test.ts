@@ -2,41 +2,22 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ConversationId } from "tau/durable";
 import { type WorkId, workId } from "../src/kernel/ids.ts";
-import type { LaneEvent, RegisteredLane, World } from "../src/kernel/lane.ts";
+import type { LaneEvent, RegisteredLane } from "../src/kernel/lane.ts";
 import { queueLane, queueTools } from "../src/lanes/queue/index.ts";
 import { trunkLane } from "../src/lanes/verify/trunk.ts";
-import { drive } from "./fixtures/drive.ts";
+import { laneDriver, laneWorld } from "./fixtures/drive.ts";
 
 const id = (n: number) => workId(n as ConversationId);
 const a = id(1),
 	b = id(2),
 	c = id(3);
-const world: World = {
-	work: null,
-	root: "/project",
-	now: 1,
-	options: {
-		design: "a/b",
-		build: "a/b",
-		verify: "a/b",
-		queue: "a/b",
-		trunk: "trunk",
-		base: "main",
-		max_workers: 1,
-	},
-	view: () => null,
-};
+const world = laneWorld({ work: null });
 function project(entry: RegisteredLane) {
 	return entry.use((lane) => {
-		let state = lane.state.initial();
+		const driver = laneDriver(lane, world);
 		return {
-			asks: () => lane.asks(state, world),
-			send(event: LaneEvent) {
-				const result = drive(lane, state, event, world);
-				assert.ok(!("reject" in result), JSON.stringify(result));
-				state = result.state;
-				return result.send ?? [];
-			},
+			asks: driver.asks,
+			send: (event: LaneEvent) => driver.send(event).send ?? [],
 		};
 	});
 }

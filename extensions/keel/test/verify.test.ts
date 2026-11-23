@@ -2,27 +2,13 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { test } from "node:test";
 import type { WorkId } from "../src/kernel/ids.ts";
-import type { LaneEvent, World } from "../src/kernel/lane.ts";
+import type { LaneEvent } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
 import { verify } from "../src/lanes/verify/index.ts";
 import { principleInputs } from "../src/principles/index.ts";
-import { drive } from "./fixtures/drive.ts";
+import { drive, laneDriver, laneWorld } from "./fixtures/drive.ts";
 
-const world: World = {
-	work: 41 as WorkId,
-	root: "/repo",
-	now: 1,
-	view: () => null,
-	options: {
-		design: "x/y",
-		build: "x/y",
-		verify: "x/y",
-		queue: "x/y",
-		base: "main",
-		trunk: "trunk",
-		max_workers: 3,
-	},
-};
+const world = laneWorld({ work: 41 as WorkId, options: { max_workers: 3 } });
 const repo = {
 	root: "/repo",
 	commonDir: "/repo/.git",
@@ -70,14 +56,8 @@ function flow(view = world.view) {
 		view,
 		runningEffect: (key: string) => running.has(key),
 	};
-	let state = verify.state.initial();
-	const apply = (event: LaneEvent) => {
-		const result = drive(verify, state, event, facts);
-		assert.ok("state" in result, JSON.stringify(result));
-		state = result.state;
-		return result;
-	};
-	const effects = () => verify.effects(state, world);
+	const driver = laneDriver(verify, facts);
+	const { send: apply, effects } = driver;
 	const effect = (kind: string) => {
 		const d = effects().find(
 			(d) => d.spec.kind === kind || (d.spec.op as LaneEvent)?.kind === kind,
@@ -86,9 +66,8 @@ function flow(view = world.view) {
 		return { key: d.key, op: (d.spec.op ?? d.spec) as LaneEvent };
 	};
 	const done = (kind: string, result: LaneEvent) =>
-		apply({ kind: "effect_done", key: effect(kind).key, result });
-	const agents = () =>
-		verify.agents(state, world).filter((a) => a.expects.length > 0);
+		driver.done(result, effect(kind).key);
+	const agents = () => driver.agents().filter((a) => a.expects.length > 0);
 	const agent = (role = "verifier") => {
 		const a = agents().find((a) => a.role === role);
 		assert.ok(a, `expected ${role}`);
@@ -192,10 +171,10 @@ function flow(view = world.view) {
 		prepare(trunk);
 		done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	};
-	const asks = () => verify.asks(state, world);
 	return {
 		running,
-		state: () => state,
+		state: driver.state,
+		attempt: driver.attempt,
 		agents,
 		agent,
 		call,
@@ -215,7 +194,7 @@ function flow(view = world.view) {
 		take,
 		prepare,
 		prepared,
-		asks,
+		asks: driver.asks,
 	};
 }
 const findingHold = (cause: string, item = "bug") => ({
@@ -344,6 +323,25 @@ test("a verifier's principle violation returns the failed item and separately pr
 	assert.equal(proposal?.event.principle, true);
 	assert.match(String(proposal?.event.text), /project\/round-once/);
 	assert.match(String(proposal?.event.report), /A half-cent is rounded twice/);
+});
+
+test("a principle violation cannot cite a thread outside the failing verdict", () => {
+	const x = flow();
+	x.publish();
+	x.checkout();
+	const result = x.attempt({
+		kind: "verdict",
+		agent: x.agent().key,
+		outcome: "fail",
+		text: "The balance is wrong.",
+		blocks: [block("totals")],
+		notes: [],
+		principlesUnfollowed: [{ name: "project/round-once", thread: "absent" }],
+	});
+	assert.match(
+		"reject" in result ? result.reject : "",
+		/existing block thread/,
+	);
 });
 
 test("a classified item hold gates verifier tools and keeps siblings running until the last cause drops", () => {

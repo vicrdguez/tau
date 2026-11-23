@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ConversationId, JsonObject } from "tau/durable";
-import { workId } from "../src/kernel/ids.ts";
-import type { LaneEvent, World } from "../src/kernel/lane.ts";
+import type { JsonObject } from "tau/durable";
+import type { LaneEvent } from "../src/kernel/lane.ts";
 import { buildLane } from "../src/lanes/build/index.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
-import { drive } from "./fixtures/drive.ts";
-
-const work = workId(32 as ConversationId);
+import { startBuild } from "./fixtures/build.ts";
+import { laneDriver, laneWorld } from "./fixtures/drive.ts";
+const { work } = laneWorld();
 const base = "a".repeat(40);
 const tip = "b".repeat(40);
 const mandate: Mandate = {
@@ -64,41 +63,15 @@ function setup(
 	initial = mandate,
 	initialReplies: JsonObject[] = [],
 ) {
-	const world: World = {
-		work,
-		root: "/repo",
-		now: 0,
-		view: () => null,
-		options: {
-			design: "a/a",
-			build: "b/b",
-			verify: "c/c",
-			queue: "d/d",
-			base: "main",
-			trunk: "trunk",
-			max_workers,
-		},
-	};
 	return buildLane.use((lane) => {
-		let state = lane.state.initial();
-		const tryEvent = (event: LaneEvent) => drive(lane, state, event, world);
-		const send = (event: LaneEvent) => {
-			const r = tryEvent(event);
-			if ("reject" in r) assert.fail(r.reject);
-			state = r.state;
-			return r.send ?? [];
-		};
-		const agents = () => lane.agents(state, world);
+		const driver = laneDriver(lane, laneWorld({ options: { max_workers } }));
+		const { agents, effects, done } = driver;
+		const send = (event: LaneEvent) => driver.send(event).send ?? [];
 		const coord = () =>
 			agents().find((a) => a.role === "coordinator")?.expects[0];
 		const workers = () => agents().filter((a) => a.role === "worker");
 		const worker = (item: string) =>
 			workers().find((a) => a.key.startsWith(`worker/${item}/`));
-		const effects = () => lane.effects(state, world);
-		const done = (result: JsonObject, key = effects()[0]?.key) => {
-			assert.ok(key, "an effect is due");
-			return send({ kind: "effect_done", key, result });
-		};
 		const plan = (
 			items: ReturnType<typeof goal>[],
 			replies: JsonObject[] = [],
@@ -133,23 +106,18 @@ function setup(
 			done({ kind: "removed" }, cleanup.key);
 			return routes;
 		};
-		send({ kind: "bound", mandate: initial });
-		done({
-			kind: "repo",
-			repo: {
-				root: "/repo",
-				commonDir: "/repo/.git",
-				base: "main",
-				trunk: "trunk",
-				baseHead: base,
-				trunkHead: base,
-			},
+		startBuild(driver, initial, {
+			root: "/repo",
+			commonDir: "/repo/.git",
+			base: "main",
+			trunk: "trunk",
+			baseHead: base,
+			trunkHead: base,
 		});
-		done({ kind: "started", base });
 		plan(items, initialReplies);
 		return {
 			send,
-			tryEvent,
+			tryEvent: driver.attempt,
 			coord,
 			worker,
 			workers,
@@ -160,10 +128,8 @@ function setup(
 			ready,
 			publish,
 			merge,
-			view: () => lane.view(state),
-			restore: () => {
-				state = JSON.parse(JSON.stringify(state));
-			},
+			view: driver.view,
+			restore: driver.restore,
 		};
 	});
 }

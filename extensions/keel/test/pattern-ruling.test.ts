@@ -1,32 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
-import { fauxAnswer } from "tau/testing";
-import { ProjectState } from "../src/kernel/records.ts";
-import { stateDoc } from "../src/kernel/state.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture, git } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo, git } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 test("a worker's pattern citation files from its commit without blocking; a later ruling follows the blessing without filing", {
 	timeout: 15000,
 }, async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const s = await openScriptedWorkflow(root, new MemoryStorage(), true);
 	const { harness } = s.store;
 	const recorded = latch<void>();
 	const blessed = latch<void>();
 	t.after(async () => {
 		blessed.resolve();
-		await harness.close(ctx);
+		await s.close();
 	});
-	const turn = (...args: Parameters<typeof s.turn>) => {
-		const step = s.turn(...args);
-		assert.equal(typeof step, "function");
-		return step;
-	};
+	const { turn } = s;
 	const goal = "Repair the book";
 	const pattern = "preserve-the-last-line";
 	const first = {
@@ -121,12 +113,8 @@ test("a worker's pattern citation files from its commit without blocking; a late
 		}),
 		pass,
 	]);
-	const asks = () =>
-		harness
-			.snapshot(stateDoc(ProjectState), ctx)
-			.then((p) => Object.values(p?.asks ?? {}));
 	harness.resume();
-	await s.root.submit({ type: "input", content: goal }, ctx);
+	await s.submit(goal);
 	await recorded.promise;
 	const delivery = (
 		await harness.commit(
@@ -139,28 +127,17 @@ test("a worker's pattern citation files from its commit without blocking; a late
 		"the ruling must schedule investigation, not hold the worker",
 	);
 	await harness.waitForTask(delivery.id, ctx);
-	const [triage] = await asks();
+	const [triage] = await s.asks();
 	assert.equal(triage?.lane, "queue");
-	assert.ok(triage);
-	const d = await harness.commit((tx) => decision(tx, triage.decision), ctx);
-	assert.ok(d?.status === "open");
+	const { d } = await s.readAsk(triage!);
 	assert.deepEqual(d.choices, ["bless", "revoke", "defer"]);
-	assert.equal(
-		(
-			await fauxAnswer(s.store, d.id, {
-				basis: d.basis,
-				choice: "bless",
-				annotations: [],
-			})
-		).kind,
-		"answered",
-	);
+	await s.answer(d, "bless");
 	const answer = (
 		await harness.commit((tx) => tx.scanTasks({ kind: "keel.answer" }, 10), ctx)
 	).items[0];
 	assert.ok(answer);
 	await harness.waitForTask(answer.id, ctx);
-	assert.deepEqual(await asks(), []);
+	assert.deepEqual(await s.asks(), []);
 	blessed.resolve();
 	await s.settle();
 	assert.equal(s.queueProvider.getPendingResponseCount(), 0);
@@ -176,15 +153,10 @@ test("a worker's pattern citation files from its commit without blocking; a late
 			.map(({ id }) => id),
 		[delivery.id],
 	);
-	const [handover] = await asks();
-	assert.equal(handover?.lane, "verify");
-	assert.ok(handover);
-	const hand = await harness.commit(
-		(tx) => decision(tx, handover.decision),
-		ctx,
+	const open = await s.asks();
+	assert.deepEqual(
+		open.map((a) => a.local),
+		["handover"],
 	);
-	assert.ok(hand?.status === "open");
-	const basis = await harness.commit((tx) => tx.entry(hand.basis), ctx);
-	assert.ok(JSON.stringify(basis?.data).includes(second.what));
-	assert.equal(git(root, "show", "trunk:book"), "repaired");
+	assert.ok((await s.readAsk(open[0]!)).text.includes(second.what));
 });

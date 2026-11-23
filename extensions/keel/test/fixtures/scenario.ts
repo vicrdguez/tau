@@ -1,28 +1,14 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import {
-	CodingTools,
-	createRegistry,
-	type JsonObject,
-	NodeExecutionEnv,
-	type Storage,
-} from "tau/durable";
-import {
-	createModels,
-	type FauxResponseStep,
-	fauxAnswer,
-	fauxAssistantMessage,
-	fauxProvider,
-	fauxToolCall,
-	openStore,
-} from "tau/testing";
-import { ProjectState, WorkState } from "../../src/kernel/records.ts";
+import type { JsonObject, Storage } from "tau/durable";
+import type { FauxResponseStep } from "tau/testing";
+import { WorkState } from "../../src/kernel/records.ts";
 import { stateDoc } from "../../src/kernel/state.ts";
 import type { EffectRunner } from "../../src/kernel/tasks.ts";
-import { options } from "../../src/roles/index.ts";
-import { createWorkflow } from "../../src/workflow.ts";
+import { openScriptedWorkflow } from "./kernel.ts";
+
+export { openScriptedWorkflow } from "./kernel.ts";
 
 const prompt =
 	"Fix book according to its approved format: repaired, followed by one newline.";
@@ -36,171 +22,6 @@ const thread = "line-ending";
 const evidence = "The checked-out book has no trailing newline.";
 type Phase = "rework" | "through-publish" | "through-land" | "after-landing";
 
-/** The production entry and coding tools, with scripted models and a real cwd. */
-export async function openScriptedWorkflow(
-	cwd: string,
-	storage: Storage,
-	first: boolean,
-	runner?: EffectRunner,
-	now?: () => number,
-) {
-	const k = createWorkflow(runner);
-	const registry = createRegistry();
-	registry.install(CodingTools);
-	registry.install(k.extension);
-	const roles = ["designer", "coordinator", "worker", "verifier"];
-	const provider = fauxProvider({ models: roles.map((id) => ({ id })) });
-	const queueProvider = fauxProvider({
-		provider: "queue-fixture",
-		models: [{ id: "investigator" }],
-	});
-	const sweeper = fauxProvider({
-		provider: "sweep-fixture",
-		models: [{ id: "sweeper" }],
-	});
-	const secondCandidate = fauxProvider({ provider: "candidate-fixture" });
-	const judge = fauxProvider({ provider: "judge-fixture" });
-	const challenger = fauxProvider({ provider: "challenger-fixture" });
-	const explorer = fauxProvider({ provider: "explorer-fixture" });
-	const models = createModels();
-	for (const p of [
-		provider,
-		queueProvider,
-		sweeper,
-		secondCandidate,
-		judge,
-		challenger,
-		explorer,
-	])
-		models.setProvider(p.provider);
-	const store = await openStore(
-		storage,
-		{
-			registry,
-			models,
-			...(now && { now }),
-			env: (target) =>
-				new NodeExecutionEnv({
-					cwd: target.cwd ?? cwd,
-					shellEnv: {
-						...process.env,
-						GIT_CONFIG_NOSYSTEM: "1",
-						GIT_CONFIG_GLOBAL: "/dev/null",
-					},
-				}),
-		},
-		ctx,
-	);
-	const { harness } = store;
-	if (first)
-		await harness.commit(
-			(tx) =>
-				options.set(tx, {
-					design: "faux/designer",
-					build: "faux/coordinator",
-					worker: "faux/worker",
-					verify: "faux/verifier",
-					queue: "queue-fixture/investigator",
-					arena_seat_1: "faux/designer",
-					arena_seat_2: `candidate-fixture/${secondCandidate.getModel().id}`,
-					arena_judge: `judge-fixture/${judge.getModel().id}`,
-					arena_challenger: `challenger-fixture/${challenger.getModel().id}`,
-					design_explorer: `explorer-fixture/${explorer.getModel().id}`,
-				}),
-			ctx,
-		);
-	const root = first
-		? await harness.root(ctx, {
-				agent: { ...(await harness.commit(k.entry, ctx)), cwd },
-			})
-		: await harness.root(ctx);
-	const errors: string[] = [];
-	function turn(
-		role: string,
-		name: string,
-		args: JsonObject,
-		...expectedInput: (string | { tool: string; text: string })[]
-	): Extract<FauxResponseStep, (...args: never[]) => unknown> {
-		return (context, _, __, model) => {
-			if (model.id !== role)
-				errors.push(`${name}: expected ${role}, got ${model.id}`);
-			const latest = JSON.stringify(
-				context.messages.filter((m) => m.role === "user").at(-1),
-			);
-			const last = context.messages.at(-1);
-			for (const part of expectedInput) {
-				if (typeof part === "string") {
-					if (!latest?.includes(part))
-						errors.push(
-							`${role}.${name}: latest input did not include ${part}`,
-						);
-				} else if (
-					last?.role !== "toolResult" ||
-					last.toolName !== part.tool ||
-					!JSON.stringify(last.content).includes(part.text)
-				) {
-					errors.push(
-						`${name}: expected ${part.tool} to return ${part.text}; got ${JSON.stringify(last)?.slice(0, 300)}`,
-					);
-				}
-			}
-			if (last?.role === "toolResult" && last.isError)
-				errors.push(`${last.toolName}: ${JSON.stringify(last.content)}`);
-			return fauxAssistantMessage([fauxToolCall(name, args)], {
-				stopReason: "toolUse",
-			});
-		};
-	}
-	async function settle(
-		ignore: (kind: string, input: unknown) => boolean = () => false,
-	) {
-		harness.resume();
-		for (;;) {
-			const tasks = (await harness.inspect(ctx)).tasks.filter(
-				({ record }) => !ignore(record.kind, record.input),
-			);
-			if (!tasks.length) break;
-			await Promise.all(
-				tasks.map(async ({ record, state }) => {
-					assert.notEqual(state.kind, "blocked", record.kind);
-					const {
-						state: { outcome },
-					} = await harness.waitForTask(record.id, ctx);
-					assert.notEqual(
-						outcome.status,
-						"faulted",
-						JSON.stringify({ kind: record.kind, outcome }),
-					);
-				}),
-			);
-		}
-		assert.deepEqual(errors, []);
-	}
-	return {
-		store,
-		root,
-		transact: k.transact,
-		options: k.options,
-		provider,
-		queueProvider,
-		sweeper,
-		secondCandidate,
-		judge,
-		challenger,
-		explorer,
-		turn,
-		settle,
-		newDesigner: async () =>
-			harness.createConversation(
-				{
-					ownership: { kind: "ownerless" },
-					agent: { ...(await harness.commit(k.entry, ctx)), cwd },
-				},
-				ctx,
-			),
-	};
-}
-
 export async function openScenario(
 	cwd: string,
 	storage: Storage,
@@ -210,8 +31,17 @@ export async function openScenario(
 ) {
 	const first = phase === "rework" || phase === "through-publish";
 	const rework = phase === "rework";
-	const { store, root, provider, queueProvider, turn, settle } =
-		await openScriptedWorkflow(cwd, storage, first, runner, now);
+	const {
+		store,
+		root,
+		provider,
+		queueProvider,
+		turn,
+		settle,
+		asks,
+		readAsk,
+		answer,
+	} = await openScriptedWorkflow(cwd, storage, first, runner, now);
 	const { harness } = store;
 	const script: FauxResponseStep[] = [];
 	const call = (...args: Parameters<typeof turn>) => script.push(turn(...args));
@@ -420,25 +250,12 @@ export async function openScenario(
 			0,
 			"all scripted agent turns ran",
 		);
-		const asks = () =>
-			harness
-				.snapshot(stateDoc(ProjectState), ctx)
-				.then((p) => Object.values(p?.asks ?? {}));
 		const open = await asks();
 		assert.equal(open.length, 1, "only hand-over needs the owner");
 		const handOver = open[0]!;
 		assert.equal(handOver.lane, "verify");
-		const d = await harness.commit(
-			(tx) => decision(tx, handOver.decision),
-			ctx,
-		);
-		assert.ok(d?.status === "open");
+		const { d, text: rendered } = await readAsk(handOver);
 		assert.deepEqual([...d.choices].sort(), ["accept", "reject"]);
-		const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
-		assert.ok(
-			basis?.data && typeof basis.data === "object" && "text" in basis.data,
-		);
-		const rendered = String(basis.data.text);
 		assert.match(rendered, /no action/i);
 		assert.match(rendered, /no other reader needs a change/);
 		for (const part of [trunk, goal, what, note, risk])
@@ -446,12 +263,7 @@ export async function openScenario(
 				rendered.includes(part),
 				`missing ${part} from hand-over: ${rendered}`,
 			);
-		const result = await fauxAnswer(store, d.id, {
-			basis: d.basis,
-			choice: "accept",
-			annotations: [],
-		});
-		assert.equal(result.kind, "answered");
+		await answer(d, "accept");
 		await settle();
 		assert.deepEqual(await asks(), []);
 	}

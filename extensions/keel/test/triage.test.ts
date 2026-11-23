@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { LaneEvent, Message, World } from "../src/kernel/lane.ts";
 import { queueLane } from "../src/lanes/queue/index.ts";
 import { explorerDispatch } from "../src/roles/dispatch.ts";
-import { drive } from "./fixtures/drive.ts";
+import { laneDriver } from "./fixtures/drive.ts";
 
 const plan = [
 	{
@@ -67,13 +67,10 @@ const filing = {
 };
 function queue(world: World = activeWorld) {
 	return queueLane.use((l) => {
-		let s = l.state.initial();
-		const attempt = (e: LaneEvent) => drive(l, s, e, world);
+		const driver = laneDriver(l, world);
 		let notes: string[] = [];
 		const send = (e: LaneEvent): Message[] => {
-			const r = attempt(e);
-			if ("reject" in r) assert.fail(r.reject);
-			s = r.state;
+			const r = driver.send(e);
 			const outgoing = (r.send ?? []).filter((m) => {
 				if (
 					m.lane !== "queue" ||
@@ -105,8 +102,7 @@ function queue(world: World = activeWorld) {
 			nodes: ["sums"],
 			...(extra as object),
 		});
-		const effects = () => l.effects(s, world);
-		const ask = () => l.asks(s, world);
+		const ask = driver.asks;
 		const answer = (choice: string, subject = ask()[0]!.subject) =>
 			send({
 				kind: "answered",
@@ -115,20 +111,19 @@ function queue(world: World = activeWorld) {
 				decision: "d1",
 				annotations: [{ n: 1, text: "Use the ledger boundary." }],
 			});
-		const agents = () => l.agents(s, world);
 		return {
 			send,
 			file,
-			attempt,
+			attempt: driver.attempt,
 			investigation,
 			ask,
 			answer,
-			agents,
-			effects,
-			state: () => s,
+			agents: driver.agents,
+			effects: driver.effects,
+			state: driver.state,
 			notes: () => notes,
 			view: () =>
-				l.view(s) as {
+				driver.view() as {
 					findingsFor(work: number): string;
 					patternRulings: { name: string; status: string }[];
 					priorFindings: {

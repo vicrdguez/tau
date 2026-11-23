@@ -1,21 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decision } from "tau";
-import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type JsonObject, MemoryStorage } from "tau/durable";
-import { type FauxResponseStep, fauxAnswer } from "tau/testing";
-import { ProjectState } from "../src/kernel/records.ts";
-import { stateDoc } from "../src/kernel/state.ts";
+import type { FauxResponseStep } from "tau/testing";
 import { options } from "../src/roles/index.ts";
 import { runRepoEffect } from "../src/workflow.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture, git } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo, git } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 test("build two dependents concurrently from the first merge, merge serially, and hand over exactly the verified tree", {
 	timeout: 15000,
 }, async (t) => {
-	const { root, base } = await fixture(t);
+	const { root, base } = await tempRepo(t);
 	const bothWorkers = latch<void>();
 	const workers = new Set<string>();
 	const briefed: string[] = [];
@@ -51,15 +47,12 @@ test("build two dependents concurrently from the first merge, merge serially, an
 			}
 		},
 	);
-	const { harness } = s.store;
 	t.after(async () => {
 		bothWorkers.resolve();
-		await harness.close(ctx);
+		await s.close();
 	});
-	await harness.commit(
-		async (tx) =>
-			options.set(tx, { ...(await options.get(tx)), max_workers: 2 }),
-		ctx,
+	await s.commit(async (tx) =>
+		options.set(tx, { ...(await options.get(tx)), max_workers: 2 }),
 	);
 	const build = `keel/${s.root.id}/build`;
 	const intent = "Restore the book and add both independent indexes";
@@ -73,11 +66,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 			deps: ["book"],
 		},
 	];
-	const turn = (...params: Parameters<typeof s.turn>) => {
-		const answer = s.turn(...params);
-		assert.equal(typeof answer, "function");
-		return answer;
-	};
+	const { turn } = s;
 	const brief = (id: string) =>
 		turn("coordinator", "brief_item", {
 			item: id,
@@ -188,7 +177,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 		verdict,
 		...Array.from({ length: 10 }, () => step),
 	]);
-	await s.root.submit({ type: "input", content: intent }, ctx);
+	await s.submit(intent);
 	await s.settle();
 	assert.equal(s.provider.getPendingResponseCount(), 0);
 	assert.deepEqual([...workers].sort(), ["left", "right"]);
@@ -217,29 +206,7 @@ test("build two dependents concurrently from the first merge, merge serially, an
 		git(root, "worktree", "list", "--porcelain").match(/^worktree /gm)?.length,
 		1,
 	);
-	const project = await harness.snapshot(stateDoc(ProjectState), ctx);
-	const asks = Object.values(project?.asks ?? {});
+	const asks = await s.asks();
 	assert.equal(asks.length, 1);
-	const handover = await harness.commit(
-		(tx) => decision(tx, asks[0]!.decision),
-		ctx,
-	);
-	assert.ok(handover?.status === "open");
-	const basis = await harness.commit((tx) => tx.entry(handover.basis), ctx);
-	assert.match(JSON.stringify(basis?.data), new RegExp(trunk));
-	assert.equal(
-		(
-			await fauxAnswer(s.store, handover.id, {
-				basis: handover.basis,
-				choice: "accept",
-				annotations: [],
-			})
-		).kind,
-		"answered",
-	);
-	await s.settle();
-	assert.deepEqual(
-		(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks,
-		{},
-	);
+	assert.match((await s.readAsk(asks[0]!)).text, new RegExp(trunk));
 });
