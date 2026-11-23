@@ -13,7 +13,7 @@
 - A moved ref, occupied path or effect exhausted after retries holds the affected operation and reports evidence. Resume must not overwrite a foreign ref or accept an unverified target.
 - Stopped, failed and unfulfilled agents hold once; only a resume reopens their obligation with a new token and one-turn owner direction. A later stop or completed tool call does not carry those instructions into the next delivery.
 - Cancellation withdraws unclaimed operations and releases a wait/slot. A CAS already running finishes under the slot and its real outcome is reported. Running checkout/integration jobs settle before disposal; held operations are cleaned up without a successor write. Failed removals name their paths in Verify's single cleanup report to Design.
-- Hand-over releases the slot before the owner answers. It names the trunk SHA, intent, notes, cost-ordered rulings, residual risk, the directions given across lanes and the diagnosis of non-convergence, even after the original review is superseded. Reject keeps the missing-check annotations; accept and reject close work.
+- Hand-over releases the slot before the owner answers. It names the trunk SHA, intent, notes, cost-ordered rulings, residual risk, the directions given across lanes and the diagnosis of non-convergence, even after the original review is superseded. Reject files each annotation as an owner finding with the landed evidence; accept and annotated reject close work.
 - A superseded answer or effect result cannot reopen work.
 - The independently pinned v1 state retains open holds and in-flight landing identifiers.
 

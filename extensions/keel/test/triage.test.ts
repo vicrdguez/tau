@@ -552,7 +552,7 @@ test("the investigator can close a non-blocking observation with a reason but no
 	q.file({ source: "verifier", text: "Other readers unchanged" });
 	q.file({
 		source: "owner",
-		text: "MISSING-CHECK: the owner rejected hand-over",
+		text: "The landed change does not handle an empty book.",
 	});
 	q.file({ text: "I am blocked", blocking: true });
 	const closure = {

@@ -1,13 +1,11 @@
-# Override and sweep failure inventory
+# Hand-over and sweep failure inventory
 
-## Override
+## Hand-over
 
-- A blank or unannotated rejection fails to ask again or files a check anyway.
-- An annotated rejection loses an annotation, the source commit, or its original hand-over evidence.
-- An investigator closes an override, or triage build does not seed work that encodes it.
-- Duplicate override wording makes two outstanding obligations, or defer/drop forgives the check.
-- An unrelated, failed, cancelled or unchanged build clears a check without a verified landed commit.
-- Real repository: the owner rejects, builds from triage, and sees no check owed on the encoding hand-over.
+- A blank or unannotated rejection fails to ask again or files a finding anyway.
+- An annotated rejection loses an annotation, owner attribution, the landed commit or the hand-over evidence.
+- An investigator closes an owner's finding as no action.
+- Real repository: the rejection bypasses investigation, defer does not park a finding, build does not seed new work, or a later hand-over shows a debt list.
 
 ## Sweep and queue
 
