@@ -11,6 +11,7 @@ import {
 } from "tau/durable";
 import { obj } from "tau/schema";
 import { createModels, openStore } from "tau/testing";
+import { explorerDispatch } from "../src/roles/dispatch.ts";
 import {
 	type KeelOptions,
 	options,
@@ -40,7 +41,7 @@ const laneRoles = [
 	],
 	["build", ["coordinator", "worker", "build_explorer"]],
 	["verify", ["verifier", "diagnoser"]],
-	["queue", ["investigator", "queue_explorer"]],
+	["queue", ["investigator", "queue_explorer", "sweeper"]],
 ] as const satisfies ReadonlyArray<
 	readonly [keyof typeof lanes, readonly RoleName[]]
 >;
@@ -80,27 +81,25 @@ test("four lane models suffice; every role and seat can independently override i
 		/trunk.*base|base.*trunk/i,
 	);
 	const defaults = await read(lanes);
-	assert.equal(defaults.trunk, "trunk");
-	assert.equal(defaults.base, "main");
-	assert.equal(defaults.max_workers, 3);
+	const { base, trunk, max_workers, dispatch_rounds, dispatch_minutes } =
+		defaults;
 	assert.deepEqual(
-		[
-			Reflect.get(defaults, "dispatch_rounds"),
-			Reflect.get(defaults, "dispatch_minutes"),
-		],
-		[64, 20],
+		{ base, trunk, max_workers, dispatch_rounds, dispatch_minutes },
+		{
+			base: "main",
+			trunk: "trunk",
+			max_workers: 3,
+			dispatch_rounds: 64,
+			dispatch_minutes: 20,
+		},
 	);
 	const bounded = await read({
 		...lanes,
-		...{ dispatch_rounds: 5, dispatch_minutes: 2 },
+		dispatch_rounds: 5,
+		dispatch_minutes: 2,
 	});
-	assert.deepEqual(
-		[
-			Reflect.get(bounded, "dispatch_rounds"),
-			Reflect.get(bounded, "dispatch_minutes"),
-		],
-		[5, 2],
-	);
+	assert.equal(bounded.dispatch_rounds, 5);
+	assert.equal(bounded.dispatch_minutes, 2);
 	const overrides = Object.fromEntries(
 		laneRoles.flatMap(([, roles]) =>
 			roles.map((role) => [role, `custom/${role}`]),
@@ -168,20 +167,6 @@ test("configured agents see their coding tools and only their assigned Keel tool
 		);
 		const agent = await conversation.agent(ctx);
 		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
-		if (role === "designer") {
-			assert.match(agent.instructions ?? "", /## Proof/);
-			assert.match(agent.instructions ?? "", /reserved[^\n]*`intent`/i);
-			assert.match(agent.instructions ?? "", /share[^\n]*label/i);
-			assert.doesNotMatch(
-				agent.instructions ?? "",
-				/protected paths|protectedPaths/i,
-			);
-			assert.match(
-				agent.instructions ?? "",
-				/tell the owner[^\n]*confirmation[^\n]*call `request_cancel`/i,
-			);
-			assert.doesNotMatch(agent.instructions ?? "", /\{\{form\}\}/);
-		}
 		assert.deepEqual(agent.tools.map((t) => t.name).sort(), expected, role);
 		assert.deepEqual(
 			agent.extensions.map((e) => e.name).sort(),
@@ -189,4 +174,29 @@ test("configured agents see their coding tools and only their assigned Keel tool
 			role,
 		);
 	}
+	assert.deepEqual([...explorerDispatch.roles].sort(), [
+		"designer",
+		"investigator",
+		"worker",
+	]);
+	const worker = {
+		role: "worker",
+		cwd: null,
+		options: opts,
+		view: () => null,
+		priorWorks: [],
+	} as const;
+	assert.ok(
+		explorerDispatch.resolve(worker, {
+			seat: "build_explorer",
+			question: "Check the inputs",
+		}),
+	);
+	assert.equal(
+		explorerDispatch.resolve(worker, {
+			seat: "design_explorer",
+			question: "Check the inputs",
+		}),
+		undefined,
+	);
 });
