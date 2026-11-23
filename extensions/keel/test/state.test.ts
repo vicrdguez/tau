@@ -153,7 +153,7 @@ test("an upgrade reads the old committed value and retains outstanding work", as
 	);
 });
 
-test("state writes use bounded checkpoints rather than storing a base on every change", () => {
+test("state writes checkpoint at the 64th delta, not before", () => {
 	const value = { runs: 1 };
 	const spec = {
 		kind: "keel.checkpoints",
@@ -161,11 +161,9 @@ test("state writes use bounded checkpoints rather than storing a base on every c
 		version: 1,
 		initial: () => value,
 	} as const;
-	const standard = stateDoc(defineState(spec)).definition.checkpointWhen;
-	const short = stateDoc(defineState({ ...spec, checkpointEvery: 2 }))
-		.definition.checkpointWhen;
-	assert.equal(standard(value, [], { deltasSinceBase: 2 }), false);
-	assert.equal(standard(value, [], { deltasSinceBase: 64 }), true);
-	assert.equal(short(value, [], { deltasSinceBase: 0 }), false);
-	assert.equal(short(value, [], { deltasSinceBase: 2 }), true);
+	const checkpoint = stateDoc(defineState(spec)).definition.checkpointWhen;
+	assert.equal(checkpoint(value, [], { deltasSinceBase: 0 }), false);
+	assert.equal(checkpoint(value, [], { deltasSinceBase: 62 }), false);
+	assert.equal(checkpoint(value, [], { deltasSinceBase: 63 }), true);
+	assert.equal(checkpoint(value, [], { deltasSinceBase: 64 }), true);
 });
