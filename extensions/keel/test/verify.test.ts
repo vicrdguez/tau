@@ -910,6 +910,7 @@ for (const { phase, failure, evidence } of [
 			x.take();
 		} else x.mergedBeforeConflict();
 		const op = x.effect(phase).op;
+		assert.deepEqual(op.checks, mandate.checks);
 		const r = x.done(phase, failure);
 		const event = r.send?.find((m) => m.lane === "build")?.event;
 		assert.equal(event?.kind, "integration");
@@ -1433,6 +1434,19 @@ test("the landing slot gates CAS; reviewed hand-over prioritizes high-cost evide
 		[["trunk", "take_slot"]],
 	);
 	assert.deepEqual(x.effects(), []);
+	x.apply({ kind: "slot_granted" });
+	const obstruction = x.done("read_repo", {
+		kind: "repo",
+		repo: { ...repo, trunkHead: null },
+	});
+	const finding = obstruction.send?.find((m) => m.lane === "queue")?.event;
+	assert.match(String(finding?.evidence), /trunk branch is absent/i);
+	assert.deepEqual(
+		x.effects(),
+		[],
+		"the missing trunk cannot be integrated or landed",
+	);
+	x.apply(resume(finding!));
 	const { op } = x.prepare();
 	x.done("prepare_landing", { kind: "prepared", sha: "prepared" });
 	assert.deepEqual(x.effect("land").op, {
