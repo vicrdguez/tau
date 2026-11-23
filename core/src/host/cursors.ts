@@ -1,10 +1,12 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import {
+	bool,
 	compile,
 	int,
 	lit,
 	map,
 	nul,
+	num,
 	obj,
 	oneOf,
 	opt,
@@ -23,7 +25,19 @@ const checkPayload = compile(Payload);
 const id = int({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const order = oneOf(["ascending", "descending"]);
 const position = obj({ after: id, order });
+export const telemetryBounds = {
+	startMin: opt(num()),
+	startMax: opt(num()),
+	attributes: opt(map(union([str(), num(), bool()]))),
+};
+export const traceFilters = {
+	...telemetryBounds,
+	name: opt(str()),
+	errors: opt(bool()),
+};
+
 const checks = {
+	traces: compile(obj({ query: obj(traceFilters), position: str() })),
 	conversations: compile(
 		obj({
 			query: obj({}),

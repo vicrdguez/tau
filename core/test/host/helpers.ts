@@ -276,7 +276,7 @@ export async function until(
 	assert.fail(`never: ${what}`);
 }
 
-export const TWENTY_CALLS = [
+export const CALLS = [
 	"extensions",
 	"models",
 	"projects",
@@ -297,4 +297,7 @@ export const TWENTY_CALLS = [
 	"answer",
 	"timeline",
 	"faults",
+	"metrics",
+	"traces",
+	"trace",
 ] as const;

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { send, start, TWENTY_CALLS } from "./helpers.js";
+import { CALLS, send, start } from "./helpers.js";
 
-const bodies: Record<(typeof TWENTY_CALLS)[number], object> = {
+const bodies: Record<(typeof CALLS)[number], object> = {
 	extensions: {},
 	models: {},
 	projects: {},
@@ -29,12 +29,15 @@ const bodies: Record<(typeof TWENTY_CALLS)[number], object> = {
 	},
 	timeline: { project: "nope" },
 	faults: { project: "nope" },
+	metrics: { project: "nope", name: "measure.latency" },
+	traces: { project: "nope" },
+	trace: { project: "nope", traceId: "trace" },
 };
 
 test("every call refuses one unknown field beside a valid body", async () => {
 	const s = await start();
 	try {
-		for (const name of TWENTY_CALLS) {
+		for (const name of CALLS) {
 			const valid = bodies[name];
 			if (name === "inbox") {
 				const stream = s.watch(name, valid);
@@ -92,7 +95,7 @@ test("a reply has one of three bodies and the protocol header", async () => {
 	}
 });
 
-test("unknown_call lists exactly the twenty calls", async () => {
+test("unknown_call lists exactly the host calls", async () => {
 	const s = await start();
 	try {
 		const auth = { Authorization: `Bearer ${s.token}` };
@@ -108,7 +111,7 @@ test("unknown_call lists exactly the twenty calls", async () => {
 			assert.equal(reply.body.refused?.code, "unknown_call", pathname);
 			assert.deepEqual(
 				[...(reply.body.refused?.calls ?? [])].sort(),
-				[...TWENTY_CALLS].sort(),
+				[...CALLS].sort(),
 			);
 			assert.equal(reply.headers["tau-protocol"], "1");
 		}
