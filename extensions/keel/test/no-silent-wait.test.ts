@@ -207,10 +207,16 @@ for (const choice of ["resume", "cancel"])
 			(await x.asks()).map((a) => a.local),
 			["investigate/2/0"],
 		);
+		const investigation = await x.readAsk("investigate/");
 		await x.answer("investigate/", "cancel");
 
 		assert.equal((await x.asks()).length, 1);
 		const { d, text } = await x.readAsk("finding/");
+		assert.equal(
+			d.conversation,
+			investigation.d.conversation,
+			"the owner sees both in the project queue",
+		);
 		assert.deepEqual(d.choices, ["resume", "cancel"]);
 		assert.match(text, /writer.*escaped colons get dropped/);
 		assert.match(text, /stats.*Stats cannot continue/);

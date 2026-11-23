@@ -191,10 +191,12 @@ test("an agent that answers without its hand-off gets one nudge and then a stall
 	assert.equal(stalls, 1);
 	assert.deepEqual(notes, ["unfulfilled"]);
 });
-for (const mode of ["closed", "foreign"] as const)
+for (const mode of ["closed", "foreign", "untagged"] as const)
 	test(`agent tool admission rejects a ${mode} expectation`, async (t) => {
 		const x = await setup(t);
-		await x.send("manual");
+		await x.send("agent");
+		for (const delivery of await x.tasks("keel.deliver"))
+			await x.harness.abortTask(delivery.id, ctx);
 		if (mode === "closed") await x.send("quiet");
 		const [worker] = await x.agents();
 		assert.ok(worker);
@@ -206,10 +208,12 @@ for (const mode of ["closed", "foreign"] as const)
 			{
 				type: "input",
 				content: "publish",
-				entry: {
-					kind: "keel.input",
-					data: { token: token(`worker/${mode === "closed" ? 0 : 1}`, 1) },
-				},
+				...(mode !== "untagged" && {
+					entry: {
+						kind: "keel.input",
+						data: { token: token(`worker/${mode === "closed" ? 0 : 1}`, 1) },
+					},
+				}),
 			},
 			ctx,
 		);
@@ -343,13 +347,41 @@ for (const mode of ["failed", "queued stop"] as const)
 		]);
 	});
 
+test("re-entering after pause uses a fresh delivery in the same conversation", async (t) => {
+	const x = await setup(t);
+	x.provider.setResponses([publish(), publish()]);
+	await x.send("agent");
+	x.harness.resume();
+	await x.finish("keel.deliver");
+	const [worker] = await x.agents();
+	assert.ok(worker);
+	const byTurn = (n: number) =>
+		x.harness.commit(
+			(tx) => tx.submissionByRequest(worker, token("worker/0", n)),
+			ctx,
+		);
+	const first = await byTurn(1);
+	assert.ok(first);
+	await x.send("pause");
+	await x.finish("keel.stop");
+	await x.send("agent", { turn: 2 });
+	await x.finish("keel.deliver");
+	const second = await byTurn(2);
+	assert.ok(second);
+	assert.notEqual(first.id, second.id);
+	assert.equal((await x.state()).publications, 2);
+	assert.deepEqual(await x.agents(), [worker]);
+});
+
 for (const move of ["pause", "cancel", "quiet"])
 	test(`a token cannot re-enter after ${move}`, async (t) => {
 		const x = await setup(t);
-		await x.send("manual");
+		await x.send("agent");
 		await x.send(move);
-		if (move === "pause") await x.send("agent"); // resumes with no expectation (turn zero)
-		await assert.rejects(x.send("manual"), /reus.*token|token.*reus/i);
+		await assert.rejects(
+			x.send("agent", { turn: 1 }),
+			/reus.*token|token.*reus/i,
+		);
 	});
 
 test("two designers cannot share and overwrite the work binding", async (t) => {
@@ -392,11 +424,11 @@ test("a routed request cannot impersonate a kernel fact", async (t) => {
 
 test("a stale stop cannot abort a later run just because the agent is paused again", async (t) => {
 	const x = await setup(t);
-	await x.send("manual");
+	await x.send("agent");
 	await x.send("pause");
 	x.harness.resume();
 	await x.finish("keel.stop");
-	await x.send("agent"); // resumes worker 0 without the old token
+	await x.send("agent", { turn: 0 }); // resumes worker 0 without any expectation
 	await x.send("pause");
 	await x.finish("keel.stop");
 	const [id] = await x.agents();

@@ -123,7 +123,7 @@ const toyLane = defineLane({
 					state: {
 						...s,
 						agents: Number(e.count ?? 1),
-						turn: s.turn + 1,
+						turn: Number(e.turn ?? s.turn + 1),
 						paused: false,
 					},
 					notes: [{ text: "worker ready", agent: agentKey("worker/0") }],
