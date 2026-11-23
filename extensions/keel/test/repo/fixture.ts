@@ -11,6 +11,7 @@ import {
 	nodeExec,
 	type RepoOp,
 	type RepoResult,
+	readCheckoutHead,
 	readPublishable,
 	readRepo,
 } from "../../src/repo/index.ts";
@@ -86,15 +87,15 @@ export async function fixture(t: TestContext) {
 		await startWorker();
 		await writeFile(join(worker.path, "book"), "new\n");
 		git(worker.path, "commit", "-am", "verified");
-		const pub = await publish();
-		assert.equal(pub.kind, "ok");
+		const item = await readCheckoutHead(nodeExec, worker.path);
+		assert.ok(item, "worker commit");
 		return {
 			kind: "merge_item",
 			key: "merge:1",
 			integration: layout.integration(repo, "42", "merge:1"),
 			into: branch,
 			expected: base,
-			item: pub.sha,
+			item,
 			checks: [],
 			message: "book",
 		} as const;
