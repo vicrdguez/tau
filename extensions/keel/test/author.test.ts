@@ -4,7 +4,7 @@ import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type Conversation, defineTool, type JsonObject } from "tau/durable";
 import { obj, str } from "tau/schema";
 import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import { agentKey, effectKey, token, type WorkId } from "../src/kernel/ids.ts";
+import { agentKey, token, type WorkId } from "../src/kernel/ids.ts";
 import {
 	defineLane,
 	defineLaneTool,
@@ -60,15 +60,8 @@ const lane: Lane<ReturnType<typeof plan.initial>> = {
 									: [],
 					},
 				],
-	effects: (s, facts) =>
-		s.phase === "effect"
-			? [{ key: effectKey("spawn"), spec: { declaredRoot: facts.root } }]
-			: [],
-	onFact(s, e) {
-		return e.kind === "effect_done"
-			? { state: { ...s, phase: "done", answered: [String(e.result.child)] } }
-			: { state: s };
-	},
+	effects: () => [],
+	onFact: (state) => ({ state }),
 	reduce(s, e, world) {
 		if (e.kind === "reject") return { reject: "not adopted" };
 		if (e.kind === "brief")
@@ -163,15 +156,6 @@ async function setup(t: TestContext) {
 				section: { key: "secret", render: () => "worker index" },
 			},
 		],
-		runEffect: async (input, _context, owner) => {
-			assert.equal(input.root, "/projects/quant-engine");
-			assert.equal(input.spec.declaredRoot, input.root);
-			assert.ok(!("commit" in owner) && !("sleepUntil" in owner));
-			const child = (await owner.scanChildren(1)).items[0];
-			if (child) return { child: child.id };
-			await owner.createChild();
-			throw new Error("retry after creating the child");
-		},
 	});
 	t.after(() => x.harness.close(ctx));
 	async function call(
@@ -303,25 +287,6 @@ test("when two handoffs for the same tool are open, the latest input cannot disa
 		(await x.harness.snapshot(stateDoc(plan), x.root.id, ctx))?.answered,
 		[],
 	);
-});
-test("an effect can recover its own child without receiving authority over task progress", async (t) => {
-	const { x } = await setup(t);
-	await x.deliver("plan", x.root.id, { kind: "effect" });
-	x.harness.resume();
-	await x.finish("keel.effect");
-	const state = await x.harness.snapshot(stateDoc(plan), x.root.id, ctx);
-	assert.equal(state?.root, "/projects/quant-engine");
-	const [effect] = await x.tasks("keel.effect");
-	assert.ok(effect);
-	const children = await x.harness.commit(
-		(tx) => tx.scanConversations({ ownerTaskId: effect.id }, 10),
-		ctx,
-	);
-	assert.deepEqual(
-		children.items.map((c) => String(c.id)),
-		state?.answered,
-	);
-	assert.equal(children.items.length, 1);
 });
 test("a plain tool admits only an active bound agent", async (t) => {
 	const { x, call } = await setup(t);

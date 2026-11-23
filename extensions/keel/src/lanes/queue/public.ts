@@ -42,13 +42,6 @@ export function fileHolding(finding: Holding): Message {
 }
 
 export type HoldingAddress = Pick<Holding, "work" | "lane" | "cause">;
-export function resolveHolding(finding: HoldingAddress): Message {
-	return {
-		lane: "queue",
-		work: null,
-		event: { kind: "resolve_holding", ...finding },
-	};
-}
 
 export type Intake = {
 	work: WorkId | null;

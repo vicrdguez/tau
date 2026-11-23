@@ -72,12 +72,6 @@ test("sweep accepts array replies with fences or surrounding prose", async () =>
 			},
 			ctx,
 			{
-				async scanChildren() {
-					throw new Error("Unexpected scan");
-				},
-				async createChild() {
-					throw new Error("Unexpected child");
-				},
 				async dispatch() {
 					return [
 						{

@@ -52,13 +52,8 @@ export type DeliverInput = StopInput & {
 };
 
 type EffectPhase = { phase: "claim" } | { phase: "run"; attempt: number };
-/** Effect code can create and recover its owned conversations, but never advance the task. */
+/** Effect code can dispatch to owned conversations, but cannot advance the task. */
 type EffectOwner = {
-	scanChildren(
-		limit: number,
-		cursor?: Cursor,
-	): ReturnType<Tx["scanConversations"]>;
-	createChild(): Promise<ConversationId>;
 	dispatch<J extends DispatchJob>(
 		roster: DispatchAdmission<J>,
 		jobs: readonly J[],
@@ -321,19 +316,6 @@ export function makeTasks(hooks: Hooks) {
 									roster,
 									jobs,
 									context,
-								),
-							scanChildren: (limit, cursor) =>
-								readOrCreate((tx) =>
-									tx.scanConversations({ ownerTaskId: id }, limit, cursor),
-								),
-							createChild: () =>
-								readOrCreate(
-									async (tx) =>
-										(
-											await tx.createConversation({
-												ownership: { kind: "task", taskId: id },
-											})
-										).id,
 								),
 						}),
 					};
