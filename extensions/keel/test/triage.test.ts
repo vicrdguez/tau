@@ -878,6 +878,30 @@ test("A-4: a pattern ruling leaves the other decision and the uninvestigated fil
 	);
 });
 
+test("the last pattern answer wins even when it answers the first filing; a deferral does not replace it", () => {
+	const q = queue();
+	const pattern = "legacy-writer";
+	q.file({ pattern, text: "An earlier positive report" });
+	q.file({ pattern, text: "A later negative report" });
+	q.classify(1, "unapproved_pattern", { recommendation: "bless" });
+	q.classify(2, "unapproved_pattern", { recommendation: "revoke" });
+	const [first, second] = q.ask();
+	q.answer("revoke", second!.subject);
+	q.answer("bless", first!.subject);
+	q.file({ pattern, source: "owner", text: "An unresolved counterexample" });
+	q.classify(3, "unapproved_pattern", { recommendation: "defer" });
+	q.answer("defer");
+	assert.deepEqual(
+		q.file({ work: 5, pattern, text: "Use current precedent" }),
+		[],
+	);
+	assert.deepEqual(
+		q.view().patternRulings.map(({ name, status }) => [name, status]),
+		[[pattern, "blessed"]],
+	);
+	assert.deepEqual(q.ask(), []);
+});
+
 test("determined work whose original build closed seeds new follow work with its reference", () => {
 	let phase = "active";
 	const q = queue({
