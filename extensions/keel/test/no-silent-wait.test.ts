@@ -5,8 +5,10 @@ import { type JsonObject, MemoryStorage } from "tau/durable";
 import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { agentKey, subject, token } from "../src/kernel/ids.ts";
 import type { KernelEvent, LaneEvent } from "../src/kernel/lane.ts";
+import { WorkState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
 import { buildDoc } from "../src/lanes/build/state.ts";
+import { designLane } from "../src/lanes/design/index.ts";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
 import { tempRepo } from "./fixtures/repo.ts";
 
@@ -161,70 +163,211 @@ async function start(
 		fact,
 		commit: s.commit,
 		options: s.options,
+		workflow: s,
 	};
 }
 
-test("cancelling the last active investigation exposes a wait; resume delivers the evidence and owner direction", async (t) => {
-	const x = await start(t);
-	await x.brief("writer");
-	await x.brief("stats", "R2");
-	await x.file("writer", "PARSER: escaped colons get dropped");
-	assert.ok(!("reject" in (await x.classify(1))));
-	assert.ok(!("reject" in (await x.plan([goal("fix", ["stats"])]))));
-	await x.file("stats", "An unrelated, non-blocking observation", false);
-	await x.commit(async (tx) =>
-		x.options.set(tx, { ...(await x.options.get(tx)), sweep_minutes: 60 }),
-	);
+for (const choice of ["resume", "cancel"])
+	test(`cancelling the last active investigation exposes a wait; the owner can ${choice}`, async (t) => {
+		const x = await start(t);
+		await x.brief("writer");
+		await x.brief("stats", "R2");
+		await x.file("writer", "PARSER: escaped colons get dropped");
+		assert.ok(!("reject" in (await x.classify(1))));
+		assert.ok(!("reject" in (await x.plan([goal("fix", ["stats"])]))));
+		await x.file("stats", "An unrelated, non-blocking observation", false);
+		await x.commit(async (tx) =>
+			x.options.set(tx, { ...(await x.options.get(tx)), sweep_minutes: 60 }),
+		);
 
-	// A project timer is not work progress. Deliver a late hold on the dependency at the lane routing seam, not by editing stored state.
-	await x.must("build", {
-		kind: "queue_hold",
-		item: "stats",
-		nodes: [],
-		cause: "queue/late",
-		evidence: "Stats cannot continue",
+		// A project timer is not work progress. Deliver a late hold on the dependency at the lane routing seam, not by editing stored state.
+		await x.must("build", {
+			kind: "queue_hold",
+			item: "stats",
+			nodes: [],
+			cause: "queue/late",
+			evidence: "Stats cannot continue",
+		});
+		assert.deepEqual(
+			await x.asks(),
+			[],
+			"the live investigator can still move the work",
+		);
+		await x.fact(
+			{
+				kind: "agent_stalled",
+				agent: agentKey("investigator"),
+				tokens: [token("investigate/2", 0)],
+				cause: "stopped",
+				lastWords: "",
+			},
+			"queue",
+		);
+		assert.deepEqual(
+			(await x.asks()).map((a) => a.local),
+			["investigate/2/0"],
+		);
+		await x.answer("investigate/", "cancel");
+
+		assert.equal((await x.asks()).length, 1);
+		const { d, text } = await x.readAsk("finding/");
+		assert.deepEqual(d.choices, ["resume", "cancel"]);
+		assert.match(text, /writer.*escaped colons get dropped/);
+		assert.match(text, /stats.*Stats cannot continue/);
+		assert.match(text, /fix.*depends on stats/);
+		await x.answer("finding/", choice, "Make the fix independent of stats.");
+		assert.deepEqual(await x.asks(), []);
+		if (choice === "cancel") {
+			assert.equal((await x.build())?.phase, "cancelled");
+			return;
+		}
+		const { items, coordinator } = (await x.build())!;
+		assert.equal(coordinator.tool, "publish_plan");
+		assert.ok(
+			items.find((i) => i.id === "stats")?.parked,
+			"resume does not release the hold",
+		);
+		assert.match(coordinator.direction, /fix.*depends on stats/);
+		assert.match(coordinator.direction, /Make the fix independent of stats/);
+		assert.ok(
+			!(
+				"reject" in (await x.plan([goal("writer"), goal("stats"), goal("fix")]))
+			),
+		);
+		assert.equal((await x.build())?.coordinator.item, "fix");
 	});
-	assert.deepEqual(
-		await x.asks(),
-		[],
-		"the live investigator can still move the work",
-	);
-	await x.fact(
-		{
-			kind: "agent_stalled",
-			agent: agentKey("investigator"),
-			tokens: [token("investigate/2", 0)],
-			cause: "stopped",
-			lastWords: "",
-		},
-		"queue",
-	);
-	assert.deepEqual(
-		(await x.asks()).map((a) => a.local),
-		["investigate/2/0"],
-	);
-	await x.answer("investigate/", "cancel");
 
-	assert.equal((await x.asks()).length, 1);
-	const { d, text } = await x.readAsk("finding/");
-	assert.deepEqual(d.choices, ["resume", "cancel"]);
-	assert.match(text, /writer.*escaped colons get dropped/);
-	assert.match(text, /stats.*Stats cannot continue/);
-	assert.match(text, /fix.*depends on stats/);
-	await x.answer("finding/", "resume", "Make the fix independent of stats.");
-	const { items, coordinator } = (await x.build())!;
-	assert.equal(coordinator.tool, "publish_plan");
-	assert.ok(
-		items.find((i) => i.id === "stats")?.parked,
-		"resume does not release the hold",
-	);
-	assert.match(coordinator.direction, /fix.*depends on stats/);
-	assert.match(coordinator.direction, /Make the fix independent of stats/);
-	assert.ok(
-		!("reject" in (await x.plan([goal("writer"), goal("stats"), goal("fix")]))),
-	);
-	assert.equal((await x.build())?.coordinator.item, "fix");
+test("designer stall asks to resume the same turn or cancel the work", async (t) => {
+	for (const choice of ["resume", "cancel"]) {
+		const s = await openScriptedWorkflow(
+			process.cwd(),
+			new MemoryStorage(),
+			true,
+		);
+		t.after(s.close);
+		await s.send("design", {
+			kind: "queue_seed",
+			text: "Fix settled rounding",
+			route: "precedent",
+			reference: null,
+		});
+		await s.fact("design", {
+			kind: "agent_stalled",
+			agent: agentKey("designer"),
+			tokens: [token("ground", 1)],
+			cause: "stopped",
+			lastWords: "Reading the rules.",
+		});
+		const { slot, d, text } = await s.openAsk((a) =>
+			a.local.startsWith("finding/"),
+		);
+		assert.deepEqual(d.choices, ["resume", "cancel"]);
+		assert.match(
+			text,
+			/^Work on hold: Fix settled rounding\n\ndesign reports:\nstopped: Reading the rules\./,
+		);
+		await s.fact(slot.lane, {
+			kind: "answered",
+			subject: subject(slot.local),
+			decision: d.id,
+			choice,
+			annotations: [{ n: 1, text: "Inspect ADR 4." }],
+		});
+		assert.deepEqual(await s.asks(), []);
+		const design = await designLane.use(({ state }) => {
+			assert.equal(state.scope, "conversation");
+			return s.store.harness.snapshot(stateDoc(state), s.work, ctx);
+		});
+		if (choice === "resume") {
+			assert.equal(design?.phase, "seeded");
+			assert.match(
+				String(design?.direction),
+				/Reading the rules[\s\S]*1\. Inspect ADR 4/,
+			);
+		} else assert.equal(design?.phase, "cancelled");
+	}
 });
+
+for (const stop of ["coordinator", "worker", "verifier", "checkout"] as const) {
+	test(`${stop} obstruction shows its reason and allows only an explicit resume or work cancel`, async (t) => {
+		for (const choice of ["resume", "cancel"]) {
+			const x = await start(t, ["writer"]);
+			const s = x.workflow;
+			if (stop !== "coordinator") await x.brief("writer");
+			if (stop === "verifier" || stop === "checkout") {
+				await x.must("build", {
+					kind: "publish",
+					agent: "worker/writer/1",
+					summary: "Ready",
+					addresses: [],
+					facts: {
+						kind: "ok",
+						sha: "b".repeat(40),
+						base: sha,
+						changedPolicyFiles: [],
+					},
+				});
+				await s.done(
+					"verify",
+					`verify/${x.work}/checkout/`,
+					stop === "checkout"
+						? { kind: "occupied", path: "/conflicting-checkout" }
+						: { kind: "checkout", playbook: "Inspect writer" },
+				);
+			}
+			if (stop !== "checkout") {
+				const key = {
+					coordinator: "coordinator",
+					worker: "worker/writer/1",
+					verifier: "verify/writer",
+				}[stop];
+				const slot = (
+					await s.store.harness.snapshot(stateDoc(WorkState), x.work, ctx)
+				)?.agents;
+				const turn = Object.entries(slot ?? {}).find(([k]) =>
+					k.endsWith(`:${key}`),
+				)?.[1].open[0];
+				assert.ok(turn);
+				await x.fact(
+					{
+						kind: "agent_stalled",
+						agent: agentKey(key),
+						tokens: [turn.token],
+						cause: "stopped",
+						lastWords: "Need owner direction.",
+					},
+					stop === "verifier" ? "verify" : "build",
+				);
+			}
+			const { d, text } = await x.readAsk("finding/");
+			assert.deepEqual(d.choices, ["resume", "cancel"]);
+			assert.match(
+				text,
+				/^Work on hold: Export the book and a statistics file\n/,
+			);
+			assert.match(
+				text,
+				stop === "checkout"
+					? /verify\/writer reports:\n[\s\S]*conflicting-checkout/
+					: /reports:\n.*stopped.*Need owner direction\./,
+			);
+			await x.answer("finding/", choice, "Inspect trailing lines.");
+			assert.deepEqual(await x.asks(), []);
+			assert.equal(
+				(await x.build())?.phase,
+				choice === "cancel" ? "cancelled" : "active",
+			);
+			if (choice === "resume" && stop === "checkout") {
+				assert.ok(
+					Object.entries(
+						(await s.store.harness.snapshot(stateDoc(WorkState), x.work, ctx))!
+							.effects,
+					).some(([k, e]) => k.includes("/retry/") && e.status === "planned"),
+				);
+			}
+		}
+	});
+}
 
 // A filer can be the fix itself, or reach it through existing dependencies.
 for (const filer of ["transitive", "fix"] as const) {

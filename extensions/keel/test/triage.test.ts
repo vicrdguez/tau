@@ -969,27 +969,38 @@ test("cancelling a work closes its open and pending Mandate revisions, but not o
 	);
 });
 
-test("investigator stop is left to the owner; resume declares a fresh input for the same finding", () => {
-	const q = queue();
-	q.file();
-	const a = q.agents()[0]!;
-	const tok = a.expects[0]!.token;
-	q.send({
-		kind: "agent_stalled",
-		cause: "stopped",
-		agent: a.key,
-		tokens: [tok],
-		lastWords: "waiting for evidence",
+for (const choice of ["resume", "cancel"])
+	test(`investigator stop asks the owner to ${choice}; cancel drops only that finding`, () => {
+		const q = queue();
+		q.file();
+		const a = q.agents()[0]!;
+		const tok = a.expects[0]!.token;
+		q.send({
+			kind: "agent_stalled",
+			cause: "stopped",
+			agent: a.key,
+			tokens: [tok],
+			lastWords: "waiting for evidence",
+		});
+		assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
+		assert.match(q.ask()[0]!.basis, /waiting for evidence/);
+		const basis = q.ask()[0]!.basis;
+		assert.deepEqual(q.ask()[0]!.choices, ["resume", "cancel"]);
+		assert.match(basis, /Cancel drops the finding/);
+		q.file({ text: "Independently check the decimal parser" });
+		q.answer(choice);
+		const exp = q.agents()[0]?.expects[0];
+		const input = exp?.input?.() ?? "";
+		if (choice === "resume") {
+			assert.match(input, /## Finding #1[\s\S]*Which rounding boundary\?/);
+			assert.match(input, /Use the ledger boundary\./);
+		} else {
+			assert.match(input, /Independently check the decimal parser/);
+			assert.match(
+				q.view().findingsFor(4),
+				/Which rounding boundary\? \(dropped\)/,
+			);
+		}
+		assert.match(input, /Compare both ledger balances/);
+		assert.notEqual(exp?.token, tok);
 	});
-	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
-	assert.match(q.ask()[0]!.basis, /waiting for evidence/);
-	const basis = q.ask()[0]!.basis;
-	q.answer("resume");
-	const exp = q.agents()[0]?.expects[0];
-	const input = exp?.input?.() ?? "";
-	assert.ok(input.includes(filing.text));
-	assert.match(input, /Use the ledger boundary\./);
-	assert.match(input, /Compare both ledger balances/);
-	assert.match(basis, /Cancel drops the finding/);
-	assert.notEqual(exp?.token, tok);
-});
