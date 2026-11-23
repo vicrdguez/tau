@@ -1,3 +1,5 @@
+// Kill only after the real landing CAS, leaving recovery and sweep timing to the caller.
+// The sentinel identifies the fault point; it does not predict the replay result.
 import assert from "node:assert/strict";
 import { writeSync } from "node:fs";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";

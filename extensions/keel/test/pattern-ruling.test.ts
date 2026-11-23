@@ -116,12 +116,13 @@ test("a worker's pattern citation files from its commit without blocking; a late
 	harness.resume();
 	await s.submit(goal);
 	await recorded.promise;
-	const delivery = (
-		await harness.commit(
-			(tx) => tx.scanTasks({ kind: "keel.deliver" }, 100),
-			ctx,
-		)
-	).items.find((r) => (r.input as JsonObject).lane === "queue");
+	const tasks = async (kind: string) =>
+		(await s.commit((tx) => tx.scanTasks({ kind }, 100))).items;
+	const filings = async () =>
+		(await tasks("keel.deliver")).filter(
+			(r) => (r.input as JsonObject).lane === "queue",
+		);
+	const [delivery] = await filings();
 	assert.ok(
 		delivery,
 		"the ruling must schedule investigation, not hold the worker",
@@ -132,25 +133,15 @@ test("a worker's pattern citation files from its commit without blocking; a late
 	const { d } = await s.readAsk(triage!);
 	assert.deepEqual(d.choices, ["bless", "revoke", "defer"]);
 	await s.answer(d, "bless");
-	const answer = (
-		await harness.commit((tx) => tx.scanTasks({ kind: "keel.answer" }, 10), ctx)
-	).items[0];
+	const [answer] = await tasks("keel.answer");
 	assert.ok(answer);
 	await harness.waitForTask(answer.id, ctx);
 	assert.deepEqual(await s.asks(), []);
 	blessed.resolve();
 	await s.settle();
 	assert.equal(s.queueProvider.getPendingResponseCount(), 0);
-	const deliveries = (
-		await harness.commit(
-			(tx) => tx.scanTasks({ kind: "keel.deliver" }, 100),
-			ctx,
-		)
-	).items;
 	assert.deepEqual(
-		deliveries
-			.filter((r) => (r.input as JsonObject).lane === "queue")
-			.map(({ id }) => id),
+		(await filings()).map((r) => r.id),
 		[delivery.id],
 	);
 	const open = await s.asks();

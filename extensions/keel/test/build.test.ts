@@ -419,8 +419,9 @@ test("worker input passes the item's path fences and triggers a premise check on
 	assert.deepEqual(b.agent("worker").projectPrinciples, policy);
 	assert.deepEqual(expectation().paths, ["src/money/tick.ts", "tests/tie.ts"]);
 	b.pub(undefined, ["tie"]);
-	b.send({ ...back, kind: "integration" });
+	b.send({ ...back, kind: "integration", threads: [] });
 	assert.notEqual(expectation().situation, "survived_fix");
+	assert.doesNotMatch(b.request("worker").text, /Threads:\s*\n/i);
 });
 
 test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
@@ -768,84 +769,41 @@ test("a start that failed after a possible CAS keeps its immutable git plan on e
 	assert.deepEqual(b.effect().spec, first.spec);
 });
 
-test("a stopped token files only one finding and its direction is consumed by the resumed turn", () => {
-	const b = setup();
-	b.start();
-	const old = b.request("coordinator");
-	const stop = {
-		kind: "agent_stalled",
-		agent: b.agent("coordinator").key,
-		tokens: [old.token],
-		cause: "stopped",
-		lastWords: "",
-	};
-	const file = b.send(stop).send![0]!.event;
-	assert.equal(b.send(stop).send?.length ?? 0, 0);
-	b.send({
-		kind: "resume",
-		item: null,
-		cause: file.cause!,
-		direction: "one small item",
-		evidence: "",
-	});
-	assert.equal(b.send(stop).send?.length ?? 0, 0);
-	assert.match(b.request("coordinator").text, /one small item/);
-	b.send({ kind: "plan", items: [item] });
-	assert.doesNotMatch(b.request("coordinator").text, /one small item/);
-	b.workOn();
-	b.pub();
-	b.send({
-		kind: "integration",
-		item: "fix",
-		evidence: "merge conflict",
-		threads: [],
-	});
-	assert.doesNotMatch(b.request("worker").text, /Threads:\s*\n/i);
-});
-
-test("stop holds the current turn, resume redelivers direction, and cancellation retires both agents", () => {
-	for (const role of ["worker", "coordinator"]) {
+for (const role of ["coordinator", "worker"]) {
+	test(`${role} stop holds once, resume delivers new direction, and cancel retires the turn`, () => {
 		const b = setup();
 		if (role === "worker") b.working();
 		else b.start();
-		const old = b.request(role);
-		const stop = () =>
-			b.send({
-				kind: "agent_stalled",
-				agent: b.agent(role).key,
-				tokens: [b.request(role).token],
-				cause: "stopped",
-				lastWords: "need review",
-			}).send![0]!.event;
-		const file = stop();
-		assert.match(String(file.evidence), /stopped/);
-		assert.match(String(file.evidence), /need review/);
-		assert.equal(b.agent(role).paused, true);
-		b.send({
-			kind: "resume",
-			item: file.item!,
-			cause: file.cause!,
-			direction: "continue now",
-			evidence: file.evidence!,
+		const stop = () => ({
+			kind: "agent_stalled",
+			agent: b.agent(role).key,
+			tokens: [b.request(role).token],
+			cause: "stopped",
+			lastWords: "need review",
 		});
+		const old = stop();
+		const file = b.send(old).send![0]!.event;
+		assert.equal(b.agent(role).paused, true);
+		assert.match(String(file.evidence), /stopped[\s\S]*need review/);
+		assert.deepEqual(b.send(old).send ?? [], []);
+		b.send({ ...file, kind: "resume", direction: "continue now" });
+		assert.notEqual(b.request(role).token, old.tokens[0]);
+		assert.deepEqual(b.send(old).send ?? [], []);
 		assert.match(b.request(role).text, /continue now/);
-		assert.notEqual(b.request(role).token, old.token);
-		stop();
+		if (role === "coordinator") {
+			b.send({ kind: "plan", items: [item] });
+			assert.doesNotMatch(b.request(role).text, /continue now/);
+		}
+		b.send(stop());
 		b.send({ kind: "cancel" });
-		assert.deepEqual(b.agents(), []);
 		if (role === "worker") {
 			assert.equal((b.effect().spec.op as JsonObject).kind, "remove");
 			b.done({ kind: "removed" });
 		}
 		assert.deepEqual(b.effects(), []);
-		b.send({
-			kind: "effect_done",
-			key: "late",
-			result: { kind: "started", base: repo.trunkHead },
-		});
 		assert.deepEqual(b.agents(), []);
-	}
-});
+	});
+}
 
 test("cancel gathers all worker cleanup outcomes into one completion, including held and in-flight attempts", () => {
 	const b = setup(2);

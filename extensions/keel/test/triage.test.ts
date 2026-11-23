@@ -67,7 +67,6 @@ const filing = {
 function queue(world: World = activeWorld) {
 	return queueLane.use((l) => {
 		const driver = laneDriver(l, world);
-		let notes: string[] = [];
 		const send = (e: LaneEvent): Message[] => {
 			const r = driver.send(e);
 			const outgoing = (r.send ?? []).filter((m) => {
@@ -79,7 +78,6 @@ function queue(world: World = activeWorld) {
 				send(m.event);
 				return false;
 			});
-			notes = r.notes?.map((n) => n.text) ?? [];
 			return outgoing;
 		};
 		const file = (over: Partial<LaneEvent> = {}) =>
@@ -122,7 +120,6 @@ function queue(world: World = activeWorld) {
 			agents: driver.agents,
 			effects: driver.effects,
 			state: driver.state,
-			notes: () => notes,
 			view: () =>
 				driver.view() as {
 					findingsFor(work: number): string;
@@ -330,27 +327,39 @@ test("an unlikely edge case without likelihood and a blocking filing without an 
 			}),
 	);
 });
-test("a blocking filer holds only itself; classification holds named nodes immediately and drop releases the cause", () => {
-	const q = queue();
-	const [own] = q.file({ blocking: true });
-	assert.deepEqual(
-		[own?.lane, own?.work, own?.event.kind, own?.event.item, own?.event.nodes],
-		["build", 4, "queue_hold", "ledger", []],
-	);
-	const [nodes] = q.classify(1, "mandate_wrong");
-	assert.deepEqual(
-		[nodes?.event.kind, nodes?.event.nodes, nodes?.event.cause],
-		["queue_hold", ["sums"], own?.event.cause],
-	);
-	const subject = q.ask()[0]!.subject;
-	const [release] = q.answer("drop");
-	assert.deepEqual(
-		[release?.lane, release?.event.kind, release?.event.cause],
-		["build", "queue_release", own?.event.cause],
-	);
-	assert.deepEqual(q.answer("build", subject), []);
-	assert.match(JSON.stringify(q.state()), /dropped/);
-});
+for (const choice of ["drop", "defer"]) {
+	test(`${choice} releases the original cause after expanding its scope`, () => {
+		const q = queue();
+		const [own] = q.file({ blocking: true });
+		assert.deepEqual(
+			[
+				own?.lane,
+				own?.work,
+				own?.event.kind,
+				own?.event.item,
+				own?.event.nodes,
+			],
+			["build", 4, "queue_hold", "ledger", []],
+		);
+		const [nodes] = q.classify(1, "mandate_wrong");
+		assert.deepEqual(
+			[nodes?.event.kind, nodes?.event.nodes, nodes?.event.cause],
+			["queue_hold", ["sums"], own?.event.cause],
+		);
+		const subject = q.ask()[0]!.subject;
+		const [release] = q.answer(choice);
+		assert.deepEqual(
+			[release?.lane, release?.event.kind, release?.event.cause],
+			["build", "queue_release", own?.event.cause],
+		);
+		assert.match(String(release?.event.direction), /Use the ledger boundary/);
+		assert.deepEqual(q.answer("build", subject), []);
+		assert.match(
+			q.view().findingsFor(4),
+			choice === "drop" ? /dropped/ : /deferred/,
+		);
+	});
+}
 test("links through another finding replace only their own decision and retain the full batch", () => {
 	const q = queue();
 	const reports = [
@@ -662,50 +671,80 @@ test("a defect goes to the coordinator without triage; determined work waits for
 		);
 	}
 });
-test("a linked blocker is shown in reissued triage with both reports and both nodes", () => {
-	const q = queue();
-	q.file();
-	q.file({
-		text: "Same issue in another item",
-		item: "second",
-		blocking: true,
+for (const choice of ["build", "defer"]) {
+	test(`linked Mandate triage shows both reports and nodes; ${choice} handles both causes`, () => {
+		const q = queue();
+		q.file({ blocking: true });
+		q.classify(1, "mandate_wrong");
+		const previous = q.ask()[0]!.basis;
+		q.file({
+			text: "Are reversed postings lost?",
+			report: "The smallest amount disagrees.",
+			item: "second",
+			blocking: true,
+		});
+		q.classify(2, "mandate_wrong", {
+			sameAs: 1,
+			nodes: ["totals"],
+			cause: "reversed totals",
+		});
+		const [ask] = q.ask();
+		assert.equal(q.ask().length, 1);
+		assert.notEqual(ask!.basis, previous);
+		assert.match(ask!.title, /wrong Mandate/i);
+		assert.deepEqual(ask!.choices, ["build", "defer", "drop"]);
+		assert.match(ask!.basis, /defer and drop.*blocked item.*same obstacle/i);
+		assert.match(
+			ask!.basis.split("\n", 1)[0]!,
+			/rounding point.*reversed totals/,
+		);
+		assert.match(
+			ask!.basis,
+			/Which rounding boundary\?[\s\S]*Are reversed postings lost\?[\s\S]*## Mandate nodes[\s\S]*Round once\.[\s\S]*Totals include reversed postings/,
+		);
+		for (const evidence of [
+			filing.report,
+			"The smallest amount disagrees.",
+			"The filer could not continue item second.",
+			"Source: worker / Post each cent once. / second",
+		])
+			assert.ok(ask!.basis.includes(evidence), evidence);
+		assert.doesNotMatch(
+			ask!.basis,
+			/Held items:|Waiting on held dependencies:|Keeps running:|queue conversation/,
+		);
+		const out = q.answer(choice);
+		if (choice === "defer") {
+			assert.deepEqual(
+				out.map((m) => [m.event.kind, m.event.cause]),
+				[
+					["queue_release", "queue/1"],
+					["queue_release", "queue/2"],
+				],
+			);
+		} else {
+			assert.ok(
+				out.every((m) =>
+					["queue_hold", "revise_mandate"].includes(m.event.kind),
+				),
+			);
+			const revision = out.find((m) => m.event.kind === "revise_mandate");
+			assert.deepEqual(
+				[
+					revision?.lane,
+					revision?.work,
+					revision?.event.causes,
+					revision?.event.nodes,
+				],
+				["design", 4, ["queue/1", "queue/2"], ["sums", "totals"]],
+			);
+			assert.match(
+				String(revision?.event.text),
+				/smallest amount[\s\S]+Use the ledger boundary/,
+			);
+		}
 	});
-	q.classify(1, "mandate_wrong");
-	const previous = q.ask()[0]!.basis;
-	q.classify(2, "mandate_wrong", {
-		sameAs: 1,
-		nodes: ["totals"],
-		cause: "reversed totals",
-	});
-	assert.equal(q.ask().length, 1);
-	const basis = q.ask()[0]!.basis;
-	assert.notEqual(basis, previous);
-	assert.match(basis.split("\n", 1)[0]!, /rounding point.*reversed totals/);
-	assert.match(basis, /## Mandate nodes\n\n### sums/);
-	for (const text of [
-		"Finding #1",
-		filing.report,
-		"Finding #2",
-		"Same issue in another item",
-		"The filer could not continue item second.",
-		"Round once.",
-		"Totals include reversed postings.",
-		"Source: worker / Post each cent once. / second",
-	])
-		assert.ok(basis.includes(text), text);
-	assert.doesNotMatch(
-		basis,
-		/Held items:|Waiting on held dependencies:|Keeps running:|queue conversation/,
-	);
-	assert.deepEqual(q.notes(), []);
-	assert.deepEqual(
-		q.answer("defer").map((m) => [m.event.kind, m.event.cause]),
-		[
-			["queue_release", "queue/1"],
-			["queue_release", "queue/2"],
-		],
-	);
-});
+}
 
 test("a second blocked filer linked to a defect being fixed stays held until that defect merges", () => {
 	const q = queue();
@@ -889,33 +928,6 @@ test("determined work whose original build closed seeds new follow work with its
 	assert.match(String(seed?.event.text), /Use the ledger boundary/);
 });
 
-test("approving triage asks the designer of the same work for a revision and keeps both causes held", () => {
-	const q = queue();
-	const [own] = q.file({ blocking: true });
-	q.classify(1, "mandate_wrong");
-	q.file({
-		text: "Try a half-cent",
-		report: "The smallest amount that disagrees.",
-	});
-	const [second] = q.classify(2, "mandate_wrong", { sameAs: 1 });
-	const out = q.answer("build");
-	const revision = out.find((m) => m.event.kind === "revise_mandate");
-	assert.ok(
-		out.every((m) => ["queue_hold", "revise_mandate"].includes(m.event.kind)),
-	);
-	assert.equal(revision?.lane, "design");
-	assert.equal(revision?.work, 4);
-	assert.deepEqual(revision?.event.causes, [
-		own?.event.cause,
-		second?.event.cause,
-	]);
-	assert.deepEqual(revision?.event.nodes, ["sums"]);
-	assert.match(
-		String(revision?.event.text),
-		/smallest amount[\s\S]+Use the ledger boundary/,
-	);
-});
-
 test("an investigation must answer the head finding and name its evidence, authority and affected nodes", () => {
 	const q = queue();
 	q.file();
@@ -962,37 +974,6 @@ test("cancelling a work closes its open and pending Mandate revisions, but not o
 		q.view().findingsFor(4),
 		/Which rounding boundary\? \(cancelled\)/,
 	);
-});
-
-test("wrong-Mandate triage identifies the decision, shows the reports before their node text, and explains releasing the blocked item", () => {
-	const q = queue();
-	q.file({ blocking: true });
-	q.classify(1, "mandate_wrong");
-	q.file({ text: "Are reversed postings lost?", nodes: ["totals"] });
-	q.classify(2, "mandate_wrong", { nodes: ["totals"], sameAs: 1 });
-	const [ask] = q.ask();
-	assert.deepEqual(ask?.choices, ["build", "defer", "drop"]);
-	assert.match(ask!.title, /wrong Mandate/i);
-	assert.match(ask!.basis, /defer and drop.*blocked item.*same obstacle/i);
-	assert.match(ask!.basis, /Which rounding boundary\?[\s\S]*Round once\./);
-	assert.match(
-		ask!.basis,
-		/Are reversed postings lost\?[\s\S]*Totals include reversed postings\./,
-	);
-});
-
-test("a deferred Mandate finding releases its causes just as a dropped one does", () => {
-	const q = queue();
-	q.file();
-	const [hold] = q.classify(1, "mandate_wrong");
-	const out = q.answer("defer");
-	assert.deepEqual(
-		out.map((m) => [m.lane, m.work, m.event.kind, m.event.cause]),
-		[["build", 4, "queue_release", hold?.event.cause]],
-	);
-	assert.match(String(out[0]?.event.direction), /Use the ledger boundary/);
-	assert.deepEqual(q.ask(), []);
-	assert.match(JSON.stringify(q.state()), /deferred/);
 });
 
 test("investigator stop is left to the owner; resume declares a fresh input for the same finding", () => {

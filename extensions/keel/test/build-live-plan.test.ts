@@ -341,6 +341,10 @@ test("revision activation and the edited plan take effect together, retaining a 
 	for (const [items, reason] of [
 		[replacement.slice(0, 3), /Keep the started item other/],
 		[
+			[...replacement.slice(0, 3), goal("other", [], "rewrite history")],
+			/Keep the started item other/,
+		],
+		[
 			[...replacement.slice(0, 3), goal("other", ["dependency"])],
 			/Keep the dependencies of other/,
 		],

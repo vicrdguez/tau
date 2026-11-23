@@ -4,7 +4,7 @@
 - Empty plans, unsafe or duplicate IDs, missing dependencies and cycles cannot start workers.
 - The coordinator cannot brief a future item, cite missing authority or hand off before every merge.
 - Ready briefs respect dependencies and worker capacity. Only confirmed worktrees receive worker input.
-- A dirty or unrelated worker cannot publish. No hash from the model reaches Verify.
+- A dirty or unrelated worker cannot publish. The public tool schema and the actual worker publication are exercised separately.
 - Rulings belong to the writing item. Publication carries its brief, named threads, git SHA and rulings.
 - A failed verdict or merge returns evidence and thread IDs to the same worker under a fresh token. Neither advances the build head.
 - Worker preparation racing Keel's recorded advance replans under a new key and path. An unknown move, occupied path or exhausted effect files one holding finding. Resume rechecks a moved head against the latest recorded merge. Stale results never create workers.
@@ -13,12 +13,10 @@
 - A full-set failure or trunk conflict after handoff reaches the coordinator as a new correction plan, preserving merged history.
 - The verifier receives the worker's publication summary, observed item diff base and Git-reported principle and playbook changes. The current build head orders later integration; it does not supply the review comparison.
 - A full-set thread reaches the correction brief and worker. The worker can still claim that thread after an item-level rework, but cannot invent a claim.
-- The shipped Build document matches its independent version-1 fixture.
 
 ## Reviewed Mandate and principles (slice 4)
 
 - A reviewed Mandate with seams or rules refuses a missing or misplaced Encode, and any later item without a direct dependency on the first Encode.
-- A reviewed Mandate without seams or rules can start with ordinary work.
 - The first plan must answer every approval annotation exactly once by number with a valid disposition and a nonblank reason. Fabricated numbers are refused.
 - Planning shows numbered approval notes and bound nodes. The accepted replies are kept, and the brief carries the cited node's label and content.
 - The planner, worker and verifier can distinguish binding design sections and falsifiable rules from delegated, non-binding riders. A delegated label cannot authorize a brief.

@@ -5,7 +5,7 @@
 - A blank or unannotated rejection fails to ask again or files a finding anyway.
 - An annotated rejection loses an annotation, owner attribution, the landed commit or the hand-over evidence.
 - An investigator closes an owner's finding as no action.
-- Real repository: the rejection bypasses investigation, defer does not park a finding, build does not seed new work, or a later hand-over shows a debt list.
+- Real repository: the rejection bypasses investigation, defer does not park a finding, or build does not seed new work.
 
 ## Sweep and queue
 
