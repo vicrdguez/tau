@@ -159,6 +159,8 @@ async function start(
 		plan,
 		build,
 		fact,
+		commit: s.commit,
+		options: s.options,
 	};
 }
 
@@ -170,8 +172,11 @@ test("cancelling the last active investigation exposes a wait; resume delivers t
 	assert.ok(!("reject" in (await x.classify(1))));
 	assert.ok(!("reject" in (await x.plan([goal("fix", ["stats"])]))));
 	await x.file("stats", "An unrelated, non-blocking observation", false);
+	await x.commit(async (tx) =>
+		x.options.set(tx, { ...(await x.options.get(tx)), sweep_minutes: 60 }),
+	);
 
-	// Deliver a late hold on the dependency at the lane routing seam, not by editing stored state.
+	// A project timer is not work progress. Deliver a late hold on the dependency at the lane routing seam, not by editing stored state.
 	await x.must("build", {
 		kind: "queue_hold",
 		item: "stats",
