@@ -53,11 +53,7 @@ const roundHistory = prose(dir, "documents/mandate-round-history.md", [
 	"replies",
 	"heading",
 ]);
-const precedingRound = (
-	removed: string,
-	replies: string,
-	heading = "##",
-) =>
+const precedingRound = (removed: string, replies: string, heading = "##") =>
 	roundHistory({
 		removed: removed || "None.",
 		replies: replies || "None.",
