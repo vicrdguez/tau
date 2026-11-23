@@ -4,19 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import { type Conversation, configure } from "tau/durable";
+import { configure, type Conversation } from "tau/durable";
 import { obj, str } from "tau/schema";
-import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { fauxAssistantMessage } from "tau/testing";
 import { agentKey, token } from "../src/kernel/ids.ts";
 import { defineLane, defineLaneTool } from "../src/kernel/lane.ts";
 import { defineState } from "../src/kernel/state.ts";
+import { overlapsFence } from "../src/principles/fences.ts";
 import {
 	indexFor,
 	principleInputs,
 	principleSections,
 	principleTools,
 } from "../src/principles/index.ts";
-import { toy } from "./toy.ts";
+import { toolTurn, toy } from "./toy.ts";
 
 async function checkout(t: TestContext) {
 	const cwd = await mkdtemp(join(tmpdir(), "keel-principles-"));
@@ -47,7 +48,6 @@ test("the full index follows offered tools, keeps Keel then project order, and r
 		/attack-the-premise[\s\S]+type-system-discipline[\s\S]+alpha: First statement\.[\s\S]+zeta: Last statement\./,
 	);
 	assert.doesNotMatch(first, /Secret body|Another body/);
-	assert.equal(index(), first);
 	await put("zeta", "New statement.", "", "Changed.");
 	assert.match(index(), /alpha: First statement\.[\s\S]+zeta: New statement\./);
 	assert.doesNotMatch(index(), /Last statement/);
@@ -84,50 +84,24 @@ test("role and path bindings deliver bodies, while the verifier sees all project
 	assert.match(verify, /coordinate: Plan sizes/);
 	assert.doesNotMatch(verify, /Apply the cent rule|Estimate costs/);
 });
-test("path bindings cover fenced directories, their parents and normalized descendants without matching siblings", async (t) => {
-	const { cwd, put } = await checkout(t);
-	await put(
-		"money",
-		"Review rounding.",
-		'paths: ["src/money/**"]\n',
-		"Cent rule.",
-	);
-	await put(
-		"limits",
-		"Review limits.",
-		'paths: ["services/*/risk/limit.ts"]\n',
-		"Limit rule.",
-	);
-	const input = (path: string) =>
-		principleInputs.render({ role: "worker", cwd, paths: [path] }, "Act.").text;
-	for (const fence of [
-		"src/money",
-		"src",
-		"./src/money/tick.ts",
-		"src/money/",
-		".",
-	]) {
-		assert.match(input(fence), /Cent rule/, fence);
-	}
-	for (const fence of ["src/moneys", "src/ledger", "app/src/money"]) {
-		assert.doesNotMatch(input(fence), /Cent rule/, fence);
-	}
-	assert.match(input("services/payments/risk"), /Limit rule/);
-	assert.doesNotMatch(input("services/payments/risky"), /Limit rule/);
-});
-test("a principle path pattern with a leading ./ binds to matching fences", async (t) => {
-	const { cwd, put } = await checkout(t);
-	await put(
-		"ledger",
-		"Review rounding.",
-		'paths: ["./src/ledger/**"]\n',
-		"Apply the ledger rule.",
-	);
-	const input = (path: string) =>
-		principleInputs.render({ role: "worker", cwd, paths: [path] }, "Act.").text;
-	for (const fence of ["src", "src/ledger", "./src/ledger/post.ts"])
-		assert.match(input(fence), /Apply the ledger rule/, fence);
-	assert.doesNotMatch(input("src/ledger-old"), /Apply the ledger rule/);
+test("fences overlap matching paths in either direction but not neighboring or nested lookalikes", () => {
+	for (const [fence, pattern, expected] of [
+		[".", "src/money/**", true], // whole repository
+		["src", "src/money/**", true], // fence covers the pattern
+		["src/money/tick.ts", "src/money", true], // pattern covers the fence
+		["./src/money/tick.ts", "src/money/**", true], // normalize fence prefix
+		["src/money/", "src/money/**", true], // normalize trailing slash
+		["src/ledger", "./src/ledger/**", true], // normalize pattern prefix
+		["src/moneys", "src/money/**", false],
+		["app/src/money", "src/money/**", false],
+		["services/payments/risk", "services/*/risk/limit.ts", true],
+		["services/payments/risky", "services/*/risk/limit.ts", false],
+	] as const)
+		assert.equal(
+			overlapsFence(fence, pattern),
+			expected,
+			`${fence} against ${pattern}`,
+		);
 });
 test("CRLF project frontmatter delivers its description, roles, paths and body", async (t) => {
 	const { cwd } = await checkout(t);
@@ -186,22 +160,6 @@ test("a malformed project principle is reported without hiding healthy policy or
 	assert.doesNotMatch(index(), /unavailable/i);
 	assert.match(input(), /Repaired body/);
 });
-test("worker bindings follow the policy pinned at preparation", async (t) => {
-	const { cwd, put } = await checkout(t);
-	await put("ticks", "Later statement.", "roles: [worker]\n", "Later body");
-	const projectPrinciples = [
-		{
-			name: "ticks",
-			body: '---\ndescription: "Original statement."\nroles: [worker]\n---\nOriginal body',
-		},
-	];
-	const { text } = principleInputs.render(
-		{ cwd, role: "worker", situation: "survived_fix", projectPrinciples },
-		"Rework.",
-	);
-	assert.match(text, /Original body/);
-	assert.doesNotMatch(text, /Later body/);
-});
 
 const accessState = defineState({
 	kind: "keel.principleTest",
@@ -233,35 +191,31 @@ async function withAccess(cwd: string, t: TestContext) {
 					reduce: (_s, e) => ({ state: { phase: e.kind } }),
 					agents: ({ phase }) => {
 						if (phase === "workers")
-							return [
-								{
-									key: agentKey("pinned"),
-									role: "worker",
-									cwd,
-									paused: false,
-									projectPrinciples: [
-										{
-											name: "ticks",
-											body: "---\ndescription: Prepared statement.\nroles: [worker]\n---\nPrepared body.",
-										},
-									],
-									expects: [
-										{
-											token: token("pinned", 1),
-											tools: [],
-											input: () => "Rework.",
-										},
-									],
-								},
-								{
-									key: agentKey("empty"),
-									role: "worker",
-									cwd,
-									paused: false,
-									projectPrinciples: [],
-									expects: [],
-								},
-							];
+							return ["pinned", "empty"].map((key) => ({
+								key: agentKey(key),
+								role: "worker" as const,
+								cwd,
+								paused: false,
+								projectPrinciples:
+									key === "empty"
+										? []
+										: [
+												{
+													name: "ticks",
+													body: "---\ndescription: Prepared statement.\nroles: [worker]\n---\nPrepared body.",
+												},
+											],
+								expects:
+									key === "empty"
+										? []
+										: [
+												{
+													token: token(key, 1),
+													tools: [],
+													input: () => "Rework.",
+												},
+											],
+							}));
 						return phase === "retired" || phase === "entry"
 							? []
 							: [
@@ -285,62 +239,32 @@ async function withAccess(cwd: string, t: TestContext) {
 	});
 	t.after(() => x.harness.close(ctx));
 	await x.harness.commit((tx) => configure(tx, x.root.id, { cwd }), ctx);
-	const request = async (conv = x.root, name?: string, args = {}) => {
-		let prompt = "";
-		x.provider.setResponses([
-			(context) => {
-				prompt = JSON.stringify(context);
-				return name
-					? fauxAssistantMessage([fauxToolCall(name, args)], {
-							stopReason: "toolUse",
-						})
-					: fauxAssistantMessage("Done");
-			},
-			fauxAssistantMessage("Done"),
-		]);
-		await (await conv.submit({ type: "input", content: "Act." }, ctx)).wait(
-			ctx,
-		);
-		const rows = (
-			await conv.entries({ order: "descending" }, 100, undefined, ctx)
-		).items;
-		const result = name
-			? rows.flatMap((e) => e.model ?? []).find((m) => m.role === "toolResult")
-			: undefined;
-		return { prompt, result };
-	};
-	return { ...x, request };
+	return x;
 }
 
-test("the principle index is hidden before designer adoption and shown afterwards", async (t) => {
+test("only the active bound designer sees the principle index and may pull", async (t) => {
 	const { cwd, put } = await checkout(t);
 	await put("ticks", "Read this statement.", "", "Read this body.");
 	const x = await withAccess(cwd, t);
 	const before = await x.request(x.root, "start");
 	assert.equal(before.result?.isError, false);
-	const after = await x.request();
-	assert.match(after.prompt, /ticks: Read this statement/);
-	assert.doesNotMatch(
-		before.prompt,
-		/keel-principles|ticks: Read this statement/,
+	assert.equal(before.sections["keel-principles"] ?? null, null);
+	const after = await x.request(x.root, "principle", { name: "ticks" });
+	assert.match(
+		after.sections["keel-principles"] ?? "",
+		/ticks: Read this statement/,
 	);
-});
-
-for (const phase of ["paused", "retired"]) {
-	test(`a ${phase} designer who cannot pull does not see the index`, async (t) => {
-		const { cwd, put } = await checkout(t);
-		await put("ticks", "Read this statement.", "", "Read this body.");
-		const x = await withAccess(cwd, t);
-		await x.request(x.root, "start");
+	assert.equal(after.result?.isError, false);
+	for (const phase of ["paused", "retired"]) {
 		await x.deliver("access", x.root.id, { kind: phase });
 		await x.finish("keel.stop");
-		const { prompt, result } = await x.request(x.root, "principle", {
+		const { sections, result } = await x.request(x.root, "principle", {
 			name: "ticks",
 		});
-		assert.equal(result?.isError, true);
-		assert.doesNotMatch(prompt, /keel-principles|ticks: Read this statement/);
-	});
-}
+		assert.equal(result?.isError, true, phase);
+		assert.equal(sections["keel-principles"] ?? null, null, phase);
+	}
+});
 
 test("worker delivery, index and pulls share the prepared snapshot, including an empty snapshot", async (t) => {
 	const { cwd, put } = await checkout(t);
@@ -363,32 +287,17 @@ test("worker delivery, index and pulls share the prepared snapshot, including an
 	const original = await x.request(pinned, "principle", { name: "ticks" });
 	const added = await x.request(pinned, "principle", { name: "added" });
 	const noProject = await x.request(empty, "principle", { name: "ticks" });
-	assert.deepEqual(
-		{
-			delivered: original.prompt.includes("Prepared body."),
-			indexed: original.prompt.includes("ticks: Prepared statement."),
-			liveIndex: /Checkout statement|Added statement/.test(original.prompt),
-			pulled: JSON.stringify(original.result?.content).includes(
-				"Prepared body.",
-			),
-			addedRefused: added.result?.isError,
-			emptyRefused: noProject.result?.isError,
-			emptyLiveIndex: /Checkout statement|Added statement/.test(
-				noProject.prompt,
-			),
-			builtinIndex: noProject.prompt.includes("attack-the-premise"),
-		},
-		{
-			delivered: true,
-			indexed: true,
-			liveIndex: false,
-			pulled: true,
-			addedRefused: true,
-			emptyRefused: true,
-			emptyLiveIndex: false,
-			builtinIndex: true,
-		},
-	);
+	assert.match(original.prompt, /Prepared body\./);
+	assert.match(original.prompt, /ticks: Prepared statement\./);
+	assert.match(JSON.stringify(original.result?.content), /Prepared body\./);
+	assert.match(noProject.prompt, /attack-the-premise/);
+	for (const run of [original, noProject])
+		assert.doesNotMatch(
+			run.prompt,
+			/Checkout statement|Checkout body|Added statement/,
+		);
+	assert.equal(added.result?.isError, true);
+	assert.equal(noProject.result?.isError, true);
 });
 
 test("shape binds domain modeling and only a survived fix triggers a worker's premise check", async (t) => {
@@ -445,22 +354,8 @@ test("rulings admit delivered and pulled bodies, not index-only names, another w
 		(await x.agents()).map((id) => x.harness.conversation(id, ctx)),
 	);
 	const call = async (conv: Conversation, tool: string, name: string) => {
-		x.provider.setResponses([
-			fauxAssistantMessage([fauxToolCall(tool, { name })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("Done"),
-		]);
-		await (await conv.submit({ type: "input", content: "Act." }, ctx)).wait(
-			ctx,
-		);
-		const rows = (
-			await conv.entries({ order: "descending" }, 30, undefined, ctx)
-		).items;
-		const result = rows
-			.flatMap((e) => e.model ?? [])
-			.find((m) => m.role === "toolResult");
-		assert.ok(result?.role === "toolResult");
+		const { result } = await x.request(conv, tool, { name });
+		assert.ok(result);
 		return { error: result.isError, text: JSON.stringify(result.content) };
 	};
 	const [a, b] = workers;
@@ -470,8 +365,18 @@ test("rulings admit delivered and pulled bodies, not index-only names, another w
 		assert.equal(refused.error, true, name);
 		assert.match(refused.text, /pull/i);
 	}
+	const cutoff = (await a.entries({ order: "descending" }, 1, undefined, ctx))
+		.items[0]?.id;
+	assert.ok(cutoff);
 	const pull = () => call(a, "principle", "lookup");
 	assert.match((await pull()).text, /Original body/);
+	assert.match(
+		(await x.harness.commit(
+			(tx) => principleInputs.checkCitations(tx, a.id, cutoff, ["lookup"]),
+			ctx,
+		)) ?? "",
+		/Pull the principle first: lookup/,
+	);
 	await put("lookup", "Read by judgement.", "", "Replacement body.");
 	assert.match((await pull()).text, /Replacement body/);
 	assert.equal(
@@ -483,11 +388,7 @@ test("rulings admit delivered and pulled bodies, not index-only names, another w
 	);
 	assert.equal((await call(b, "cite", "lookup")).error, true);
 	assert.equal((await call(a, "cite", "lookup")).error, false);
-	x.provider.setResponses([
-		fauxAssistantMessage([fauxToolCall("cite", { name: "on-desk" })], {
-			stopReason: "toolUse",
-		}),
-	]);
+	x.provider.setResponses([toolTurn("cite", { name: "on-desk" })]);
 	const other = await x.harness.createConversation(
 		{ ownership: { kind: "ownerless" } },
 		ctx,

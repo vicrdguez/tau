@@ -8,7 +8,13 @@ import {
 	type Storage,
 } from "tau/durable";
 import { obj } from "tau/schema";
-import { createModels, fauxProvider, openStore } from "tau/testing";
+import {
+	createModels,
+	fauxAssistantMessage,
+	fauxProvider,
+	fauxToolCall,
+	openStore,
+} from "tau/testing";
 import {
 	agentKey,
 	effectKey,
@@ -27,7 +33,7 @@ import { defineState, stateDoc } from "../src/kernel/state.ts";
 import { options } from "../src/roles/index.ts";
 import { sharedFixture, toyFixture } from "./state/toy.ts";
 
-export type ToyState = {
+type ToyState = {
 	ask: string | null;
 	turn: number;
 	agents: number;
@@ -74,7 +80,6 @@ const shared = defineLane(
 		onFact: (state) => ({ state }),
 		reduce(s, e) {
 			if (e.kind === "forbidden") return { reject: "not allowed" };
-			if (e.kind === "changed") return { state: { seen: [] } };
 			return { state: { seen: [...s.seen, String(e.kind)] } };
 		},
 	},
@@ -177,7 +182,16 @@ const toyLane = defineLane(
 				case "tamper": {
 					const view = world.view("shared", null) as { seen: string[] };
 					view.seen.push("intruder");
-					return { state: s };
+					return {
+						state: s,
+						send: [
+							{
+								lane: "shared",
+								work: null,
+								event: { kind: "after inspection" },
+							},
+						],
+					};
 				}
 				case "cycle":
 					return {
@@ -194,12 +208,8 @@ const toyLane = defineLane(
 					return { state: s };
 			}
 		},
-		asks: (s, facts) =>
-			s.ask === null ||
-			(s.ask === "dependent" &&
-				// @ts-expect-error a declaration cannot depend on another lane
-				!(facts.view?.("shared") as { seen: string[] } | undefined)?.seen
-					.length)
+		asks: (s) =>
+			s.ask === null
 				? []
 				: Array.from({ length: s.ask === "A" ? 2 : 1 }, () => ({
 						subject: subject("review"),
@@ -229,6 +239,12 @@ const toyLane = defineLane(
 	},
 	toyFixture,
 );
+
+export function toolTurn(name: string, args: JsonObject = {}) {
+	return fauxAssistantMessage([fauxToolCall(name, args)], {
+		stopReason: "toolUse",
+	});
+}
 
 export async function toy({
 	storage = new MemoryStorage(),
@@ -308,6 +324,31 @@ export async function toy({
 				throw Error(JSON.stringify(done.state.outcome));
 		}
 	};
+	async function request(conv = root, name?: string, args: JsonObject = {}) {
+		const latest = (limit: number) =>
+			conv.entries({ order: "descending" }, limit, undefined, ctx);
+		const before = (await latest(1)).items[0]?.id;
+		let prompt = "";
+		const sections: Record<string, string | null> = {};
+		provider.setResponses([
+			(context) => {
+				prompt = JSON.stringify(context);
+				for (const message of context.messages)
+					if (message.role === "system")
+						Object.assign(sections, message.sections);
+				return name ? toolTurn(name, args) : fauxAssistantMessage("Done");
+			},
+			fauxAssistantMessage("Done"),
+		]);
+		await (await conv.submit({ type: "input", content: "Act." }, ctx)).wait(
+			ctx,
+		);
+		const result = (await latest(30)).items
+			.filter(({ id }) => before === undefined || id > before)
+			.flatMap(({ model }) => model ?? [])
+			.find((message) => message.role === "toolResult");
+		return { prompt, sections, result };
+	}
 	// Preserve the public Store type rather than emitting the internal Harness type.
 	return Object.assign(
 		{
@@ -321,6 +362,7 @@ export async function toy({
 			agents,
 			tasks,
 			finish,
+			request,
 		},
 		store,
 	);

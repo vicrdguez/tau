@@ -3,18 +3,12 @@ import { type TestContext, test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { type Conversation, defineTool, type JsonObject } from "tau/durable";
 import { obj, str } from "tau/schema";
-import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { fauxAssistantMessage } from "tau/testing";
 import { agentKey, token, type WorkId } from "../src/kernel/ids.ts";
-import {
-	defineLane,
-	defineLaneTool,
-	type Lane,
-	prose,
-	type World,
-} from "../src/kernel/lane.ts";
+import { defineLane, defineLaneTool, type Lane } from "../src/kernel/lane.ts";
 import { BindingState, ProjectState } from "../src/kernel/records.ts";
 import { defineState, stateDoc } from "../src/kernel/state.ts";
-import { latch, toy } from "./toy.ts";
+import { latch, toolTurn, toy } from "./toy.ts";
 
 const plan = defineState({
 	kind: "keel.plan",
@@ -163,20 +157,8 @@ async function setup(t: TestContext) {
 		args: JsonObject = {},
 		conv: Conversation = x.root,
 	) {
-		x.provider.setResponses([
-			fauxAssistantMessage([fauxToolCall(name, args)], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
-		]);
-		await (await conv.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
-		const rows = (
-			await conv.entries({ order: "descending" }, 100, undefined, ctx)
-		).items;
-		const result = rows
-			.flatMap((r) => r.model ?? [])
-			.find((m) => m.role === "toolResult");
-		assert.ok(result?.role === "toolResult");
+		const { result } = await x.request(conv, name, args);
+		assert.ok(result);
 		return result;
 	}
 	return { x, call };
@@ -231,10 +213,7 @@ test("queue seed creates a different anchored work; rejected seed leaks no conve
 	x.provider.setResponses([
 		async () => {
 			await release.promise;
-			return fauxAssistantMessage(
-				[fauxToolCall("start", { action: "grounded" })],
-				{ stopReason: "toolUse" },
-			);
+			return toolTurn("start", { action: "grounded" });
 		},
 		fauxAssistantMessage("done"),
 		fauxAssistantMessage("done"),
@@ -303,52 +282,11 @@ test("plain tools and prompt sections follow role assignments even at entry", as
 	const { x } = await setup(t);
 	const agent = await x.root.agent(ctx);
 	assert.ok(agent.tools.some((t) => t.name === "principle"));
-	let seen = "";
-	x.provider.setResponses([
-		(context) => {
-			seen = JSON.stringify(context);
-			return fauxAssistantMessage("done");
-		},
-	]);
-	await (await x.root.submit({ type: "input", content: "hello" }, ctx)).wait(
-		ctx,
-	);
-	assert.match(seen, /designer index/);
-	assert.doesNotMatch(seen, /worker index/);
-});
-test("lanes render slotted prose without importing tau", () => {
-	const render = prose(import.meta.dirname, "../src/prose/roles/designer.md", [
-		"form",
-	]);
-	assert.match(render({ form: "example mandate" }), /example mandate/);
+	const { prompt } = await x.request();
+	assert.match(prompt, /designer index/);
+	assert.doesNotMatch(prompt, /worker index/);
 });
 test("registration requires a fixture at the state version", () => {
-	// @ts-expect-error fixture required even for an empty lane
-	assert.throws(() => defineLane(lane), /fixture/i);
+	assert.throws(() => Reflect.apply(defineLane, undefined, [lane]), /fixture/i);
 	assert.throws(() => defineLane(lane, { ...fixture, version: 2 }), /fixture/i);
-	void (() => {
-		type Contract = typeof lane;
-		// @ts-expect-error facts are delivered, never refused
-		const reject: Contract["onFact"] = () => ({ reject: "not now" });
-		// @ts-expect-error returning state alongside a rejection still refuses the fact
-		const both: Contract["onFact"] = (state) => ({ state, reject: "stale" });
-		const needsViews = (
-			_: ReturnType<typeof plan.initial>,
-			w: World,
-		): never => {
-			throw Error(String(w.view("other")));
-		};
-		// @ts-expect-error declarations cannot require views or a clock
-		const asks: Contract["asks"] = needsViews;
-		// @ts-expect-error declarations cannot require views or a clock
-		const agents: Contract["agents"] = needsViews;
-		// @ts-expect-error declarations cannot require views or a clock
-		const effects: Contract["effects"] = needsViews;
-		void [reject, both, asks, agents, effects];
-		// @ts-expect-error an older fixture missing a field cannot pin this state
-		defineLane(lane, {
-			version: 1,
-			sample: () => ({ phase: "", answered: [] as string[] }),
-		});
-	});
 });

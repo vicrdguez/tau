@@ -31,11 +31,8 @@ async function reopen(t: TestContext, point: "publish" | "create") {
 	const x = await toy({ storage });
 	t.after(() => x.harness.close(ctx));
 	const agents = await x.agents();
-	assert.ok(
-		agents.length === 1 && agents[0] !== undefined,
-		"one original worker",
-	);
-	const worker = await x.harness.conversation(agents[0], ctx);
+	assert.equal(agents.length, 1, "one original worker");
+	const worker = await x.harness.conversation(agents[0]!, ctx);
 	assert.ok(worker);
 	return { x, worker, storage };
 }
@@ -64,7 +61,6 @@ test("SQLite SIGKILL after publish and before tool reply: replay returns the rec
 		call.id,
 		ctx,
 	);
-	assert.ok(receipt);
 	assert.deepEqual(receipt, {
 		reply: "published once",
 		terminate: true,
@@ -85,8 +81,8 @@ test("SQLite SIGKILL after publish and before tool reply: replay returns the rec
 		[
 			{
 				tool: "publish",
-				error: receipt.isError,
-				output: [{ type: "text", text: receipt.reply }],
+				error: false,
+				output: [{ type: "text", text: "published once" }],
 			},
 		],
 	);
@@ -112,11 +108,7 @@ test("SQLite SIGKILL between worker creation and first submit: restart delivers 
 			ctx,
 		);
 	const before = await conversationIds();
-	assert.deepEqual(
-		await submissions(),
-		[],
-		"worker exists but no submission was admitted",
-	);
+	assert.deepEqual(await submissions(), [], "no submission was admitted");
 	assert.equal(
 		(await x.tasks("keel.deliver")).length,
 		1,
