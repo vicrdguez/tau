@@ -6,18 +6,12 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import {
-	type ConversationId,
-	type JsonObject,
-	openNodeSqliteStorage,
-} from "tau/durable";
-import { fauxAnswer, fauxAssistantMessage } from "tau/testing";
-import { effectKey } from "../src/kernel/ids.ts";
+import { type JsonObject, openNodeSqliteStorage } from "tau/durable";
+import { fauxAssistantMessage } from "tau/testing";
 import { ProjectState } from "../src/kernel/records.ts";
 import { stateDoc } from "../src/kernel/state.ts";
-import { sweepDispatch } from "../src/roles/dispatch.ts";
+import { replyJson } from "../src/reply-json.ts";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openScriptedWorkflow } from "./fixtures/kernel.ts";
 import { tempRepo, git } from "./fixtures/repo.ts";
@@ -49,43 +43,18 @@ async function until<T>(observe: () => Promise<T | undefined>) {
 	assert.fail("Workflow did not reach the expected state");
 }
 
-test("sweep accepts array replies with fences or surrounding prose", async () => {
-	const run = sweepDispatch(async () => ({
-		authority: [],
-		samples: [],
-		patternRulings: [],
-		priorFindings: [],
-	}));
-	const findings = [{ text: "Missing proof.", report: "Test at sha-1." }];
+test("JSON replies recover fenced and inline arrays, but not invalid text", () => {
+	const findings = [{ text: "Missing proof.", report: "Test at [sha-1]." }];
 	const json = JSON.stringify(findings);
-	for (const answer of [
-		`Here are the findings:\n\n\`\`\`json\n${json}\n\`\`\`\n`,
-		`I checked the tree. ${json} That is all.`,
-	]) {
-		const result = await run(
-			{
-				lane: "queue",
-				work: null,
-				key: effectKey("sweep/1"),
-				spec: { kind: "sweep" },
-				root: "/x",
-			},
-			ctx,
-			{
-				async dispatch() {
-					return [
-						{
-							seat: "sweeper",
-							conversation: 1 as ConversationId,
-							answer,
-							error: null,
-						},
-					];
-				},
-			},
-		);
-		assert.deepEqual(result.findings, findings);
-	}
+	assert.deepEqual(
+		replyJson(`Findings:\n\n\`\`\`json\n${json}\n\`\`\`\n`),
+		findings,
+	);
+	assert.deepEqual(
+		replyJson(`Checking [old notes. Actual result: ${json} Done.`),
+		findings,
+	);
+	assert.equal(replyJson("[no valid findings]"), null);
 });
 
 test("a durable sweep fires once per tick around SIGKILL, files real playbook drift during a landing, and re-arms while idle", {
@@ -122,7 +91,7 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 		() => started + minute,
 	);
 	const { harness } = a.store;
-	t.after(() => harness.close(ctx));
+	t.after(a.close);
 	a.sweeper.setResponses([
 		a.turn("sweeper", "bash", {
 			command:
@@ -134,12 +103,13 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 				/Run sh old-check\.sh/,
 			);
 			return fauxAssistantMessage(
-				JSON.stringify([
-					{
-						text: "Verification playbook calls a removed check.",
-						report: `.keel/playbooks/verify.md names old-check.sh; Git has no such file at ${git(root, "rev-parse", "trunk")}.`,
-					},
-				]),
+				"Found drift: " +
+					JSON.stringify([
+						{
+							text: "Verification playbook calls a removed check.",
+							report: `.keel/playbooks/verify.md names old-check.sh; Git has no such file at ${git(root, "rev-parse", "trunk")}.`,
+						},
+					]),
 			);
 		},
 	]);
@@ -154,51 +124,34 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 		}),
 	]);
 	harness.resume();
-	let findingDecision: Awaited<ReturnType<typeof decision>>;
-	try {
-		const queue = await until(async () =>
-			Object.values(
-				(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-			).find((a) => a.lane === "queue"),
-		);
-		const p = await harness.snapshot(stateDoc(ProjectState), ctx);
-		assert.ok(p);
-		const ask = await harness.commit((tx) => decision(tx, queue.decision), ctx);
-		findingDecision = ask;
-		assert.ok(ask?.status === "open");
-		const basis = await harness.commit((tx) => tx.entry(ask.basis), ctx);
-		assert.match(
-			JSON.stringify(basis?.data),
-			/playbook calls a removed check[\s\S]*old-check\.sh/i,
-		);
-		assert.deepEqual(
-			Object.values(p.asks).map((a) => a.local),
-			["triage/2"],
-		);
-		assert.ok(
-			JSON.stringify(basis?.data).includes(git(root, "rev-parse", "trunk")),
-			"finding cites the pinned revision in its report",
-		);
-		assert.doesNotMatch(JSON.stringify(basis?.data), /Revision: not available/);
-		assert.equal(a.sweeper.state.callCount, 2);
-	} finally {
-		landing.resolve(undefined);
-	}
+	const finding = await (async () => {
+		try {
+			const queue = await until(async () =>
+				(await a.asks()).find((a) => a.lane === "queue"),
+			);
+			const { d, text } = await a.readAsk(queue);
+			assert.deepEqual(
+				(await a.asks()).map((a) => a.local),
+				["triage/2"],
+			);
+			assert.match(text, /playbook calls a removed check[\s\S]*old-check\.sh/i);
+			assert.ok(
+				text.includes(git(root, "rev-parse", "trunk")),
+				"finding cites the pinned revision",
+			);
+			assert.doesNotMatch(text, /Revision: not available/);
+			assert.equal(a.sweeper.state.callCount, 2);
+			return d;
+		} finally {
+			landing.resolve(undefined);
+		}
+	})();
 	await a.settle(timer);
-	assert.deepEqual(
-		Object.values(
-			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-		)
-			.map((a) => a.local)
-			.sort(),
-		["handover", "triage/2"],
-	);
-	assert.ok(findingDecision?.status === "open");
-	await fauxAnswer(a.store, findingDecision.id, {
-		basis: findingDecision.basis,
-		choice: "defer",
-		annotations: [],
-	});
+	assert.deepEqual((await a.asks()).map((a) => a.local).sort(), [
+		"handover",
+		"triage/2",
+	]);
+	await a.answer(finding, "defer");
 	await a.settle(timer);
 	const settled = await harness.snapshot(stateDoc(ProjectState), ctx);
 	assert.equal(
@@ -206,8 +159,9 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 		1,
 		"only the next timer needs a receipt",
 	);
-	await harness.close(ctx);
+	await a.close();
 
+	// Reopen at the same instant (no repeat), then at the next due tick.
 	for (const tick of [1, 2]) {
 		const b = await openScriptedWorkflow(
 			root,
@@ -260,12 +214,7 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 				`sweep calls at tick ${tick}`,
 			);
 			assert.deepEqual(
-				Object.values(
-					(await b.store.harness.snapshot(stateDoc(ProjectState), ctx))?.asks ??
-						{},
-				)
-					.map((a) => a.local)
-					.sort(),
+				(await b.asks()).map((a) => a.local),
 				["handover"],
 			);
 			if (tick === 2) {
@@ -287,7 +236,7 @@ test("a durable sweep fires once per tick around SIGKILL, files real playbook dr
 				);
 			}
 		} finally {
-			await b.store.harness.close(ctx);
+			await b.close();
 		}
 	}
 });

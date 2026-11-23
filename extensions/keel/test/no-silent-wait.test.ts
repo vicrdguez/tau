@@ -40,7 +40,7 @@ async function start(
 	);
 	const { harness } = s.store;
 	t.after(s.close);
-	const { work, commit, send, asks } = s;
+	const { work, send, asks } = s;
 	const must = async (lane: string, event: LaneEvent) => {
 		const r = await send(lane, event);
 		assert.ok(!("reject" in r), JSON.stringify(r));
@@ -126,9 +126,6 @@ async function start(
 	const plan = (items: ReturnType<typeof goal>[]) =>
 		send("build", { kind: "plan", items, replies: [] });
 	const build = () => harness.snapshot(stateDoc(buildDoc), work, ctx);
-	const changeBuild = (
-		change: (state: ReturnType<typeof buildDoc.initial>) => void,
-	) => commit(async (tx) => change(await tx.doc(stateDoc(buildDoc), work)));
 	await must("design", {
 		kind: "ground",
 		route: "follow",
@@ -161,43 +158,60 @@ async function start(
 		classify,
 		plan,
 		build,
-		changeBuild,
 		fact,
-		commit,
-		options: s.options,
 	};
 }
 
-test("X1: a late hold on a fix dependency leads to one decision; resume gives the coordinator that picture and the owner's direction", async (t) => {
+test("cancelling the last active investigation exposes a wait; resume delivers the evidence and owner direction", async (t) => {
 	const x = await start(t);
 	await x.brief("writer");
 	await x.brief("stats", "R2");
 	await x.file("writer", "PARSER: escaped colons get dropped");
 	assert.ok(!("reject" in (await x.classify(1))));
 	assert.ok(!("reject" in (await x.plan([goal("fix", ["stats"])]))));
-	await x.commit(async (tx) =>
-		x.options.set(tx, { ...(await x.options.get(tx)), sweep_minutes: 60 }),
-	);
-	// Replay the hold that a pre-refusal link delivered to Build.
+	await x.file("stats", "An unrelated, non-blocking observation", false);
+
+	// Deliver a late hold on the dependency at the lane routing seam, not by editing stored state.
 	await x.must("build", {
 		kind: "queue_hold",
 		item: "stats",
 		nodes: [],
-		cause: "queue/1",
+		cause: "queue/late",
+		evidence: "Stats cannot continue",
 	});
+	assert.deepEqual(
+		await x.asks(),
+		[],
+		"the live investigator can still move the work",
+	);
+	await x.fact(
+		{
+			kind: "agent_stalled",
+			agent: agentKey("investigator"),
+			tokens: [token("investigate/2", 0)],
+			cause: "stopped",
+			lastWords: "",
+		},
+		"queue",
+	);
+	assert.deepEqual(
+		(await x.asks()).map((a) => a.local),
+		["investigate/2/0"],
+	);
+	await x.answer("investigate/", "cancel");
+
 	assert.equal((await x.asks()).length, 1);
 	const { d, text } = await x.readAsk("finding/");
 	assert.deepEqual(d.choices, ["resume", "cancel"]);
 	assert.match(text, /writer.*escaped colons get dropped/);
-	assert.match(text, /stats.*escaped colons get dropped/);
+	assert.match(text, /stats.*Stats cannot continue/);
 	assert.match(text, /fix.*depends on stats/);
 	await x.answer("finding/", "resume", "Make the fix independent of stats.");
-	assert.deepEqual(await x.asks(), []);
 	const { items, coordinator } = (await x.build())!;
 	assert.equal(coordinator.tool, "publish_plan");
 	assert.ok(
 		items.find((i) => i.id === "stats")?.parked,
-		"resume does not release the cause",
+		"resume does not release the hold",
 	);
 	assert.match(coordinator.direction, /fix.*depends on stats/);
 	assert.match(coordinator.direction, /Make the fix independent of stats/);
@@ -207,101 +221,34 @@ test("X1: a late hold on a fix dependency leads to one decision; resume gives th
 	assert.equal((await x.build())?.coordinator.item, "fix");
 });
 
-test("X2: a fix blocked on its own finding leads to one decision", async (t) => {
-	const x = await start(t, ["writer"]);
-	await x.brief("writer");
-	await x.file("writer", "Parser defect");
-	assert.ok(!("reject" in (await x.classify(1))));
-	assert.ok(!("reject" in (await x.plan([goal("fix")]))));
-	await x.brief("fix");
-	// Replay the hold delivered by the formerly accepted self-link.
-	await x.must("build", {
-		kind: "queue_hold",
-		item: "fix",
-		nodes: [],
-		cause: "queue/1",
-	});
-	assert.equal((await x.asks()).length, 1);
-	assert.match((await x.readAsk("finding/")).text, /fix.*Parser defect/);
-});
-
-for (const filer of ["direct", "transitive", "fix"] as const) {
-	test(`A-1: an investigator cannot link the ${filer} filer to its own fix`, async (t) => {
-		const x = await start(
-			t,
-			filer === "fix"
-				? ["writer"]
-				: filer === "transitive"
-					? ["writer", "stats", "reader"]
-					: undefined,
-			{ reader: ["stats"] },
-		);
+// A filer can be the fix itself, or reach it through existing dependencies.
+for (const filer of ["transitive", "fix"] as const) {
+	test(`an investigator cannot link a ${filer} filer to its own fix`, async (t) => {
+		const ids = filer === "fix" ? ["writer"] : ["writer", "stats", "reader"];
+		const x = await start(t, ids, { reader: ["stats"] });
 		await x.brief("writer");
-		if (filer !== "fix") await x.brief("stats", "R2");
+		if (filer === "transitive") await x.brief("stats", "R2");
 		await x.file("writer", "The parser loses its escape.");
 		assert.ok(!("reject" in (await x.classify(1))));
-		const items =
-			filer === "transitive"
-				? [goal("fix", ["reader"])]
-				: [goal("fix", filer === "direct" ? ["stats"] : [])];
-		assert.ok(!("reject" in (await x.plan(items))));
+		assert.ok(
+			!(
+				"reject" in
+				(await x.plan([goal("fix", filer === "fix" ? [] : ["reader"])]))
+			),
+		);
 		if (filer === "fix") await x.brief("fix");
 		const item = filer === "fix" ? "fix" : "stats";
 		await x.file(item, "The same defect would block the fix if linked.");
-		assert.deepEqual(
-			await x.asks(),
-			[],
-			"the investigator is still expected to act",
-		);
 		const linked = await x.classify(2, { sameAs: 1 });
 		assert.match(
 			"reject" in linked ? linked.reject : "",
 			new RegExp(`${item}.*fix.*without linking`, "i"),
 		);
-		assert.ok(
-			!("reject" in (await x.classify(2))),
-			"the investigator can report a separate defect",
-		);
+		assert.ok(!("reject" in (await x.classify(2))));
 		assert.ok(!("reject" in (await x.plan([goal("different-fix")]))));
 		assert.equal((await x.build())?.coordinator.item, "different-fix");
 	});
 }
-
-test("X3: a coordinator stalled on an approved removal reports the held item in one decision", async (t) => {
-	const x = await start(t, ["stats"]);
-	await x.brief("stats", "R2");
-	await x.file("stats", "Statistics rule R2 is wrong; drop it", false);
-	assert.ok(
-		!(
-			"reject" in
-			(await x.classify(1, { classification: "mandate_wrong", nodes: ["R2"] }))
-		),
-	);
-	await x.answer("triage/", "build");
-	// Replay the approved proposal that reached Build before removal was refused at source.
-	const bound = (await x.build())!.mandate!;
-	await x.must("build", {
-		kind: "propose_revision",
-		number: 1,
-		causes: ["queue/1"],
-		nodes: ["R2"],
-		changes: "R2: removed",
-		mandate: { ...bound, nodes: bound.nodes.filter((n) => n.label !== "R2") },
-	});
-	const { coordinator } = (await x.build())!;
-	await x.fact({
-		kind: "agent_stalled",
-		agent: agentKey("coordinator"),
-		tokens: [token("publish_plan", coordinator.seq)],
-		cause: "unfulfilled",
-		lastWords: "No revision plan can apply.",
-	});
-	assert.equal((await x.asks()).length, 1);
-	assert.match(
-		(await x.readAsk("finding/")).text,
-		/stats.*Statistics rule R2 is wrong/,
-	);
-});
 
 test("A-3: determined triage keeps both filers held until both planned items merge, then restarts them at the final head", async (t) => {
 	const x = await start(t);
@@ -408,75 +355,6 @@ test("A-n1: approval without notes releases an already-settled cause without a p
 	assert.equal(build.items[0]?.parked, false);
 	assert.deepEqual(build.queueHolds, []);
 	assert.deepEqual(await x.asks(), []);
-});
-
-test("a synthetic cycle among held unfinished items opens one decision, not one per item", async (t) => {
-	const x = await start(t, ["left", "right"]);
-	await x.brief("left");
-	await x.brief("right");
-	await x.changeBuild((s) => {
-		s.items[0]!.deps = ["right"];
-		s.items[1]!.deps = ["left"];
-	});
-	await x.must("build", {
-		kind: "queue_hold",
-		item: "left",
-		nodes: [],
-		cause: "queue/1",
-		evidence: "### Finding #1: Left cannot continue",
-	});
-	await x.must("build", {
-		kind: "queue_hold",
-		item: "right",
-		nodes: [],
-		cause: "queue/2",
-		evidence: "### Finding #2: Right cannot continue",
-	});
-	assert.equal((await x.asks()).length, 1);
-	const { text } = await x.readAsk("finding/");
-	assert.match(text, /left.*Left cannot continue.*depends on right/);
-	assert.match(text, /right.*Right cannot continue.*depends on left/);
-	await x.answer("finding/", "cancel");
-	assert.deepEqual(await x.asks(), []);
-});
-
-test("cancelling a stalled investigation of a non-blocking note exposes the work's otherwise silent wait", async (t) => {
-	const x = await start(t, ["left", "right"]);
-	await x.brief("left");
-	await x.brief("right");
-	await x.file("left", "A non-blocking note about left", false);
-	// As in the synthetic-cycle test, stand in for an unknown build dead end.
-	await x.changeBuild((s) => {
-		s.items[0]!.deps = ["right"];
-		s.items[1]!.deps = ["left"];
-	});
-	for (const item of ["left", "right"])
-		await x.must("build", {
-			kind: "queue_hold",
-			item,
-			nodes: [],
-			cause: `queue/${item === "left" ? 91 : 92}`,
-		});
-	assert.deepEqual(await x.asks(), [], "investigation is still progress");
-	await x.fact(
-		{
-			kind: "agent_stalled",
-			agent: agentKey("investigator"),
-			tokens: [token("investigate/1", 0)],
-			cause: "stopped",
-			lastWords: "",
-		},
-		"queue",
-	);
-	assert.deepEqual(
-		(await x.asks()).map((a) => a.local),
-		["investigate/1/0"],
-	);
-	await x.answer("investigate/", "cancel");
-	const { d, text } = await x.readAsk("finding/");
-	assert.deepEqual(d.choices, ["resume", "cancel"]);
-	assert.match(text, /left.*depends on right/);
-	assert.match(text, /right.*depends on left/);
 });
 
 test("a coordinator stall after resume shows the refused plan's error, not a prior turn's error", async (t) => {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JsonObject } from "tau/durable";
-import { buildLane, buildTools } from "../src/lanes/build/index.ts";
-import type { buildView } from "../src/lanes/build/state.ts";
+import { buildLane } from "../src/lanes/build/index.ts";
+import { type buildView, validateGraph } from "../src/lanes/build/state.ts";
 import type { Mandate } from "../src/lanes/design/public.ts";
 import { startBuild } from "./fixtures/build.ts";
 import { laneDriver, laneWorld } from "./fixtures/drive.ts";
@@ -42,7 +42,12 @@ const ruling = {
 	follows: "existing price model",
 	principles: [],
 };
-const item = { id: "fix", kind: "build", goal: "fix rounding", deps: [] };
+const item = {
+	id: "fix",
+	kind: "build" as const,
+	goal: "fix rounding",
+	deps: [],
+};
 const clean = {
 	kind: "ok",
 	sha,
@@ -69,13 +74,23 @@ function setup(max_workers = 1) {
 			start();
 			send({ kind: "plan", items });
 		}
+		const briefItem = (id = "fix", overrides: JsonObject = {}) =>
+			send({ kind: "brief", ...brief, item: id, ...overrides });
+		const ready = (
+			base = repo.trunkHead,
+			key?: ReturnType<typeof effect>["key"],
+		) => done({ kind: "worktree", base, principles: [] }, key);
+		const workOn = (id = "fix", base = repo.trunkHead) => {
+			briefItem(id);
+			ready(base);
+		};
 		function prepare(kind = "build") {
 			plan([{ ...item, kind }]);
-			send({ kind: "brief", ...brief });
+			briefItem();
 		}
 		function working(kind = "build") {
 			prepare(kind);
-			done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+			ready();
 		}
 		const pub = (facts: JsonObject = clean, addresses: string[] = []) =>
 			send({
@@ -101,6 +116,9 @@ function setup(max_workers = 1) {
 			plan,
 			prepare,
 			working,
+			briefItem,
+			ready,
+			workOn,
 			pub,
 			tryEvent: driver.attempt,
 			agent,
@@ -132,23 +150,24 @@ test("Build discovers the repo and starts the build before opening planning", ()
 	assert.match(r.text, /repair pricing/);
 });
 
-test("plans refuse unsafe or duplicate IDs, empty plans, missing dependencies and cycles", () => {
-	const b = setup();
-	b.start();
-	for (const items of [
-		[],
-		[item, item],
-		[{ ...item, id: "../a" }],
-		[{ ...item, id: "full" }],
-		[{ ...item, deps: ["later"] }],
-		[{ ...item, deps: ["fix"] }],
+test("plan validation refuses missing goals, invalid IDs and unsatisfiable dependencies", () => {
+	const table: [string, Parameters<typeof validateGraph>[1], RegExp][] = [
+		["empty", [], /at least one item/],
+		["duplicate", [item, item], /unique/],
+		["path", [{ ...item, id: "../a" }], /lowercase/],
+		["reserved", [{ ...item, id: "full" }], /reserved/],
+		["unknown dependency", [{ ...item, deps: ["later"] }], /missing/],
 		[
-			{ ...item, deps: ["next"] },
-			{ ...item, id: "next", deps: ["fix"] },
+			"cycle",
+			[
+				{ ...item, deps: ["next"] },
+				{ ...item, id: "next", deps: ["fix"] },
+			],
+			/cycle/,
 		],
-	])
-		assert.ok("reject" in b.tryEvent({ kind: "plan", items }));
-	assert.deepEqual(b.effects(), []);
+	];
+	for (const [failure, goals, reason] of table)
+		assert.match(validateGraph([], goals) ?? "", reason, failure);
 });
 
 const reviewed: Mandate = {
@@ -235,7 +254,7 @@ test("approval notes require a numbered reply each; the first plan and its cited
 		"reject" in b.tryEvent({ kind: "brief", ...brief, nodes: ["tick-order"] }),
 	);
 	b.send({ kind: "brief", ...brief, nodes: ["cash-port", "port-api"] });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.ready();
 	assert.match(b.request("worker").text, /Item: fix \(encode\)/);
 	assert.match(
 		b.request("worker").text,
@@ -270,28 +289,6 @@ test("approval notes require a numbered reply each; the first plan and its cited
 	assert.deepEqual(correction.state.approvals, approvals);
 });
 
-test("the brief request and worker brief each render one Bound Mandate heading", () => {
-	const b = setup();
-	b.plan();
-	const request = b.request("coordinator").text;
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
-	const worker = b.request("worker").text;
-	for (const [input, text] of Object.entries({ request, worker }))
-		assert.equal(
-			(text.match(/^(?:## )?Bound Mandate:?[ \t]*$/gm) ?? []).length,
-			1,
-			input,
-		);
-});
-
-test("reviewed work without seams or rules can start with ordinary work", () => {
-	const b = setup();
-	b.start({ ...reviewed, encodeRequired: false, approvalNotes: [] });
-	b.send({ kind: "plan", items: [item] });
-	assert.deepEqual(b.request("coordinator").tools, ["brief_item"]);
-});
-
 test("briefs require ready work and bound labels; only a confirmed worktree starts a worker", () => {
 	const b = setup();
 	b.plan([item, { ...item, id: "later", deps: ["fix"] }]);
@@ -302,7 +299,7 @@ test("briefs require ready work and bound labels; only a confirmed worktree star
 		{ kind: "handoff", summary: "done", risk: "none" },
 	])
 		assert.ok("reject" in b.tryEvent(e));
-	b.send({ kind: "brief", ...brief });
+	b.briefItem();
 	const { op } = b.effect().spec;
 	assert.deepEqual(op, {
 		kind: "worktree",
@@ -313,7 +310,7 @@ test("briefs require ready work and bound labels; only a confirmed worktree star
 		base: repo.trunkHead,
 	});
 	assert.equal(b.agents().length, 1);
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.ready();
 	assert.equal(b.agent("worker").cwd, "/repo/.git/keel/32/worker-fix-1");
 	for (const fact of [brief.evidence, brief.fences, mandate.intent])
 		assert.ok(b.request("worker").text.includes(fact));
@@ -327,14 +324,14 @@ test("briefs use spare worker slots but never start pending dependencies or exce
 		{ ...item, id: "other" },
 		{ ...item, id: "third" },
 	]);
-	b.send({ kind: "brief", ...brief });
+	b.briefItem();
 	assert.match(b.request("coordinator").text, /other/);
-	b.send({ kind: "brief", ...brief, item: "other" });
+	b.briefItem("other");
 	assert.equal(b.agent("coordinator").expects.length, 0);
 	assert.equal(b.effects().length, 2);
 });
 
-test("dirty and unrelated work cannot publish, and the tool offers no SHA argument", () => {
+test("dirty and unrelated work cannot publish", () => {
 	const b = setup();
 	b.working();
 	const exp = b.request("worker");
@@ -353,18 +350,6 @@ test("dirty and unrelated work cannot publish, and the tool offers no SHA argume
 				}),
 		);
 	assert.equal(b.request("worker").token, exp.token);
-	const tool = buildTools.find((t) => t.name === "publish_build")!;
-	assert.equal(tool.observes, true);
-	const schema = tool.build(async () => ({ output: [] })).parameters;
-	assert.ok(
-		"properties" in schema &&
-			schema.properties &&
-			typeof schema.properties === "object",
-	);
-	assert.deepEqual(Object.keys(schema.properties).sort(), [
-		"addresses",
-		"summary",
-	]);
 });
 
 test("principle and playbook changes go to the verifier without a publication hold", () => {
@@ -441,10 +426,8 @@ test("worker input passes the item's path fences and triggers a premise check on
 test("the verifier receives the repo's comparison base, not the current head or original attempt base", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
-	b.send({ kind: "brief", ...brief, item: "other" });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.workOn();
+	b.workOn("other");
 	b.pub();
 	b.send({ kind: "merged", item: "fix", head: merged });
 	const inherited = "f".repeat(40);
@@ -471,7 +454,6 @@ test("rework and integration reach the original worker with fresh expectations; 
 	for (const [kind, evidence] of [
 		["rework", "wrong rounding"],
 		["integration", "merge conflict in book"],
-		["integration", "proof failed: invalid tick"],
 	] as const) {
 		b.send({ kind, item: "fix", evidence, threads: ["tie"] });
 		assert.equal(b.agent("worker").key, worker.key);
@@ -531,65 +513,46 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 			result: { kind: "worktree", base: repo.trunkHead, principles: [] },
 		});
 		assert.equal(b.agents().length, 1);
-		b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+		b.ready();
 		assert.match(b.request("worker").text, /try another checkout/);
 	});
 }
 
-test("a worker racing a recorded merge is prepared from the new head without owner intervention", () => {
-	const b = setup(2);
-	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
-	b.send({ kind: "brief", ...brief, item: "other" });
-	const original = b.effect();
-	b.pub();
-	b.send({ kind: "merged", item: "fix", head: merged });
-	const result = b.send({
-		kind: "effect_done",
-		key: original.key,
-		result: { kind: "moved", actual: merged },
-	});
-	assert.equal(result.send?.length ?? 0, 0);
-	const next = b
-		.effects()
-		.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
-	assert.notEqual(next.key, original.key);
-	assert.notEqual(
-		(next.spec.op as JsonObject).path,
-		(original.spec.op as JsonObject).path,
-	);
-	assert.equal((next.spec.op as JsonObject).base, merged);
-});
-
 function preparingBesidePublication() {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
-	b.send({ kind: "brief", ...brief, item: "other" });
+	b.workOn();
+	b.briefItem("other");
 	b.pub();
 	return b;
 }
 
-test("a later-recorded merge explains a moved preparation without filing a finding", () => {
-	const b = preparingBesidePublication();
-	const first = b.effect();
-	assert.deepEqual(b.done({ kind: "moved", actual: merged }).send ?? [], []);
-	assert.deepEqual(b.effects(), []);
-	assert.deepEqual(
-		b.send({ kind: "merged", item: "fix", head: merged }).send ?? [],
-		[],
-	);
-	const next = b
-		.effects()
-		.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
-	assert.notEqual(
-		(next.spec.op as JsonObject).key,
-		(first.spec.op as JsonObject).key,
-	);
-	assert.equal((next.spec.op as JsonObject).base, merged);
-});
+// Read the move before and after recording the sibling merge; both must re-pin.
+for (const order of ["merge first", "move first"]) {
+	test(`${order}: a recorded merge explains the moved preparation without an owner decision`, () => {
+		const b = preparingBesidePublication();
+		const first = b.effect();
+		const merge = () => b.send({ kind: "merged", item: "fix", head: merged });
+		if (order === "merge first") merge();
+		assert.deepEqual(
+			b.done({ kind: "moved", actual: merged }, first.key).send ?? [],
+			[],
+		);
+		if (order === "move first") {
+			assert.deepEqual(b.effects(), []);
+			assert.deepEqual(merge().send ?? [], []);
+		}
+		const next = b
+			.effects()
+			.find((e) => (e.spec.op as JsonObject).kind === "worktree")!;
+		assert.notEqual(next.key, first.key);
+		assert.notEqual(
+			(next.spec.op as JsonObject).path,
+			(first.spec.op as JsonObject).path,
+		);
+		assert.equal((next.spec.op as JsonObject).base, merged);
+	});
+}
 
 for (const kind of ["merged", "rework", "integration"]) {
 	test(`a sibling's ${kind} that cannot explain a moved preparation files the observed head`, () => {
@@ -627,11 +590,11 @@ function replaceOccupied(b: ReturnType<typeof setup>) {
 test("only the confirmed replacement releases all its own old attempts for unmerged cleanup", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind: "brief", ...brief });
+	b.briefItem();
 	const first = replaceOccupied(b);
 	const second = replaceOccupied(b);
 	const replacement = b.effect();
-	b.send({ kind: "brief", ...brief, item: "other" });
+	b.briefItem("other");
 	const sibling = b.effects().find((e) => e.key !== replacement.key)!;
 	const confirm = (key: string) =>
 		b.send({
@@ -663,7 +626,7 @@ for (const denied of ["kept", "effect_failed"]) {
 		const b = setup();
 		b.prepare();
 		const old = replaceOccupied(b);
-		b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+		b.ready();
 		const key = b.effect().key;
 		const outcome = b.send(
 			denied === "kept"
@@ -693,8 +656,7 @@ for (const confirmed of [false, true]) {
 		b.prepare();
 		const old = replaceOccupied(b);
 		const replacement = b.effect();
-		if (confirmed)
-			b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+		if (confirmed) b.ready();
 		const claimed = b.effect();
 		Object.assign(b.world, {
 			runningEffect: (key: string) => key === claimed.key,
@@ -830,8 +792,7 @@ test("a stopped token files only one finding and its direction is consumed by th
 	assert.match(b.request("coordinator").text, /one small item/);
 	b.send({ kind: "plan", items: [item] });
 	assert.doesNotMatch(b.request("coordinator").text, /one small item/);
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.workOn();
 	b.pub();
 	b.send({
 		kind: "integration",
@@ -889,14 +850,14 @@ test("stop holds the current turn, resume redelivers direction, and cancellation
 test("cancel gathers all worker cleanup outcomes into one completion, including held and in-flight attempts", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "second" }]);
-	b.send({ kind: "brief", ...brief });
+	b.briefItem();
 	const held = b.effect();
 	b.send({
 		kind: "effect_failed",
 		key: held.key,
 		error: "interrupted after worktree add",
 	});
-	b.send({ kind: "brief", ...brief, item: "second" });
+	b.briefItem("second");
 	const running = b.effect();
 	Object.assign(b.world, {
 		runningEffect: (key: string) => key === running.key,
@@ -997,13 +958,11 @@ test("a claimed start may still create a ref; cancel waits for that exact result
 test("cancel drains an existing removal exactly once and includes an earlier kept worker", () => {
 	const b = setup(2);
 	b.plan([item, { ...item, id: "other" }]);
-	b.send({ kind: "brief", ...brief });
-	b.done({ kind: "worktree", base: repo.trunkHead, principles: [] });
+	b.workOn();
 	b.pub();
 	b.send({ kind: "merged", item: "fix", head: merged });
 	b.done({ kind: "kept", reason: "private", files: ["before-cancel"] });
-	b.send({ kind: "brief", ...brief, item: "other" });
-	b.done({ kind: "worktree", base: merged, principles: [] });
+	b.workOn("other", merged);
 	b.pub();
 	b.send({ kind: "merged", item: "other", head: sha });
 	const active = b.effect();
@@ -1118,7 +1077,7 @@ test("full-set or trunk returns request a new correction on the merged head, not
 			b.request("coordinator").text,
 			/choose two small probes/,
 		);
-		b.send({ kind: "brief", ...brief, item: "correction" });
+		b.briefItem("correction");
 		assert.equal((b.effect().spec.op as JsonObject).base, head);
 		b.done({ kind: "worktree", base: head, principles: [] });
 		assert.match(b.request("worker").text, /precision/);

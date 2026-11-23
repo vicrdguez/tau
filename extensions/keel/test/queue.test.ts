@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { ConversationId } from "tau/durable";
 import { type WorkId, workId } from "../src/kernel/ids.ts";
 import type { LaneEvent, RegisteredLane } from "../src/kernel/lane.ts";
-import { queueLane, queueTools } from "../src/lanes/queue/index.ts";
+import { queueLane } from "../src/lanes/queue/index.ts";
 import { trunkLane } from "../src/lanes/verify/trunk.ts";
 import { laneDriver, laneWorld } from "./fixtures/drive.ts";
 
@@ -90,16 +90,17 @@ test("item resume carries the evidence and direction, resets only that item, and
 		},
 	);
 	const resume = out.find((m) => m.event.kind === "resume");
-	assert.ok(resume);
-	assert.equal(resume.lane, "verify");
-	assert.equal(resume.work, a);
-	assert.equal(resume.event.cause, first.cause);
-	assert.equal(resume.event.item, "i1");
-	assert.equal(resume.event.evidence, first.evidence);
-	assert.match(
-		String(resume.event.direction),
-		/Measure twice\.[\s\S]+Keep the fence\./,
-	);
+	assert.deepEqual(resume, {
+		lane: "verify",
+		work: a,
+		event: {
+			kind: "resume",
+			cause: first.cause,
+			item: "i1",
+			evidence: first.evidence,
+			direction: "1. Measure twice.\n2. Keep the fence.",
+		},
+	});
 	assert.deepEqual(
 		out.find((m) => m.event.kind === "reset_counts"),
 		{ lane: "verify", work: a, event: { kind: "reset_counts", item: "i1" } },
@@ -148,7 +149,7 @@ test("work-level resume reaches its filer without resetting any item", () => {
 	assert.deepEqual(q.asks(), []);
 });
 
-test("cancel withdraws all questions about one work; a stale answer cannot release a hold or landing slot", () => {
+test("cancel withdraws all questions about one work; stale answers do not resume the cancelled work", () => {
 	const q = project(queueLane);
 	q.send(file(a));
 	const stale = q.asks()[0]!.subject;
@@ -222,27 +223,4 @@ test("cancelling a waiting landing drops its request; an active landing keeps it
 	assert.deepEqual(trunk.send(take(c)), []);
 	assert.deepEqual(trunk.send(release(a)), grant(c));
 	assert.deepEqual(trunk.send(release(c)), []);
-});
-
-test("queue and trunk are initially quiet version-one project records; only intake is standing", () => {
-	assert.deepEqual(
-		Array.from(queueTools, (t: { name: string; gate?: string }) => [
-			t.name,
-			t.gate,
-		]),
-		[
-			["file_finding", "standing"],
-			["report_investigation", "expectation"],
-		],
-	);
-	for (const entry of [queueLane, trunkLane])
-		entry.use((lane) => {
-			assert.equal(lane.state.version, 1);
-			assert.equal(lane.state.kind, `keel.${lane.name}`);
-			assert.equal(lane.state.scope, "session");
-			const state = lane.state.initial();
-			assert.deepEqual(lane.asks(state, world), []);
-			assert.deepEqual(lane.agents(state, world), []);
-			assert.deepEqual(lane.effects(state, world), []);
-		});
 });

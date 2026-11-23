@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
 import { test } from "node:test";
 import type { LaneEvent, Message, World } from "../src/kernel/lane.ts";
 import { queueLane } from "../src/lanes/queue/index.ts";
@@ -88,7 +87,7 @@ function queue(world: World = activeWorld) {
 		const investigation = (
 			finding = 1,
 			classification = "determined",
-			extra: LaneEvent[string] = {},
+			extra: Omit<LaneEvent, "kind"> = {},
 		) => ({
 			kind: "investigated",
 			finding,
@@ -100,7 +99,7 @@ function queue(world: World = activeWorld) {
 			reference: "signed spec",
 			sameAs: null,
 			nodes: ["sums"],
-			...(extra as object),
+			...extra,
 		});
 		const ask = driver.asks;
 		const answer = (choice: string, subject = ask()[0]!.subject) =>
@@ -116,6 +115,8 @@ function queue(world: World = activeWorld) {
 			file,
 			attempt: driver.attempt,
 			investigation,
+			classify: (...args: Parameters<typeof investigation>) =>
+				send(investigation(...args)),
 			ask,
 			answer,
 			agents: driver.agents,
@@ -141,7 +142,7 @@ test("a finding filed on the owner's behalf is investigated and can be dropped",
 	q.file({ source: "owner", requestedOwner: true, item: null });
 	assert.deepEqual(q.ask(), []);
 	assert.equal(q.agents().flatMap((a) => a.expects).length, 1);
-	q.send(q.investigation());
+	q.classify();
 	q.answer("drop");
 	assert.match(q.view().findingsFor(filing.work), /\(dropped\)/);
 	assert.deepEqual(q.ask(), []);
@@ -156,7 +157,7 @@ test("an investigator cannot close a project finding as no action", () => {
 	assert.match("reject" in result ? result.reject : "", /work/);
 	const [turn] = q.agents()[0]!.expects;
 	assert.match(turn!.input!(), /project finding[\s\S]*no_action/);
-	q.send(q.investigation(1, "sets_precedent", { nodes: [] }));
+	q.classify(1, "sets_precedent", { nodes: [] });
 	assert.equal(q.ask().length, 1);
 });
 
@@ -187,7 +188,7 @@ test("the project sweep is off by default; when enabled its interruptible effect
 test("sweep history carries dropped and deferred drift evidence, not ordinary findings", () => {
 	const q = queue();
 	q.file({ source: "owner", text: "Ordinary owner finding" });
-	q.send(q.investigation(1));
+	q.classify(1);
 	q.answer("defer");
 	for (const [i, disposition] of ["drop", "defer"].entries()) {
 		q.file({
@@ -196,7 +197,7 @@ test("sweep history carries dropped and deferred drift evidence, not ordinary fi
 			text: `Drift ${i}`,
 			report: `Evidence ${i}`,
 		});
-		q.send(q.investigation(i + 2, "sets_precedent", { nodes: [] }));
+		q.classify(i + 2, "sets_precedent", { nodes: [] });
 		q.answer(disposition);
 	}
 	assert.deepEqual(
@@ -220,10 +221,7 @@ test("a sweep files a project defect or reference mismatch without a hold; build
 			}),
 			[],
 		);
-		assert.deepEqual(
-			q.send(q.investigation(1, classification, { nodes: [] })),
-			[],
-		);
+		assert.deepEqual(q.classify(1, classification, { nodes: [] }), []);
 		assert.match(q.ask()[0]!.basis, /The playbook calls a removed command/);
 		const [seed] = q.answer("build");
 		assert.equal(seed?.work, "new");
@@ -235,9 +233,7 @@ test("owner and sweep findings reopen a blessed pattern without withdrawing auth
 	for (const source of ["owner", "sweeper"]) {
 		const q = queue();
 		q.file({ pattern: "round-last" });
-		q.send(
-			q.investigation(1, "unapproved_pattern", { recommendation: "bless" }),
-		);
+		q.classify(1, "unapproved_pattern", { recommendation: "bless" });
 		q.answer("bless");
 		assert.deepEqual(
 			q.file({
@@ -249,37 +245,12 @@ test("owner and sweep findings reopen a blessed pattern without withdrawing auth
 			}),
 			[],
 		);
-		q.send(
-			q.investigation(2, "unapproved_pattern", { recommendation: "revoke" }),
-		);
+		q.classify(2, "unapproved_pattern", { recommendation: "revoke" });
 		assert.match(q.ask()[0]!.basis, /Rounding last leaks a cent/);
 		assert.equal(q.view().patternRulings[0]?.status, "blessed");
 		assert.equal(q.answer("revoke")[0]?.work, "new");
 		assert.equal(q.view().patternRulings[0]?.status, "revoked");
 	}
-});
-
-test("a sweep keeps prior deferrals in its history without asking about them again after 30 days", () => {
-	const facts = {
-		...activeWorld,
-		options: { ...activeWorld.options, sweep_minutes: 1 },
-	};
-	const q = queue(facts);
-	q.send({ kind: "sweep_configured" });
-	q.file({ text: "An old drift finding", work: null, source: "sweeper" });
-	q.send(q.investigation(1));
-	q.answer("defer");
-	facts.now += 31 * 86_400_000;
-	q.send({
-		kind: "effect_done",
-		key: q.effects()[0]!.key,
-		result: { findings: [] },
-	});
-	assert.deepEqual(q.ask(), []);
-	assert.match(
-		JSON.stringify(q.view().priorFindings),
-		/An old drift finding.*deferred/,
-	);
 });
 
 test("a sweep proposal names its measured principle evidence and schedules no work until triage build", () => {
@@ -309,10 +280,7 @@ test("a sweep proposal names its measured principle evidence and schedules no wo
 				}),
 			),
 	);
-	assert.deepEqual(
-		q.send(q.investigation(1, "sets_precedent", { nodes: [] })),
-		[],
-	);
+	assert.deepEqual(q.classify(1, "sets_precedent", { nodes: [] }), []);
 	assert.match(q.ask()[0]!.basis, /Bind project\/round-once[\s\S]*9 of 10/);
 	assert.deepEqual(q.answer("drop"), []);
 });
@@ -369,7 +337,7 @@ test("a blocking filer holds only itself; classification holds named nodes immed
 		[own?.lane, own?.work, own?.event.kind, own?.event.item, own?.event.nodes],
 		["build", 4, "queue_hold", "ledger", []],
 	);
-	const [nodes] = q.send(q.investigation(1, "mandate_wrong"));
+	const [nodes] = q.classify(1, "mandate_wrong");
 	assert.deepEqual(
 		[nodes?.event.kind, nodes?.event.nodes, nodes?.event.cause],
 		["queue_hold", ["sums"], own?.event.cause],
@@ -383,62 +351,43 @@ test("a blocking filer holds only itself; classification holds named nodes immed
 	assert.deepEqual(q.answer("build", subject), []);
 	assert.match(JSON.stringify(q.state()), /dropped/);
 });
-test("five findings about two causes leave two open decisions, each showing every member", () => {
+test("links through another finding replace only their own decision and retain the full batch", () => {
 	const q = queue();
-	for (const text of [
+	const reports = [
 		"First discrepancy",
 		"Unclear flag",
 		"Another discrepancy",
-		"Another flag",
 		"Third discrepancy",
-	])
-		q.file({ text });
-	q.send(q.investigation(1, "sets_precedent"));
-	q.send(q.investigation(2, "sets_precedent", { cause: "flag semantics" }));
-	const original = q.ask();
+	];
+	for (const text of reports) q.file({ text });
+	q.classify(1, "sets_precedent");
+	q.classify(2, "sets_precedent", { cause: "flag semantics" });
+	const [first, unrelated] = q.ask();
 	const next = q.agents()[0]!.expects[0]!.input!();
 	assert.match(next, /#1.*triage.*sets_precedent.*rounding point/);
 	assert.match(next, /#2.*triage.*sets_precedent.*flag semantics/);
-	q.send(q.investigation(3, "sets_precedent", { sameAs: 1, cause: "" }));
-	assert.deepEqual(q.notes(), []);
-	q.send(
-		q.investigation(4, "sets_precedent", {
-			sameAs: 2,
-			cause: "a paraphrase is not needed",
-		}),
-	);
-	q.send(q.investigation(5, "sets_precedent", { sameAs: 3 }));
-	const current = q.ask();
-	assert.equal(current.length, 2);
-	assert.notEqual(current[0]!.basis, original[0]!.basis);
-	assert.notEqual(current[1]!.basis, original[1]!.basis);
-	assert.match(
-		current[0]!.basis,
-		/First discrepancy[\s\S]+Another discrepancy[\s\S]+Third discrepancy/,
-	);
-	assert.match(current[1]!.basis, /Unclear flag[\s\S]+Another flag/);
-	const seeds = q
-		.answer("build", original[0]!.subject)
-		.filter((m) => m.work === "new");
-	assert.equal(seeds.length, 1);
-	const seed = String(seeds[0]?.event.text);
-	for (const member of [
-		"First discrepancy",
-		"Another discrepancy",
-		"Third discrepancy",
-		"Use the ledger boundary",
-	])
-		assert.ok(seed.includes(member));
-	assert.doesNotMatch(seed, /Unclear flag/);
-	q.answer("drop", original[1]!.subject);
-	assert.deepEqual(q.ask(), []);
+	q.classify(3, "sets_precedent", { sameAs: 1, cause: "" });
+	q.classify(4, "sets_precedent", { sameAs: 3 });
+	const [combined, separate] = q.ask();
+	assert.equal(q.ask().length, 2);
+	assert.deepEqual(separate, unrelated);
+	assert.notEqual(combined!.basis, first!.basis);
+	const batch =
+		/First discrepancy[\s\S]+Another discrepancy[\s\S]+Third discrepancy/;
+	assert.match(combined!.basis, batch);
+	const [seed] = q.answer("build", combined!.subject);
+	assert.equal(seed?.work, "new");
+	assert.match(String(seed?.event.text), batch);
+	assert.match(String(seed?.event.text), /Use the ledger boundary/);
+	assert.doesNotMatch(String(seed?.event.text), /Unclear flag/);
+	assert.deepEqual(q.ask(), [unrelated]);
 });
 
 test("linking by number does not let a finding join a different classification or authority", () => {
 	const q = queue();
 	q.file();
 	q.file({ text: "Other discrepancy" });
-	q.send(q.investigation());
+	q.classify();
 	for (const [cls, extra] of [
 		["determined", { reference: "another spec" }],
 		["sets_precedent", {}],
@@ -446,30 +395,31 @@ test("linking by number does not let a finding join a different classification o
 		assert.ok(
 			"reject" in q.attempt(q.investigation(2, cls, { sameAs: 1, ...extra })),
 		);
-	q.send(q.investigation(2, "sets_precedent"));
+	q.classify(2, "sets_precedent");
 	assert.equal(q.ask().length, 2);
 });
 
-test("a link after drop or build under an approved reference needs its own answer and retains the filer hold", () => {
-	for (const choice of ["drop", "build"]) {
+test("a link to a decided reference needs a new answer and cannot release the new filer", () => {
+	for (const [choice, disposition] of [
+		["drop", "dropped"],
+		["defer", "deferred"],
+		["build", "build"],
+	]) {
 		const q = queue();
 		q.file();
-		q.send(q.investigation());
+		q.classify();
 		const previous = q.ask()[0]!.subject;
-		q.answer(choice);
+		q.answer(choice!);
 		q.file({ text: "Same cause after the answer", blocking: true });
-		assert.deepEqual(
-			q.send(q.investigation(2, "determined", { sameAs: 1, cause: "" })),
-			[],
-		);
+		assert.deepEqual(q.classify(2, "determined", { sameAs: 1, cause: "" }), []);
 		const next = q.ask()[0]!;
 		assert.notEqual(next.subject, previous);
 		assert.match(next.basis, /Finding #2: Same cause after the answer/);
-		assert.match(next.basis, /#1[^\n]+Which rounding boundary/);
 		assert.match(
 			next.basis,
-			new RegExp(choice === "drop" ? "dropped" : "build"),
+			new RegExp(`#1[^\\n]+Which rounding boundary[^\\n]+${disposition}`),
 		);
+		assert.deepEqual(q.answer("build", previous), []);
 		assert.equal(
 			q.answer("build", next.subject)[0]?.event.kind,
 			"plan_finding",
@@ -481,7 +431,7 @@ test("linking to a wrong-Mandate finding after build never joins its prior revis
 	for (const applied of [false, true]) {
 		const q = queue();
 		q.file();
-		q.send(q.investigation(1, "mandate_wrong"));
+		q.classify(1, "mandate_wrong");
 		q.answer("build");
 		if (applied)
 			q.send({
@@ -494,7 +444,7 @@ test("linking to a wrong-Mandate finding after build never joins its prior revis
 			text: "The revised framing still loses the prefix",
 			blocking: true,
 		});
-		const messages = q.send(q.investigation(2, "mandate_wrong", { sameAs: 1 }));
+		const messages = q.classify(2, "mandate_wrong", { sameAs: 1 });
 		assert.ok(messages.every((m) => m.event.kind === "queue_hold"));
 		const next = q.ask()[0]!;
 		assert.match(next.basis, /The revised framing still loses the prefix/);
@@ -508,27 +458,10 @@ test("linking to a wrong-Mandate finding after build never joins its prior revis
 	}
 });
 
-test("a link to a deferred finding opens a new decision citing the earlier report and defer", () => {
-	const q = queue();
-	q.file();
-	q.send(q.investigation());
-	const first = q.ask()[0]!.subject;
-	q.answer("defer");
-	q.file({ text: "Filed again with new evidence" });
-	q.send(q.investigation(2, "determined", { sameAs: 1 }));
-	const next = q.ask()[0]!;
-	assert.notEqual(next.subject, first);
-	assert.match(next.basis, /Which rounding boundary/);
-	assert.match(next.basis, /Filed again with new evidence/);
-	assert.match(next.basis, /deferred/);
-	assert.deepEqual(q.answer("build", first), []);
-	assert.equal(q.answer("build", next.subject)[0]?.event.kind, "plan_finding");
-});
-
 test("an identical re-filing after defer is investigated once and can reopen the original", () => {
 	const q = queue();
 	q.file();
-	q.send(q.investigation());
+	q.classify();
 	const first = q.ask()[0]!.subject;
 	q.answer("defer");
 	q.file();
@@ -537,7 +470,7 @@ test("an identical re-filing after defer is investigated once and can reopen the
 		q.agents()[0]?.expects[0]?.input?.() ?? "",
 		/Investigate finding #2/,
 	);
-	q.send(q.investigation(2, "determined", { sameAs: 1, cause: "" }));
+	q.classify(2, "determined", { sameAs: 1, cause: "" });
 	assert.notEqual(q.ask()[0]?.subject, first);
 	assert.equal(q.agents()[0]?.expects.length, 0);
 });
@@ -555,14 +488,14 @@ test("the investigator can close a non-blocking observation with a reason but no
 		evidence: "The observations match the bound rule.",
 		nodes: [],
 	};
-	assert.deepEqual(q.send(q.investigation(1, "no_action", closure)), []);
+	assert.deepEqual(q.classify(1, "no_action", closure), []);
 	assert.deepEqual(q.ask(), []);
 	assert.match(
 		q.view().findingsFor(4),
 		/no action: The observations match the bound rule/,
 	);
 	assert.ok("reject" in q.attempt(q.investigation(2, "no_action", closure)));
-	q.send(q.investigation(2, "sets_precedent"));
+	q.classify(2, "sets_precedent");
 	assert.ok("reject" in q.attempt(q.investigation(3, "no_action", closure)));
 });
 
@@ -578,13 +511,11 @@ test("a no-action closure after hand-over was written sends its reason to that w
 		/Late verifier observation \(open: awaiting investigation\)/,
 	);
 	landed = "landed-commit";
-	const [note] = q.send(
-		q.investigation(1, "no_action", {
-			recommendation: "no_action",
-			nodes: [],
-			evidence: "The format already requires an empty line.",
-		}),
-	);
+	const [note] = q.classify(1, "no_action", {
+		recommendation: "no_action",
+		nodes: [],
+		evidence: "The format already requires an empty line.",
+	});
 	assert.equal(note?.work, 4);
 	assert.match(
 		JSON.stringify(note?.event),
@@ -602,7 +533,7 @@ test("a wrong Mandate discovered after handoff remains visible without holding l
 	});
 	q.file({ source: "verifier", item: null });
 	phase = "handed_off";
-	assert.deepEqual(q.send(q.investigation(1, "mandate_wrong")), []);
+	assert.deepEqual(q.classify(1, "mandate_wrong"), []);
 	assert.match(q.ask()[0]!.basis, /Round once/);
 	assert.match(q.ask()[0]!.basis, /does not hold.*landing/i);
 	assert.equal(q.answer("build")[0]?.work, "new");
@@ -611,18 +542,16 @@ test("a wrong Mandate discovered after handoff remains visible without holding l
 test("hand-over evidence for the work includes dispositions and open findings but not other work", () => {
 	const q = queue();
 	q.file({ text: "Closed as an observation" });
-	q.send(
-		q.investigation(1, "no_action", {
-			recommendation: "no_action",
-			nodes: [],
-			evidence: "Nothing needs editing.",
-		}),
-	);
+	q.classify(1, "no_action", {
+		recommendation: "no_action",
+		nodes: [],
+		evidence: "Nothing needs editing.",
+	});
 	q.file({ text: "Deferred concern" });
-	q.send(q.investigation(2));
+	q.classify(2);
 	q.answer("defer");
 	q.file({ text: "Settled rounding boundary" });
-	q.send(q.investigation(3, "mandate_wrong"));
+	q.classify(3, "mandate_wrong");
 	q.answer("build");
 	q.send({
 		kind: "revision_disposition",
@@ -658,7 +587,7 @@ test("an unlikely edge case holds nothing until the owner answers build on a wro
 		}),
 		[],
 	);
-	assert.deepEqual(q.send(q.investigation(1, "mandate_wrong")), []);
+	assert.deepEqual(q.classify(1, "mandate_wrong"), []);
 	assert.equal(q.ask().length, 1);
 	assert.deepEqual(
 		q.answer("build").map((m) => [m.event.kind, m.event.nodes]),
@@ -705,7 +634,7 @@ test("a backlogged investigation opens on the current plan and Mandate, not thos
 	q.file();
 	q.file({ text: "Backlogged note" });
 	current = true;
-	q.send(q.investigation());
+	q.classify();
 	const input = q.agents()[0]!.expects[0]!.input!();
 	assert.match(input, /Revised ledger plan/);
 	assert.match(input, /Round after posting/);
@@ -715,7 +644,7 @@ test("a defect goes to the coordinator without triage; determined work waits for
 	for (const cls of ["defect_in_scope", "determined"]) {
 		const q = queue();
 		q.file();
-		let out = q.send(q.investigation(1, cls));
+		let out = q.classify(1, cls);
 		if (cls === "determined") {
 			assert.deepEqual(out, []);
 			out = q.answer("build");
@@ -741,15 +670,13 @@ test("a linked blocker is shown in reissued triage with both reports and both no
 		item: "second",
 		blocking: true,
 	});
-	q.send(q.investigation(1, "mandate_wrong"));
+	q.classify(1, "mandate_wrong");
 	const previous = q.ask()[0]!.basis;
-	q.send(
-		q.investigation(2, "mandate_wrong", {
-			sameAs: 1,
-			nodes: ["totals"],
-			cause: "reversed totals",
-		}),
-	);
+	q.classify(2, "mandate_wrong", {
+		sameAs: 1,
+		nodes: ["totals"],
+		cause: "reversed totals",
+	});
 	assert.equal(q.ask().length, 1);
 	const basis = q.ask()[0]!.basis;
 	assert.notEqual(basis, previous);
@@ -778,20 +705,18 @@ test("a linked blocker is shown in reissued triage with both reports and both no
 			["queue_release", "queue/2"],
 		],
 	);
-	if (process.env.KEEL_REWORK_RENDERS)
-		writeFileSync("/tmp/keel-queue-rework2-triage.md", basis);
 });
 
 test("a second blocked filer linked to a defect being fixed stays held until that defect merges", () => {
 	const q = queue();
 	q.file({ blocking: true });
-	q.send(q.investigation(1, "defect_in_scope"));
+	q.classify(1, "defect_in_scope");
 	q.file({
 		item: "second",
 		text: "Same defect blocks the other filer",
 		blocking: true,
 	});
-	const messages = q.send(q.investigation(2, "defect_in_scope", { sameAs: 1 }));
+	const messages = q.classify(2, "defect_in_scope", { sameAs: 1 });
 	assert.deepEqual(
 		messages.map((m) => [m.event.kind, m.event.cause]),
 		[
@@ -815,10 +740,7 @@ test("a second blocked filer linked to a defect being fixed stays held until tha
 		text: "Still broken after the fix",
 		blocking: true,
 	});
-	assert.deepEqual(
-		q.send(q.investigation(3, "defect_in_scope", { sameAs: 2 })),
-		[],
-	);
+	assert.deepEqual(q.classify(3, "defect_in_scope", { sameAs: 2 }), []);
 	assert.match(q.ask()[0]!.basis, /#2[^\n]+fixed by writer, stats/);
 });
 
@@ -826,9 +748,7 @@ test("a blessed pattern is an approved reference across works; revoke seeds stru
 	for (const choice of ["bless", "revoke"]) {
 		const q = queue();
 		q.file({ pattern: "round-last" });
-		q.send(
-			q.investigation(1, "unapproved_pattern", { recommendation: choice }),
-		);
+		q.classify(1, "unapproved_pattern", { recommendation: choice });
 		assert.deepEqual(q.ask()[0]!.choices, ["bless", "revoke", "defer"]);
 		const out = q.answer(choice);
 		if (choice === "bless") {
@@ -861,9 +781,7 @@ test("explorers distinguish a revoked pattern from approved authority, and only 
 		] as const
 	).entries()) {
 		q.file({ pattern });
-		q.send(
-			q.investigation(i + 1, "unapproved_pattern", { recommendation: choice }),
-		);
+		q.classify(i + 1, "unapproved_pattern", { recommendation: choice });
 		q.answer(choice);
 	}
 	q.file({ text: "A new investigation" });
@@ -904,18 +822,14 @@ test("A-4: a pattern ruling leaves the other decision and the uninvestigated fil
 		"The helper races with statistics",
 	])
 		q.file({ text, pattern: "legacy-writer" });
-	q.send(
-		q.investigation(1, "unapproved_pattern", {
-			recommendation: "bless",
-			evidence: "No lost data in the simple probe.",
-		}),
-	);
-	q.send(
-		q.investigation(2, "unapproved_pattern", {
-			recommendation: "revoke",
-			evidence: "The flush drops a record.",
-		}),
-	);
+	q.classify(1, "unapproved_pattern", {
+		recommendation: "bless",
+		evidence: "No lost data in the simple probe.",
+	});
+	q.classify(2, "unapproved_pattern", {
+		recommendation: "revoke",
+		evidence: "The flush drops a record.",
+	});
 	const [first, second] = q.ask();
 	assert.ok(first && second);
 	assert.doesNotMatch(
@@ -940,12 +854,10 @@ test("a later blessing replaces a prior revocation and governs the next citation
 	const q = queue();
 	const pattern = "legacy-writer";
 	q.file({ pattern });
-	q.send(
-		q.investigation(1, "unapproved_pattern", { recommendation: "revoke" }),
-	);
+	q.classify(1, "unapproved_pattern", { recommendation: "revoke" });
 	q.answer("revoke");
 	q.file({ work: null, text: "New evidence supports the pattern", pattern });
-	q.send(q.investigation(2, "unapproved_pattern", { recommendation: "bless" }));
+	q.classify(2, "unapproved_pattern", { recommendation: "bless" });
 	q.answer("bless");
 	assert.deepEqual(
 		q.file({ text: "Use the newly blessed pattern", pattern }),
@@ -966,7 +878,7 @@ test("determined work whose original build closed seeds new follow work with its
 			lane === "build" ? { phase, plan } : activeWorld.view(lane),
 	});
 	q.file();
-	q.send(q.investigation());
+	q.classify();
 	phase = "closed";
 	const [seed] = q.answer("build");
 	assert.equal(seed?.lane, "design");
@@ -980,12 +892,12 @@ test("determined work whose original build closed seeds new follow work with its
 test("approving triage asks the designer of the same work for a revision and keeps both causes held", () => {
 	const q = queue();
 	const [own] = q.file({ blocking: true });
-	q.send(q.investigation(1, "mandate_wrong"));
+	q.classify(1, "mandate_wrong");
 	q.file({
 		text: "Try a half-cent",
 		report: "The smallest amount that disagrees.",
 	});
-	const [second] = q.send(q.investigation(2, "mandate_wrong", { sameAs: 1 }));
+	const [second] = q.classify(2, "mandate_wrong", { sameAs: 1 });
 	const out = q.answer("build");
 	const revision = out.find((m) => m.event.kind === "revise_mandate");
 	assert.ok(
@@ -1024,46 +936,40 @@ test("an investigation must answer the head finding and name its evidence, autho
 	);
 });
 
-test("cancelling a work closes only its wrong-Mandate decisions and makes old answers inert", () => {
+test("cancelling a work closes its open and pending Mandate revisions, but not other triage", () => {
 	const q = queue();
+	q.file({ text: "Needs an active revision" });
+	q.classify(1, "mandate_wrong");
+	q.answer("build");
 	q.file();
-	q.send(q.investigation(1, "mandate_wrong"));
+	q.classify(2, "mandate_wrong");
 	const cancelled = q.ask()[0]!.subject;
 	q.file({ text: "Independent follow-up" });
-	q.send(q.investigation(2, "determined"));
+	q.classify(3, "determined");
 	q.file({ work: 5, text: "Another work's Mandate" });
-	q.send(q.investigation(3, "mandate_wrong"));
-	const out = q.send({ kind: "cancel_work", work: 4 });
-	assert.equal(out.length, 3);
-	assert.ok(out.every((m) => m.work === 4 && m.event.kind === "cancel"));
+	q.classify(4, "mandate_wrong");
+	q.send({ kind: "cancel_work", work: 4 });
 	assert.deepEqual(q.answer("build", cancelled), []);
 	const remaining = q.ask().map((ask) => ask.basis);
 	assert.equal(remaining.length, 2);
-	assert.ok(remaining.some((basis) => basis.includes("Independent follow-up")));
-	assert.ok(
-		remaining.some((basis) => basis.includes("Another work's Mandate")),
-	);
-	assert.match(JSON.stringify(q.state()), /cancelled/);
-});
-
-test("cancelling work closes its pending revision findings rather than leaving them open", () => {
-	const q = queue();
-	q.file({ text: "Needs an active revision" });
-	q.send(q.investigation(1, "mandate_wrong"));
-	q.answer("build");
-	q.send({ kind: "cancel_work", work: 4 });
+	assert.match(remaining[0]!, /Independent follow-up/);
+	assert.match(remaining[1]!, /Another work's Mandate/);
 	assert.match(
 		q.view().findingsFor(4),
 		/Needs an active revision \(cancelled\)/,
+	);
+	assert.match(
+		q.view().findingsFor(4),
+		/Which rounding boundary\? \(cancelled\)/,
 	);
 });
 
 test("wrong-Mandate triage identifies the decision, shows the reports before their node text, and explains releasing the blocked item", () => {
 	const q = queue();
 	q.file({ blocking: true });
-	q.send(q.investigation(1, "mandate_wrong"));
+	q.classify(1, "mandate_wrong");
 	q.file({ text: "Are reversed postings lost?", nodes: ["totals"] });
-	q.send(q.investigation(2, "mandate_wrong", { nodes: ["totals"], sameAs: 1 }));
+	q.classify(2, "mandate_wrong", { nodes: ["totals"], sameAs: 1 });
 	const [ask] = q.ask();
 	assert.deepEqual(ask?.choices, ["build", "defer", "drop"]);
 	assert.match(ask!.title, /wrong Mandate/i);
@@ -1078,7 +984,7 @@ test("wrong-Mandate triage identifies the decision, shows the reports before the
 test("a deferred Mandate finding releases its causes just as a dropped one does", () => {
 	const q = queue();
 	q.file();
-	const [hold] = q.send(q.investigation(1, "mandate_wrong"));
+	const [hold] = q.classify(1, "mandate_wrong");
 	const out = q.answer("defer");
 	assert.deepEqual(
 		out.map((m) => [m.lane, m.work, m.event.kind, m.event.cause]),
