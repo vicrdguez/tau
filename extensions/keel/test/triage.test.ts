@@ -130,7 +130,6 @@ function queue(world: World = activeWorld) {
 			view: () =>
 				l.view(s) as {
 					findingsFor(work: number): string;
-					owedChecks(except?: number[]): string;
 					patternRulings: { name: string; status: string }[];
 					priorFindings: {
 						text: string;
@@ -142,133 +141,16 @@ function queue(world: World = activeWorld) {
 	});
 }
 
-const missing = {
-	source: "owner",
-	missingCheck: true,
-	text: "Reject a zero-sized lot.",
-	item: null,
-	blocking: false,
-};
-const finished = (outcome: string, encoded: number[] = []) => ({
-	kind: "checks_finished",
-	ids: [1],
-	encoded,
-	outcome,
-});
-
-test("a rejection names the check and annotation, and build lists it until encoding lands", () => {
+test("a finding filed on the owner's behalf is investigated and can be dropped", () => {
 	const q = queue();
-	q.file(missing);
-	const ask = q.ask()[0]!;
-	assert.match(ask.title, /Reject a zero-sized lot/);
-	assert.match(ask.basis, /Your annotation: Reject a zero-sized lot/);
-	assert.match(ask.basis, /commit-one[\s\S]*calculations disagree/);
-	assert.doesNotMatch(ask.basis, /Reference:/);
-	assert.deepEqual(ask.choices, ["build", "defer", "drop"]);
-	assert.match(
-		ask.basis,
-		/Build starts work to encode this check\. Defer keeps it owed and listed\. Drop clears it\./,
-	);
-	assert.equal(q.agents().flatMap((a) => a.expects).length, 0);
-	assert.match(q.view().owedChecks(), /in triage/);
-	const [seed] = q.answer("build");
-	assert.equal(seed?.work, "new");
-	assert.deepEqual(seed?.event.owed, [1]);
-	assert.match(q.view().owedChecks(), /being built/);
-	q.send(finished("Landed at new-trunk.", [1]));
-	assert.equal(q.view().owedChecks(), "");
-	assert.deepEqual(q.ask(), []);
-});
-
-test("repeating an outstanding rejection does not create a duplicate; a deferred check stays listed and can still be dropped", () => {
-	const q = queue();
-	q.file(missing);
-	q.file({
-		...missing,
-		work: 5,
-		sha: "commit-two",
-		text: "  Reject a zero-sized lot.  ",
-	});
-	assert.equal(q.ask().length, 1);
-	assert.deepEqual(q.answer("defer"), []);
-	assert.match(q.view().owedChecks(), /Reject a zero-sized lot.*deferred/);
-	assert.equal(
-		q
-			.view()
-			.owedChecks()
-			.match(/Reject a zero-sized lot/g)?.length,
-		1,
-	);
-	assert.deepEqual(q.ask()[0]?.choices, ["build", "defer", "drop"]);
-	assert.equal(q.ask().length, 1);
-	q.answer("drop");
-	assert.equal(q.view().owedChecks(), "");
-	assert.deepEqual(q.ask(), []);
-});
-
-test("a later objection filed by the owner's desk is investigated, not owed", () => {
-	const q = queue({
-		...activeWorld,
-		view: (lane) =>
-			lane === "verify"
-				? {
-						landed: "landed-result",
-						passedResult: () => ({
-							sha: "landed-result",
-							evidence: "Previous proof.",
-						}),
-					}
-				: null,
-	});
-	q.file({
-		source: "owner",
-		requestedOwner: true,
-		overridePassed: true,
-		item: null,
-	});
+	q.file({ source: "owner", requestedOwner: true, item: null });
 	assert.deepEqual(q.ask(), []);
 	assert.equal(q.agents().flatMap((a) => a.expects).length, 1);
 	q.send(q.investigation());
 	q.answer("drop");
-	assert.equal(q.view().owedChecks(), "");
+	assert.match(q.view().findingsFor(filing.work), /\(dropped\)/);
+	assert.deepEqual(q.ask(), []);
 });
-
-test("drop clears the obligation; a later rejection opens a new check with only its own evidence", () => {
-	const q = queue();
-	q.file(missing);
-	q.answer("drop");
-	assert.equal(q.view().owedChecks(), "");
-	q.file({
-		...missing,
-		work: 5,
-		sha: "commit-two",
-		report: "The later verifier missed it again.",
-	});
-	assert.equal(q.ask().length, 1);
-	assert.equal(q.ask()[0]?.subject, "triage/2");
-	assert.match(q.ask()[0]!.basis, /commit-two[\s\S]*missed it again/);
-	assert.doesNotMatch(q.ask()[0]!.basis, /commit-one/);
-});
-
-for (const outcome of [
-	"Encoding work was cancelled.",
-	"Encoding work was declined.",
-	"Trunk was unchanged.",
-])
-	test(`an assigned check returns to triage when work ends without encoding: ${outcome}`, () => {
-		const q = queue();
-		q.file(missing);
-		const [ask] = q.ask();
-		q.answer("build");
-		assert.deepEqual(q.ask(), []);
-		q.send(finished(outcome));
-		const [reopened] = q.ask();
-		assert.equal(reopened?.subject, ask?.subject);
-		assert.ok(reopened?.basis.includes(outcome));
-		assert.match(q.view().owedChecks(), /in triage/);
-		q.answer("drop");
-		assert.equal(q.view().owedChecks(), "");
-	});
 
 test("an investigator cannot close a project finding as no action", () => {
 	const q = queue();

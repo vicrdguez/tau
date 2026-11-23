@@ -102,53 +102,6 @@ async function openAsk(
 	return { d, text: String((basis!.data as JsonObject).text) };
 }
 
-test("cancelled encoding work reopens its original owed-check decision without changing trunk", async (t) => {
-	const { root } = await fixture(t);
-	const s = await openScenario(root, new MemoryStorage(), "rework");
-	t.after(() => s.store.harness.close(ctx));
-	await s.start();
-	await s.settle();
-	const before = git(root, "rev-parse", "trunk");
-	const check =
-		"Keep a runnable book-format regression check in the repository.";
-	const answer = (
-		d: Awaited<ReturnType<typeof openAsk>>["d"],
-		choice: string,
-		annotations: { start: number; end: number; text: string }[] = [],
-	) => fauxAnswer(s.store, d.id, { basis: d.basis, choice, annotations });
-	await answer((await openAsk(s, "verify")).d, "reject", [
-		{ start: 0, end: 1, text: check },
-	]);
-	await s.settle();
-	const triage = await openAsk(s, "queue");
-	if (process.env.KEEL_SWEEP_FIX_RENDERS)
-		await writeFile(
-			"/tmp/keel-sweep-fix-triage.md",
-			`Title: ${triage.d.title}\nChoices: ${triage.d.choices.join(", ")}\n\n${triage.text}`,
-		);
-	await answer(triage.d, "defer");
-	await s.settle();
-	const deferred = await openAsk(s, "queue");
-	assert.notEqual(
-		deferred.d.id,
-		triage.d.id,
-		"the answered decision closes; the deferred check is still actionable",
-	);
-	s.provider.setResponses([]);
-	await answer(deferred.d, "build");
-	await s.settle();
-	const stalled = await openAsk(s, "queue");
-	assert.deepEqual(stalled.d.choices, ["resume", "cancel"]);
-	await answer(stalled.d, "cancel");
-	await s.settle();
-	const returned = await openAsk(s, "queue");
-	assert.notEqual(returned.d.id, triage.d.id);
-	assert.deepEqual(returned.d.choices, ["build", "defer", "drop"]);
-	assert.match(returned.text, /Encoding work was cancelled/);
-	assert.ok(returned.text.includes(check));
-	assert.equal(git(root, "rev-parse", "trunk"), before);
-});
-
 test("rejected hand-over findings go through investigation; defer parks one, build seeds new work, and the next hand-over has no owed list", async (t) => {
 	const { root } = await fixture(t);
 	const s = await openScenario(root, new MemoryStorage(), "rework");

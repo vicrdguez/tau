@@ -14,8 +14,8 @@ const inputs = {
 	item: prose(dir, "inputs/verify/item.md", ["facts"]),
 	rework: prose(dir, "inputs/verify/rework.md", ["facts"]),
 	integration: prose(dir, "inputs/verify/integration.md", ["facts"]),
-	full: prose(dir, "inputs/verify/full.md", ["facts", "owed"]),
-	landing: prose(dir, "inputs/verify/landing.md", ["facts", "owed"]),
+	full: prose(dir, "inputs/verify/full.md", ["facts"]),
+	landing: prose(dir, "inputs/verify/landing.md", ["facts"]),
 };
 const form = prose(dir, "documents/verify-facts.md", [
 	"sha",
@@ -50,7 +50,6 @@ const evidenceDocument = prose(dir, "documents/handover-evidence.md", [
 const handover = prose(dir, "documents/handover.md", [
 	"trunk",
 	"sha",
-	"owed",
 	"evidence",
 	"base",
 ]);
@@ -106,7 +105,7 @@ function input(s: State, c: Review) {
 		c.phase === "diagnose"
 			? diagnose({ facts, threads: history.at(-1)!.diagnose.join(", ") })
 			: c.scope !== "item"
-				? inputs[c.scope]({ facts, owed: c.owed?.text || "None." })
+				? inputs[c.scope]({ facts })
 				: inputs[
 						!history.length
 							? "item"
@@ -202,7 +201,7 @@ export function handoverEvidence(s: State): string {
 	});
 }
 function handoverAsk(s: State): Ask {
-	const { sha, owed } = s.handover!;
+	const { sha } = s.handover!;
 	const { trunk, base } = s.repo!;
 	return {
 		subject: subject("handover"),
@@ -216,7 +215,6 @@ function handoverAsk(s: State): Ask {
 			sha,
 			trunk,
 			base,
-			owed: owed || "None.",
 			evidence: handoverEvidence(s),
 		}),
 	};

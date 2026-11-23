@@ -35,7 +35,7 @@ const inputs: Record<string, string> = {
 	record_ruling: "what why cost rank follows principles pattern",
 	publish_build: "summary addresses",
 	publish_verdict:
-		"outcome text blocks.thread blocks.ground blocks.evidence notes encodedChecks principlesUnfollowed.name principlesUnfollowed.thread",
+		"outcome text blocks.thread blocks.ground blocks.evidence notes principlesUnfollowed.name principlesUnfollowed.thread",
 	publish_diagnosis: "premise test result",
 };
 type Schema = {

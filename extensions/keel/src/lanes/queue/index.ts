@@ -10,7 +10,6 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { queueFixture } from "./fixture.ts";
 import {
-	type ChecksFinished,
 	type FindingDisposition,
 	fileIntake,
 	type Holding,
@@ -136,10 +135,6 @@ export const queueLane = defineLane(
 					? withTriage(state, result)
 					: { reject: result.reject };
 			}
-			if (event.kind === "checks_finished")
-				return withTriage(state, {
-					state: triage.finishChecks(state.triage, event as ChecksFinished),
-				});
 			if (event.kind === "revision_disposition")
 				return withTriage(state, {
 					state: triage.recordDisposition(
@@ -305,10 +300,6 @@ export const queueLane = defineLane(
 						]
 					: [],
 			),
-			owedChecks: (encoded: number[] = [], returning?: readonly number[]) =>
-				triage.checks(state.triage, (id) => !encoded.includes(id), returning),
-			checks: (ids: number[]) =>
-				triage.checks(state.triage, (id) => ids.includes(id)),
 			investigation: pending(state.triage) ? state.triage.context : null,
 			directionsFor: (work: WorkId) =>
 				state.triage.entries.flatMap((f) =>

@@ -13,7 +13,7 @@ import {
 import { toBuild } from "../build/public.ts";
 import { mandateLabels, renderMandate } from "../design/public.ts";
 import { findingNote } from "../verify/public.ts";
-import type { ChecksFinished, FindingDisposition, Intake } from "./public.ts";
+import type { FindingDisposition, Intake } from "./public.ts";
 import {
 	cause,
 	choices,
@@ -29,7 +29,6 @@ import {
 	pending,
 	type Queue,
 	update,
-	workChoices,
 } from "./state.ts";
 
 const documents = `${import.meta.dirname}/../../prose/documents`;
@@ -44,13 +43,6 @@ const investigateInput = (name: string) =>
 	]);
 const investigate = investigateInput("investigate");
 const investigateProject = investigateInput("investigate-project");
-const owedDocument = prose(documents, "owed-check.md", [
-	"name",
-	"work",
-	"revision",
-	"evidence",
-	"outcome",
-]);
 const triageDocument = prose(documents, "triage.md", [
 	"topic",
 	"work",
@@ -117,8 +109,7 @@ function reportText(f: Finding, q?: Queue) {
 const evidence = (q: Queue, findings: readonly Finding[]) =>
 	findings.map((f) => reportText(f, q)).join("\n\n");
 const decisionSubject = (f: Finding) => subject(`triage/${f.id}`);
-const findingChoices = (f: Finding) =>
-	f.investigation ? choices(f.investigation.classification) : workChoices;
+const findingChoices = (f: Finding) => choices(f.investigation!.classification);
 
 function hold(f: Finding, nodes: string[], heldCause = cause(f)): Message {
 	return toBuild(f.intake.work!, {
@@ -169,7 +160,6 @@ function seed(
 	route: "follow" | "precedent",
 	text: string,
 	reference: string | null,
-	owed?: number[],
 ): Message {
 	return {
 		lane: "design",
@@ -179,47 +169,7 @@ function seed(
 			route,
 			text,
 			reference,
-			...(owed && { owed }),
 		},
-	};
-}
-
-const isOwed = (f: Finding) =>
-	f.intake.missingCheck &&
-	f.disposition !== "dropped" &&
-	f.disposition !== "encoded";
-const beingBuilt = (f: Finding) =>
-	isOwed(f) && f.disposition === "build: routed";
-
-function owedTriage(f: Finding, outcome = ""): Finding {
-	return {
-		...f,
-		status: "triage",
-		group: f.id,
-		disposition: null,
-		basis: owedDocument({
-			name: f.intake.text,
-			work: f.goal ?? "unnamed work",
-			revision: f.intake.sha ?? "not available",
-			evidence: f.intake.report?.replace(/^/gm, "> ") ?? "",
-			outcome: outcome ? `\n\n${outcome}` : "",
-		}),
-	};
-}
-
-export function finishChecks(
-	q: Queue,
-	{ ids, encoded, outcome }: ChecksFinished,
-): Queue {
-	return {
-		...q,
-		entries: q.entries.map((f) =>
-			!beingBuilt(f) || !ids.includes(f.id)
-				? f
-				: encoded.includes(f.id)
-					? { ...f, ...close("encoded") }
-					: owedTriage(f, outcome),
-		),
 	};
 }
 
@@ -273,25 +223,19 @@ export function intake(
 		edgeCase: e.edgeCase,
 		pattern,
 		blocking: e.blocking,
-		missingCheck: e.missingCheck && e.source === "owner" ? true : null,
 		principle:
 			e.principle && (e.source === "sweeper" || e.source === "verifier")
 				? true
 				: null,
 	};
-	const sameCheck =
-		input.missingCheck &&
-		q.entries.find((f) => isOwed(f) && f.intake.text === input.text);
-	if (sameCheck)
-		return { state: q, reply: `Already owed as finding #${sameCheck.id}.` };
 	const serialized = JSON.stringify(input);
 	const prior = q.entries.findLast(
 		(f) => JSON.stringify(f.intake) === serialized,
 	);
-	if (prior && !input.missingCheck && prior.disposition !== "deferred")
+	if (prior && prior.disposition !== "deferred")
 		return { state: q, reply: `Already filed as finding #${prior.id}.` };
 	const live = context(world, input.work);
-	let f: Finding = {
+	const f: Finding = {
 		id: q.entries.length + 1,
 		intake: input,
 		goal: input.work === null ? null : (live.goal ?? "unnamed work"),
@@ -302,7 +246,6 @@ export function intake(
 		disposition: null,
 		triageDirection: "",
 	};
-	if (input.missingCheck) f = owedTriage(f);
 	if (
 		precedent?.status === "revoked" &&
 		!counterexample &&
@@ -337,12 +280,7 @@ export function intake(
 }
 
 function shareDecision(f: Finding, i: Investigation, other: Finding) {
-	if (
-		f.intake.missingCheck ||
-		other.intake.missingCheck ||
-		i.classification !== other.investigation?.classification
-	)
-		return false;
+	if (i.classification !== other.investigation?.classification) return false;
 	switch (i.classification) {
 		case "mandate_wrong":
 			return other.intake.work === f.intake.work;
@@ -597,10 +535,8 @@ export function onFact(
 	const first = decisions(q).find((f) => decisionSubject(f) === fact.subject);
 	if (!first || !findingChoices(first).some((c) => c === fact.choice))
 		return { state: q };
-	if (first.intake.missingCheck && fact.choice === "defer")
-		return { state: update(q, first, { disposition: "deferred" }) };
-	const { investigation: i } = first;
-	const classification = i?.classification;
+	const i = first.investigation!;
+	const { classification } = i;
 	const related = decisionMembers(q, first.id);
 	const annotations = fact.annotations
 		.map((a) => `${a.n}. ${a.text}`)
@@ -678,16 +614,14 @@ export function onFact(
 				...related
 					.filter((f) => f !== first && f.intake.blocking)
 					.flatMap((f) => [hold(f, [], cause(first)), release(f)]),
-				plan(first, related, text, defect ? null : i!.reference),
+				plan(first, related, text, defect ? null : i.reference),
 			],
 		};
 
 	const send: Message[] = [];
 	if (building) {
-		if (first.intake.missingCheck)
-			send.push(seed("follow", text, first.intake.text, [first.id]));
-		else if (classification === "determined")
-			send.push(seed("follow", text, i!.reference));
+		if (classification === "determined")
+			send.push(seed("follow", text, i.reference));
 		else send.push(seed("precedent", text, null));
 	}
 	if (fact.choice === "revoke")
@@ -850,25 +784,6 @@ export function agents(q: Queue): AgentDecl[] {
 					: [],
 		},
 	];
-}
-
-export function checks(
-	q: Queue,
-	select: (id: number) => boolean,
-	returning: readonly number[] = [],
-) {
-	return q.entries
-		.filter((f) => isOwed(f) && select(f.id))
-		.map((f) => {
-			const state =
-				f.disposition === "deferred"
-					? "deferred"
-					: f.status === "triage" || returning.includes(f.id)
-						? "in triage"
-						: "being built";
-			return `- #${f.id}: ${f.intake.text} (${state}; rejected ${f.intake.sha})`;
-		})
-		.join("\n");
 }
 
 export function findingSummary(q: Queue, work: WorkId) {

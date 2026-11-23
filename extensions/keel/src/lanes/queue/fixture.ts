@@ -37,7 +37,6 @@ type QueueV1 = {
 				edgeCase: { failure: string; likelihood: string; cost: string } | null;
 				pattern: string | null;
 				blocking: boolean;
-				missingCheck: true | null;
 				principle: true | null;
 			};
 			goal: string | null;
@@ -107,7 +106,6 @@ export const queueFixture = {
 						edgeCase: null,
 						pattern: null,
 						blocking: true,
-						missingCheck: null,
 						principle: null,
 					},
 					goal: "Keep the ledger balanced.",

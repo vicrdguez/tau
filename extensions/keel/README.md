@@ -62,12 +62,6 @@ The investigator links evidence by naming an earlier finding with the same cause
 
 Ordinary deferred findings keep their disposition in the queue. Nothing reopens them on a timer. A later report can bring a finding back to triage.
 
-### Owed checks
-
-Only rejecting a hand-over creates owed checks. Name one missing check per annotation. An unannotated rejection asks again. Each annotation opens triage with your words, the rejected commit and its evidence. Repeating the same check text while it is owed keeps one obligation. A later objection through the designer is an ordinary owner finding.
-
-`build` starts work to encode the check as a regression test, boundary rule or type. Use a principle for a judgment-only check. The verifier confirms the encoding on the full-set pass and on the prepared commit if trunk moved. A new, non-cancelled landing clears the check if the verifier confirmed it. If the work is cancelled, declined or ends without clearing the check, triage reopens with the outcome. `defer` keeps the check owed and listed, with a fresh decision so you can build or drop it later. `drop` clears it. Every later hand-over shows the outstanding checks as of its landing, with their states: in triage, deferred or being built.
-
 ### Project sweep
 
 The sweep is off by default. Set `sweep_minutes` to a positive whole number. If configured before the first work, the sweep is armed on the first accepted Ground or queue seed. It then continues even when no work is active. Once Keel knows the directory, changing the setting replaces the timer and clearing it stops the timer and any running sweep. A tick pins the then-current trunk (or the base before trunk exists) and computes the compact index of owner-reviewed authority and recent landed samples from the work records. It does not acquire the landing slot.
@@ -76,7 +70,7 @@ The sweep looks for un-runnable verification playbook instructions, repeated wor
 
 After a tick settles, including a failure, the next tick sleeps durably for the configured interval. Restart rejoins the original dispatch rather than creating another tick. Missed wall-clock intervals do not produce a backlog.
 
-Limits: the sweeper and investigator rely on their instructions to read the pinned commit rather than the working tree. A rejected hand-over still counts as a landing for sweep history. Confirmation of the check's encoding rests on the verifier's judgment. Reverting the encoding later does not reopen the obligation.
+Limits: the sweeper and investigator rely on their instructions to read the pinned commit rather than the working tree. A rejected hand-over still counts as a landing for sweep history.
 
 ## Live plan
 
@@ -114,7 +108,7 @@ A verifier can link a principle it pulled to a failing thread. The block returns
 - **Ambiguity:** choose the first or second reading, optionally annotating the choice, or decline the work. Keel returns the chosen reading to the designer before a Mandate can bind.
 - **Before landing:** ask the designer to cancel. Its standing `request_cancel` tool opens a confirmation; only answering `cancel` cancels. `continue` leaves the work alone. Keel does not stop the designer's conversation. After landing, accept or reject the hand-over instead.
 - **Holding finding:** `resume` with direction, or `cancel` the entire piece of work. Keel files these findings for diagnosed non-convergence, moved refs, occupied paths, exhausted effects or a stalled agent. Stopping a running agent in the client goes here too. An item resume resets its survived-fix counts. A chat message is not a decision. Cancellation is recorded before agents are stopped. Keel waits for claimed operations that can still change a checkout and removes what it can prove disposable. One final cleanup note lists what it could not remove. Build and item branch refs survive. A landing already in flight can finish; Keel reports what actually happened.
-- **Hand-over:** `accept` closes the work. `reject` with annotations files the missing check and landed commit in the queue. The commit, result against intent, rulings in order of cost if wrong, verifier notes, diagnosed non-convergence, your ambiguity readings and annotations, direction on findings and in triage, the coordinator's replies grouped by approval, the fields changed in each Mandate revision or which nodes settled its findings without changes and why, work findings and their dispositions at landing, and residual risk are in the decision basis. The bound Mandate appears before the rulings for work that followed precedent. For work whose Mandate you reviewed, the hand-over shows revisions without repeating the original Mandate. The landing slot has already been released. Rejecting does not revert trunk or prevent other work from landing.
+- **Hand-over:** `accept` closes the work. `reject` needs at least one annotation. Each annotation becomes an owner finding with the landed commit and hand-over evidence. The investigator reports on it before you choose `build` for new work, `defer` to keep it in the queue, or `drop` to close it. The commit, result against intent, rulings in order of cost if wrong, verifier notes, diagnosed non-convergence, your ambiguity readings and annotations, direction on findings and in triage, the coordinator's replies grouped by approval, the fields changed in each Mandate revision or which nodes settled its findings without changes and why, work findings and their dispositions at landing, and residual risk are in the decision basis. The bound Mandate appears before the rulings for work that followed precedent. For work whose Mandate you reviewed, the hand-over shows revisions without repeating the original Mandate. The landing slot has already been released. Rejecting does not revert trunk or prevent other work from landing.
 
 ## Git and recovery
 

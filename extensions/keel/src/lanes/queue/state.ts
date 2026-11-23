@@ -64,8 +64,7 @@ export function context(world: World, work: WorkId | null) {
 
 export type Finding = {
 	id: number;
-	intake: Omit<Intake, "missingCheck" | "principle"> & {
-		missingCheck: true | null;
+	intake: Omit<Intake, "principle"> & {
 		principle: true | null;
 	};
 	goal: string | null;
@@ -130,7 +129,7 @@ export function disposition(f: Finding): string {
 		case "filed":
 			return "open: awaiting investigation";
 		case "triage":
-			return f.disposition ?? "open: awaiting triage";
+			return "open: awaiting triage";
 		case "revision":
 			return "build: awaiting Mandate revision";
 		case "defect":

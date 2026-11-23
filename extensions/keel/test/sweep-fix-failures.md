@@ -1,17 +1,6 @@
-# Owed checks and sweep review
+# Sweep review
 
-- A rejection opens triage with the check name, the owner's annotation, and the rejected evidence, with no unrelated decision instructions.
-- A hand-over does not say rejecting with annotations creates obligations, or buries their states after its evidence.
-- Build does not show the check as being built, or a verified landing does not clear it.
-- Repeating an outstanding rejection creates duplicates; defer removes it from the hand-over, fails to show its state, or strands it with no decision that can drop it.
-- A later designer filing creates an obligation instead of an ordinary owner finding.
-- Drop leaves a check owed; a fresh rejection inherits dropped evidence or identity.
-- Cancelled work leaves a check owed with no open decision.
-- Declined work leaves a check owed with no open decision.
-- An unchanged landing fails to return a check even though no encoding landed.
 - A project finding can disappear as no action, or the investigation input does not explain the rule.
-- An ordinary follow seed tells the designer how to encode a check it was not assigned.
-- An item reviewer sees owed checks; the full-set or landing input omits what to verify.
 - Ground or a queue seed fails to tell the project to arm the sweep when work starts.
 - A fenced or prose-wrapped JSON array fails to file drift.
 - A sweeper sees no earlier findings, no dropped or deferred dispositions, or no instruction to compare evidence.

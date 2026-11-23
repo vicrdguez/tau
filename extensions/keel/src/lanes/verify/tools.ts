@@ -1,4 +1,4 @@
-import { arr, int, obj, oneOf, opt, str } from "tau/schema";
+import { arr, obj, oneOf, opt, str } from "tau/schema";
 import { defineLaneTool } from "../../kernel/lane.ts";
 export const grounds = [
 	"failing_run",
@@ -22,7 +22,6 @@ export const verifyTools = [
 				obj({ thread: words, ground: oneOf(grounds), evidence: words }),
 			),
 			notes: arr(words),
-			encodedChecks: opt(arr(int({ minimum: 1 }))),
 			principlesUnfollowed: opt(arr(obj({ name: words, thread: words }))),
 		}),
 		terminate: true,

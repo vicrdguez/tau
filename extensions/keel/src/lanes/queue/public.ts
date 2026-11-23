@@ -69,7 +69,6 @@ export type Intake = {
 	edgeCase: { failure: string; likelihood: string; cost: string } | null;
 	pattern: string | null;
 	blocking: boolean;
-	missingCheck?: true;
 	principle?: true;
 };
 
@@ -101,31 +100,6 @@ export type SweepHistory = {
 		disposition: string;
 	}[];
 };
-
-export type QueueChecks = {
-	owedChecks(encoded?: number[], returning?: readonly number[]): string;
-	checks(ids: number[]): string;
-};
-export type ChecksFinished = {
-	kind: "checks_finished";
-	ids: number[];
-	encoded: number[];
-	outcome: string;
-};
-export function checksFinished(
-	ids: number[] | undefined,
-	outcome: string,
-	encoded: number[] = [],
-): Message[] {
-	if (!ids?.length) return [];
-	const event: ChecksFinished = {
-		kind: "checks_finished",
-		ids,
-		encoded,
-		outcome,
-	};
-	return [{ lane: "queue", work: null, event }];
-}
 
 export type FindingDisposition = {
 	kind: "revision_disposition";

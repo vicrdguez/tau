@@ -1,8 +1,4 @@
-Accept the result on {{trunk}}, or reject it and annotate each check that was missing. Each annotation becomes a check that is owed until built or dropped. This decision does not hold the landing slot or change trunk.
-
-Checks still owed
-
-{{owed}}
+Accept the result on {{trunk}}, or reject it and annotate what needs to change. Each annotation is filed as a finding for investigation and triage. This decision does not hold the landing slot or change trunk.
 
 {{evidence}}
 

@@ -19,10 +19,8 @@ import {
 import { toBuild } from "../build/public.ts";
 import type { Mandate } from "../design/public.ts";
 import {
-	checksFinished,
 	fileHolding,
 	fileIntake,
-	type QueueChecks,
 	type Resume,
 	resumption,
 } from "../queue/public.ts";
@@ -84,7 +82,6 @@ type Event =
 			agent: string;
 			blocks: Block[];
 			notes: string[];
-			encodedChecks?: number[];
 			principlesUnfollowed?: { name: string; thread: string }[];
 			outcome: "pass" | "fail";
 			text: string;
@@ -103,12 +100,10 @@ function transition(prev: State, world: World) {
 		send: Message[] = [],
 		notes: Note[] = [];
 	const work = world.work!;
-	const queue = world.view("queue") as
-		| (QueueChecks & {
-				findingsFor?(id: typeof work): string;
-				directionsFor?(id: typeof work): string[];
-		  })
-		| null;
+	const queue = world.view("queue") as {
+		findingsFor?(id: typeof work): string;
+		directionsFor?(id: typeof work): string[];
+	} | null;
 	const deliver = (lane: "design" | "trunk", e: LaneEvent) =>
 		send.push({
 			lane,
@@ -123,7 +118,7 @@ function transition(prev: State, world: World) {
 		text: string,
 		report: string,
 		nodes: string[],
-		purpose?: "missingCheck" | "principle",
+		principle?: true,
 	) {
 		send.push(
 			fileIntake({
@@ -137,7 +132,7 @@ function transition(prev: State, world: World) {
 				edgeCase: null,
 				pattern: null,
 				blocking: false,
-				...(purpose && { [purpose]: true }),
+				...(principle && { principle }),
 			}),
 		);
 	}
@@ -255,36 +250,17 @@ function transition(prev: State, world: World) {
 			ownerReviewed: boolean;
 			reference: string;
 			revisionSummary: string;
-			owed?: number[];
 		} | null;
-		const encoded =
-			s.cancelled || unchanged
-				? []
-				: (s.verdicts.findLast(
-						(v) => v.scope !== "item" && v.outcome === "pass",
-					)?.encodedChecks ?? []);
-		const returning = s.cancelled ? [] : (design?.owed ?? []);
-		send.push(
-			...checksFinished(
-				returning,
-				unchanged
-					? `Trunk was unchanged at ${sha}.`
-					: `Landed at ${sha} without verifier confirmation of this check.`,
-				encoded,
-			),
-		);
 		s.directions.push(...(queue?.directionsFor?.(work) ?? []));
 		s.handover = {
 			sha,
 			at: world.now,
 			unchanged,
 			status: "asking",
-			missing: [],
 			followReference:
 				design?.ownerReviewed === false ? design.reference : null,
 			revisions: design?.revisionSummary ?? "",
 			findings: queue?.findingsFor?.(work) ?? "",
-			owed: queue?.owedChecks?.(encoded, returning) ?? "",
 		};
 		if (!s.cancelled) deliver("design", { kind: "landed" });
 		note(
@@ -411,24 +387,22 @@ function transition(prev: State, world: World) {
 						break;
 					if (e.choice !== "accept" && e.choice !== "reject")
 						return { state: prev };
-					const missing = e.annotations.filter((n) => n.text.trim());
-					if (e.choice === "reject" && !missing.length) {
-						note("Reject needs an annotation naming the missing check.");
+					const annotations = e.annotations.filter((a) => a.text.trim());
+					if (e.choice === "reject" && !annotations.length) {
+						note("Annotate the hand-over to explain why you reject it.");
 						break;
 					}
 					s.handover.status = e.choice === "accept" ? "accepted" : "rejected";
 					if (e.choice === "reject") {
-						s.handover.missing = missing.map((a) => a.text);
-						const original = handoverEvidence(prev);
-						for (const a of missing)
+						const evidence = handoverEvidence(prev);
+						for (const a of annotations)
 							file(
 								"owner",
 								s.handover.sha,
 								null,
 								a.text,
-								original,
+								`Hand-over annotation ${a.n}.\n\n${evidence}`,
 								[],
-								"missingCheck",
 							);
 					}
 					deliver("design", { kind: "closed" });
@@ -685,9 +659,6 @@ function transition(prev: State, world: World) {
 							),
 						]
 					: e.addresses;
-				const owed = full
-					? ((world.view("design") as { owed?: number[] } | null)?.owed ?? [])
-					: [];
 				const c: Review = {
 					item,
 					scope: full ? "full" : "item",
@@ -710,9 +681,6 @@ function transition(prev: State, world: World) {
 					turn: 0,
 					checkout: null,
 					playbook: null,
-					owed: owed.length
-						? { ids: owed, text: queue?.checks?.(owed) ?? "" }
-						: null,
 				};
 				if (full) for (const prior of s.checks) prior.direction = "";
 				s.checks = s.checks.filter((x) => x !== old);
@@ -754,17 +722,6 @@ function transition(prev: State, world: World) {
 						reject:
 							"Pass with no blocks, or fail with distinct grounded threads and evidence.",
 					};
-				const encoded = e.encodedChecks ?? [];
-				const assigned = e.outcome === "pass" ? (c.owed?.ids ?? []) : [];
-				if (
-					new Set(encoded).size !== assigned.length ||
-					encoded.length !== assigned.length ||
-					encoded.some((id) => !assigned.includes(id))
-				)
-					return {
-						reject:
-							"Record exactly the assigned owed checks on a full-set or landing pass, or fail with evidence if they are missing.",
-					};
 				const unfollowed = e.principlesUnfollowed ?? [];
 				if (unfollowed.some((p) => !p.name.trim() || !ids.includes(p.thread)))
 					return {
@@ -782,7 +739,6 @@ function transition(prev: State, world: World) {
 					blocks,
 					diagnose,
 					notes: e.notes,
-					encodedChecks: encoded,
 				});
 				for (const text of e.notes)
 					file(
@@ -801,7 +757,7 @@ function transition(prev: State, world: World) {
 						`Clarify or bind principle ${p.name}.`,
 						`${p.thread}: ${blocks.find((b) => b.thread === p.thread)!.evidence}\n\n${e.text}`,
 						c.nodes,
-						"principle",
+						true,
 					);
 				// The agent that just answered has received its direction.
 				c.direction = "";

@@ -14,7 +14,6 @@ import {
 import { defineState } from "../../kernel/state.ts";
 import { toBuild } from "../build/public.ts";
 import {
-	checksFinished,
 	closeFindings,
 	fileHolding,
 	resumption,
@@ -185,7 +184,6 @@ type Seed = {
 	route: "follow" | "precedent";
 	reference: string | null;
 	text: string;
-	owed: number[];
 };
 type DesignerPhase =
 	| "seeded"
@@ -272,11 +270,6 @@ const resumed = prose(
 	["direction"],
 );
 const seedInputs = {
-	owed: prose(import.meta.dirname, "../../prose/inputs/design/seed-owed.md", [
-		"finding",
-		"reference",
-		"direction",
-	]),
 	follow: prose(
 		import.meta.dirname,
 		"../../prose/inputs/design/seed-follow.md",
@@ -589,7 +582,7 @@ function designerTurn(s: State): Expectation | undefined {
 				tools: ["ground"],
 				input: () =>
 					s.seed
-						? seedInputs[s.seed.owed.length ? "owed" : s.seed.route]({
+						? seedInputs[s.seed.route]({
 								finding: s.seed.text,
 								reference: s.seed.reference ?? "None established.",
 								direction: s.direction,
@@ -617,7 +610,6 @@ export const design: Lane<State> = {
 			r.phase === "applied" ? r.rounds.at(-1)!.nodes : [],
 		),
 		reference: s.reference,
-		owed: s.seed?.owed ?? [],
 		revisionSummary: s.revisions
 			.flatMap((r, i) => {
 				if (r.phase !== "applied") return [];
@@ -686,7 +678,6 @@ export const design: Lane<State> = {
 							route,
 							text,
 							reference,
-							owed: Array.isArray(e.owed) ? (e.owed as number[]) : [],
 						},
 						seq: s.seq + 1,
 					},
@@ -1121,7 +1112,6 @@ export const design: Lane<State> = {
 								key && w.runningEffect?.(key) ? { key, stopped: false } : null,
 						},
 					},
-					send: checksFinished(s.seed?.owed, "Encoding work was cancelled."),
 					notes: cancelledAnnotations(s, w),
 				};
 			}
@@ -1242,8 +1232,6 @@ export const design: Lane<State> = {
 						};
 				}
 			}
-			const declined = () =>
-				checksFinished(s.seed?.owed, "Encoding work was declined.");
 			if (s.phase === "arena_blocked") {
 				const current = currentArena(s);
 				const ask = blockedAsk(current, s.seq);
@@ -1252,7 +1240,6 @@ export const design: Lane<State> = {
 				if (e.choice === "decline")
 					return {
 						state: { ...s, phase: "closed", cancelRequested: false },
-						send: declined(),
 						notes: cancelledAnnotations(s, w),
 					};
 				const { arena, phase } = retryArena(
@@ -1283,7 +1270,6 @@ export const design: Lane<State> = {
 					case "decline":
 						return {
 							state: { ...next, phase: "closed", cancelRequested: false },
-							send: declined(),
 							notes: [{ agent: null, text: declineText(rounds) }],
 						};
 					case "arena":
@@ -1308,7 +1294,6 @@ export const design: Lane<State> = {
 			if (e.choice === "decline")
 				return {
 					state: { ...s, phase: "closed", cancelRequested: false },
-					send: declined(),
 				};
 			if (e.choice !== "first" && e.choice !== "second") return { state: s };
 			const direction = [

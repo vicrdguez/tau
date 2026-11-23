@@ -319,38 +319,6 @@ test("hand-over rejection files each nonblank annotation as an ordinary owner fi
 	assert.deepEqual(x.asks(), []);
 });
 
-test("unchanged trunk returns assigned checks even after a full-set verifier confirmation", () => {
-	const x = flow((lane) => (lane === "design" ? { owed: [2] } : null));
-	x.publish();
-	x.checkout();
-	assert.doesNotMatch(x.agent().expects[0]!.input!(), /owed checks/i);
-	x.pass();
-	x.clean();
-	x.done("merge_item", { kind: "merged", sha: "merged", checks: [] });
-	x.clean();
-	x.handoff();
-	x.checkout();
-	assert.match(
-		x.agent().expects[0]!.input!(),
-		/owed checks[\s\S]*encodedChecks/i,
-	);
-	x.call({
-		kind: "verdict",
-		outcome: "pass",
-		text: "Check exists on candidate.",
-		blocks: [],
-		notes: [],
-		encodedChecks: [2],
-	});
-	x.clean();
-	x.prepare();
-	const result = x.done("prepare_landing", { kind: "unchanged", sha: "base" });
-	const finished = result.send?.find((m) => m.event.kind === "checks_finished");
-	assert.deepEqual(finished?.event.ids, [2]);
-	assert.deepEqual(finished?.event.encoded, []);
-	assert.match(String(finished?.event.outcome), /unchanged/);
-});
-
 test("a verifier's principle violation returns the failed item and separately proposes a sharper description or binding", () => {
 	const x = flow();
 	x.publish();
@@ -1696,7 +1664,5 @@ for (const choice of ["reject", "accept"])
 			assert.match(String(filing?.event.report), /fixed totals/);
 		}
 		assert.equal(x.asks().length, 0);
-		if (choice === "reject")
-			assert.match(JSON.stringify(x.state()), /missing overflow probe/);
 		assert.ok(!x.apply(answer).send?.length);
 	});
