@@ -1,6 +1,7 @@
 import { arr, compile, obj, opt } from "tau/schema";
 import { effectKey } from "../../kernel/ids.ts";
 import {
+	type Args,
 	defineLaneTool,
 	type EffectDecl,
 	type KernelEvent,
@@ -53,15 +54,8 @@ export const experimentTools = [
 	}),
 ];
 
-export type ExperimentProtocol = {
-	node: string;
-	question: string;
-	decisionRule: string;
-	controls: string[];
-	axis: string;
-	variants: string[];
-};
-export type ExperimentComparison = { comparison: string; winner?: string };
+type ExperimentProtocol = Args<typeof protocolSchema>;
+type ExperimentComparison = Args<typeof comparisonSchema>;
 type Receipt = {
 	seat: typeof seat;
 	conversation: string;

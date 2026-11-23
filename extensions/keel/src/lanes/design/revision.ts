@@ -1,9 +1,13 @@
 import { arr, obj, opt } from "tau/schema";
 import { subject, token } from "../../kernel/ids.ts";
-import { type Ask, type Expectation, prose } from "../../kernel/lane.ts";
+import {
+	type Args,
+	type Ask,
+	type Expectation,
+	prose,
+} from "../../kernel/lane.ts";
 import {
 	checkSchema,
-	type Draft,
 	renderSeam,
 	ruleSchema,
 	seamSchema,
@@ -33,12 +37,7 @@ export const changesSchema = obj({
 	sections: opt(arr(obj({ label: text, body: text }))),
 	remove: opt(arr(text)),
 });
-export type Changes = Partial<
-	Pick<Draft, "intent" | "nodes" | "seams" | "checks">
-> & {
-	sections?: { label: string; body: string }[];
-	remove?: string[];
-};
+export type Changes = Args<typeof changesSchema>;
 export const causeAnswersSchema = arr(
 	obj({ cause: text, nodes: arr(text), reason: text }),
 );

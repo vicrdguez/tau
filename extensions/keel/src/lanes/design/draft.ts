@@ -1,6 +1,6 @@
 import { arr, int, obj, oneOf, str } from "tau/schema";
-import { prose } from "../../kernel/lane.ts";
-import { type Mandate, proofText, type RiderOrigin } from "./public.ts";
+import { type Args, prose } from "../../kernel/lane.ts";
+import { type Mandate, proofText } from "./public.ts";
 
 export const text = str({ minLength: 1 });
 const observation = obj({ label: text, text });
@@ -48,34 +48,8 @@ export const reviewedDraft = obj({
 	),
 	references: arr(obj({ label: text, source: text })),
 });
-export type Observation = { label: string; text: string };
-export type Audit = {
-	exists: string;
-	gaps: Observation[];
-	contradictions: Observation[];
-};
-export type Draft = Pick<Mandate, "intent" | "checks"> & {
-	nodes: { label: string; rule: string; probe: string }[];
-	done: string;
-	seams: {
-		label: string;
-		callersNow: string;
-		callersLater: string;
-		usage: string;
-		signature: string;
-		owner: string;
-		dependencies: string;
-	}[];
-	never: string;
-	tradeoffs: string;
-	alternatives: string;
-	settlements: { label: string; ruling: string }[];
-	riders: (Observation & {
-		origin: RiderOrigin;
-		disposition: "bind" | "open";
-	})[];
-	references: { label: string; source: string }[];
-};
+export type Audit = Args<typeof auditSchema>;
+export type Draft = Args<typeof reviewedDraft>;
 const dir = import.meta.dirname + "/../../prose/documents";
 const seamText = prose(dir, "seam.md", [
 	"callersNow",

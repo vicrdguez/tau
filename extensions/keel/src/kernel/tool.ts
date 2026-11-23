@@ -34,7 +34,9 @@ type Self = Readonly<
 		token: Token | null;
 	}
 >;
-type Args<P extends object> = Parameters<ToolRegistration<P>["execute"]>[0];
+export type Args<P extends object> = Parameters<
+	ToolRegistration<P>["execute"]
+>[0];
 type View = (lane: string) => unknown;
 type Header = {
 	lane: string;

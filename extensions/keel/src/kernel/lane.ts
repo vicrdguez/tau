@@ -12,7 +12,7 @@ import type {
 import type { StateDef } from "./state.ts";
 
 export { prose } from "tau";
-export { defineLaneTool } from "./tool.ts";
+export { type Args, defineLaneTool } from "./tool.ts";
 
 /** Tools and messages use lane-defined kinds. These facts come from the kernel. */
 export type KernelEvent =
