@@ -25,6 +25,13 @@ type Reply = Awaited<ReturnType<Journey["call"]>>;
 
 const TESTING =
 	"tau/testing is for tests. An extension cannot import it at run time.";
+const AUTHOR_ENTRIES = [
+	"tau",
+	"tau/durable",
+	"tau/schema",
+	"tau/chord",
+	"tau/telemetry",
+];
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 const scratch = () => mkdtemp(path.join(tmpdir(), "tau-loader-"));
@@ -230,7 +237,7 @@ test("group-writable extension folders and files load alongside other extensions
 	assert.equal((scan.modules["loose-file"] as { value: number }).value, 42);
 });
 
-test("the old tau-extension package name points authors to the four tau entries", async () => {
+test("the old tau-extension package name points authors to the canonical tau entries", async () => {
 	for (const specifier of ["tau-extension", "tau-extension/durable"]) {
 		const dir = await directory({
 			old: {
@@ -243,9 +250,11 @@ test("the old tau-extension package name points authors to the four tau entries"
 		const f = failure(scan, "old");
 		assert.equal(f.stage, "import");
 		assert.ok(f.message.includes(specifier), f.message);
-		assert.match(
+		assert.ok(
+			f.message.includes(
+				`The package is now tau. Use a canonical entry: ${AUTHOR_ENTRIES.join(", ")}.`,
+			),
 			f.message,
-			/The package is now tau\. Use a canonical entry: tau, tau\/durable, tau\/schema, tau\/chord\./,
 		);
 	}
 });
@@ -289,21 +298,21 @@ test("an extension that imports tau/server fails with the server message", async
 	);
 });
 
-test("the four tau author entries give every host value to an outside extension", async () => {
-	const entries = ["tau", "tau/durable", "tau/schema", "tau/chord"];
+test("the five tau author entries give every host value to an outside extension", async () => {
 	const dir = await directory({
 		same: {
 			"index.ts":
-				entries
-					.map((entry, i) => `import * as a${i} from ${JSON.stringify(entry)};`)
-					.join("\n") + "\nexport const got = [a0, a1, a2, a3];",
+				AUTHOR_ENTRIES.map(
+					(entry, i) => `import * as a${i} from ${JSON.stringify(entry)};`,
+				).join("\n") +
+				`\nexport const got = [${AUTHOR_ENTRIES.map((_, i) => `a${i}`).join(", ")}];`,
 		},
 	});
 	const script = `import assert from 'node:assert/strict';
 const {fromDirectory} = await import('tau/server');
 const scan = await fromDirectory(${JSON.stringify(dir)})();
 assert.deepEqual(scan.failures, []);
-for (const [i, entry] of ${JSON.stringify(entries)}.entries()) {
+for (const [i, entry] of ${JSON.stringify(AUTHOR_ENTRIES)}.entries()) {
  const expected = await import(entry);
  assert.deepEqual(Object.keys(scan.modules.same.got[i]).sort(), Object.keys(expected).sort());
  for (const [name, value] of Object.entries(expected)) assert.equal(scan.modules.same.got[i][name], value, entry + '.' + name);

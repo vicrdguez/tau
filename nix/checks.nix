@@ -13,13 +13,14 @@ let
     "keel"
     "w1"
     "w2"
-    "websearch"
+    "webkit"
   ];
   verifySource = lib.fileset.toSource {
     inherit root;
     fileset = lib.fileset.unions [
       (root + "/e2e/package.json")
       (root + "/e2e/test/verify-build.ts")
+      (root + "/e2e/test/installed-codemode.ts")
     ];
   };
   verifyArguments =
@@ -48,7 +49,8 @@ let
           nodejs
           pkgs.coreutils
           pkgs.git
-        ];
+        ]
+        ++ lib.optional (name == "extension-webkit") pkgs.curl;
         __darwinAllowLocalNetworking = true;
         passthru.source = source;
       }

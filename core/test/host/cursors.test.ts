@@ -9,7 +9,7 @@ test("each paged call refuses malformed cursor payloads without poisoning storag
 		const conversation = (
 			await s.call("create", { project: "p", model: "faux/a" })
 		).body.result.conversation;
-		for (const call of ["faults", "conversations", "history"]) {
+		for (const call of ["faults", "conversations", "history", "traces"]) {
 			const body =
 				call === "history" ? { project: "p", conversation } : { project: "p" };
 			const query = call === "history" ? { conversation } : {};
@@ -30,11 +30,18 @@ test("each paged call refuses malformed cursor payloads without poisoning storag
 				assert.equal(reply.body.refused?.code, "bad_cursor");
 			}
 			const position =
-				call === "faults" ? {} : { after: 1, order: "ascending" };
+				call === "faults"
+					? {}
+					: call === "traces"
+						? '[1,"id"]'
+						: { after: 1, order: "ascending" };
 			for (const badQuery of [
 				{ unknown: true },
 				{ ...query, minEntryId: -1 },
 				{ ...query, order: "sideways" },
+				...(call === "traces"
+					? [{ errors: "yes" }, { attributes: { list: [] } }]
+					: []),
 			]) {
 				const cursor = Buffer.from(
 					JSON.stringify({ call, project: "p", query: badQuery, position }),
