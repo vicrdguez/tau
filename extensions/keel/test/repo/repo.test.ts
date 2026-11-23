@@ -503,6 +503,16 @@ test("publish rejects dirt, detachment, and unrelated history", async (t) => {
 	git(f.worker.path, "reset", "--hard", unrelated);
 	assert.equal((await f.publish()).kind, "not_descendant");
 });
+test("publish refuses a different attached branch at the same worker commit", async (t) => {
+	const f = await fixture(t);
+	const { item } = await f.item();
+	git(f.worker.path, "switch", "-c", "owner-scratch");
+	assert.equal(git(f.worker.path, "branch", "--show-current"), "owner-scratch");
+	assert.equal(git(f.worker.path, "rev-parse", "HEAD"), item);
+	assert.equal(git(f.root, "rev-parse", f.worker.branch), item);
+	assert.equal((await f.publish()).kind, "occupied");
+});
+
 test("publish lists only committed changes in the project principles and playbooks directories", async (t) => {
 	const f = await fixture(t);
 	const principles = ".keel/principles";

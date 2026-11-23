@@ -75,6 +75,22 @@ for (const stale of [false, true])
 			else assert.deepEqual(JSON.parse(s.notes[0]!), [{ text: "one", n: 1 }]);
 		},
 	);
+test("a plain owner message matching a choice does not answer the open decision", async (t) => {
+	const x = await setup(t);
+	await x.send("ask", { basis: "Owner approval" });
+	const read = () =>
+		x.harness.commit((tx) => decision(tx, id(1, x.root.id)), ctx);
+	assert.equal((await read())?.status, "open");
+	x.provider.setResponses([fauxAssistantMessage("Awaiting the decision.")]);
+	x.harness.resume();
+	await (await x.root.submit({ type: "input", content: "accept" }, ctx)).wait(
+		ctx,
+	);
+	await x.root.waitForIdle(ctx);
+	assert.equal((await read())?.status, "open");
+	assert.equal((await x.state()).answers, 0);
+});
+
 test("work scopes isolate identical local subjects; project state is shared only by routed messages", async (t) => {
 	const x = await setup(t);
 	const b = await x.harness.createConversation(
