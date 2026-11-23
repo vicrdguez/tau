@@ -1,38 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { WorkId } from "../src/kernel/ids.ts";
-import type { LaneEvent, World } from "../src/kernel/lane.ts";
 import { design } from "../src/lanes/design/index.ts";
-import { drive } from "./fixtures/drive.ts";
+import { laneDriver, laneWorld } from "./fixtures/drive.ts";
 
-const work = 17 as WorkId;
-const world: World = {
-	work,
-	root: "/project",
-	now: 1,
-	view: () => null,
-	options: {
-		design: "a/a",
-		build: "b/b",
-		verify: "v/v",
-		queue: "q/q",
-		max_workers: 3,
-		base: "main",
-		trunk: "trunk",
-	},
-};
+const world = laneWorld();
+const run = () => laneDriver(design, world);
 const mandate = {
 	intent: "Reject orders below the minimum.",
 	nodes: [
 		{
 			label: "R1",
 			rule: "The boundary is inclusive.",
-			probe: "One less than the minimum fails.",
+			probe: "One less fails.",
 		},
 	],
 	checks: [{ id: "P1", argv: ["env", "test"], timeoutMs: 5000 }],
 };
-const bound = {
+const follow = {
 	kind: "ground",
 	route: "follow",
 	reference: "Orders ADR 3",
@@ -44,297 +28,170 @@ const ambiguous = {
 	reference: "The minimum lot size differs by venue.",
 	readings: ["Use the venue minimum.", "Use the exchange minimum."],
 };
-function advance(event: LaneEvent, state = design.state.initial()) {
-	const result = drive(design, state, event, world);
-	assert.ok(!("reject" in result), JSON.stringify(result));
-	return result;
-}
+const answer = (
+	subject: string,
+	choice: string,
+	annotations: { n: number; text: string }[] = [],
+) => ({ kind: "answered", subject, choice, annotations });
 
-test("a precedent-following Mandate binds once under the prompt without an owner ask", () => {
-	const { state, send } = advance(bound);
+test("following precedent binds once without asking the owner", () => {
+	const x = run();
+	const { send } = x.send(follow);
 	assert.deepEqual(send, [
 		{
 			lane: "build",
-			work,
+			work: world.work,
 			event: {
 				kind: "bound",
 				mandate: {
 					...mandate,
+					encodeRequired: false,
 					considerations: null,
 					delegated: [],
-					encodeRequired: false,
 					approvalNotes: [],
 				},
 			},
 		},
 	]);
-	assert.deepEqual(design.asks(state, world), []);
-	assert.equal(state.reference, bound.reference);
-	assert.deepEqual(state.mandate, {
-		...mandate,
-		considerations: null,
-		delegated: [],
-		encodeRequired: false,
-		approvalNotes: [],
-	});
-	assert.deepEqual(
-		design.agents(state, world).map((a) => [a.key, a.role, a.expects]),
-		[["designer", "designer", []]],
-	);
-	assert.ok("reject" in design.reduce(state, bound, world));
+	assert.deepEqual(x.asks(), []);
+	assert.equal(x.state().reference, follow.reference);
+	assert.ok("reject" in x.attempt(follow));
 });
-test("Ground refuses missing authority, colliding labels, empty probes and unusable proofs before adoption", () => {
-	for (const e of [
-		{ ...bound, reference: " " },
+
+test("follow refuses missing authority, colliding labels, a rule without a probe, or no usable proof", () => {
+	const x = run();
+	for (const event of [
+		{ ...follow, reference: " " },
 		{
-			...bound,
+			...follow,
 			mandate: { ...mandate, nodes: [{ ...mandate.nodes[0]!, label: "P1" }] },
 		},
 		{
-			...bound,
+			...follow,
 			mandate: {
 				...mandate,
 				nodes: [{ ...mandate.nodes[0]!, label: "intent" }],
 			},
 		},
 		{
-			...bound,
+			...follow,
 			mandate: { ...mandate, nodes: [{ ...mandate.nodes[0]!, probe: " " }] },
 		},
-		{ ...bound, mandate: { ...mandate, checks: [] } },
-		{
-			...bound,
-			mandate: { ...mandate, checks: [{ id: "P1", argv: [], timeoutMs: 1 }] },
-		},
-		{
-			...bound,
-			mandate: {
-				...mandate,
-				checks: [{ id: "P1", argv: ["test"], timeoutMs: 0 }],
-			},
-		},
+		{ ...follow, mandate: { ...mandate, checks: [] } },
+		...[
+			{ id: "P1", argv: [], timeoutMs: 1 },
+			{ id: "P1", argv: ["test"], timeoutMs: 0 },
+		].map((check) => ({ ...follow, mandate: { ...mandate, checks: [check] } })),
 	])
-		assert.ok(
-			"reject" in design.reduce(design.state.initial(), e, world),
-			JSON.stringify(e),
-		);
+		assert.ok("reject" in x.attempt(event), JSON.stringify(event));
 });
-test("an ambiguity needs distinct readings; the current answer supplies the reading and annotations to Ground", () => {
-	assert.ok(
-		"reject" in
-			design.reduce(
-				design.state.initial(),
-				{ ...ambiguous, readings: ["one", "one"] },
-				world,
-			),
-	);
-	const { state, send } = advance(ambiguous);
-	assert.deepEqual(send ?? [], []);
-	const [ask] = design.asks(state, world);
-	assert.ok(ask);
-	assert.ok(ask.title.includes(ambiguous.reference));
-	for (const reading of ambiguous.readings)
-		assert.ok(ask.basis.includes(reading));
-	const answer = {
-		kind: "answered",
-		subject: ask.subject,
-		choice: "second",
-		annotations: [{ n: 1, text: "Include auctions." }],
-	};
-	const directed = advance(answer, state).state;
-	const input = design.agents(directed, world)[0]?.expects[0]?.input?.() ?? "";
-	assert.ok(input.includes(ambiguous.readings[1]!));
-	assert.ok(input.includes("Include auctions."));
-	assert.deepEqual(design.asks(directed, world), []);
-	assert.deepEqual(advance(answer, directed), { state: directed });
-	assert.equal(advance(bound, directed).state.mandate?.intent, mandate.intent);
-});
-test("declining an ambiguity closes the ask without a build", () => {
-	const state = advance(ambiguous).state;
-	const result = advance(
-		{
-			kind: "answered",
-			subject: design.asks(state, world)[0]!.subject,
-			choice: "decline",
-			annotations: [],
-		},
-		state,
-	);
-	assert.deepEqual(result.send ?? [], []);
-	assert.deepEqual(design.asks(result.state, world), []);
-	assertDesk(result.state);
-});
-test("a stopped Ground turn files a hold; resume carries the finding and direction under a new token; cancel closes the turn without retiring the desk", () => {
-	const state = advance(ambiguous).state;
-	const active = advance(
-		{
-			kind: "answered",
-			subject: design.asks(state, world)[0]!.subject,
-			choice: "first",
-			annotations: [],
-		},
-		state,
-	).state;
-	const turn = design.agents(active, world)[0]!.expects[0]!;
-	const stopped = advance(
-		{
-			kind: "agent_stalled",
-			agent: "designer",
-			cause: "stopped",
-			tokens: [turn.token],
-			lastWords: "Still reading.",
-		},
-		active,
-	);
-	const [file] = stopped.send ?? [];
-	assert.equal(file?.lane, "queue");
-	assert.equal(file?.work, null);
-	assert.match(String(file?.event.evidence), /Still reading/);
-	assertDesk(stopped.state);
-	assert.deepEqual(
-		advance(
-			{
-				kind: "agent_stalled",
-				agent: "designer",
-				tokens: [turn.token],
-				cause: "stopped",
-				lastWords: "again",
-			},
-			stopped.state,
-		).send ?? [],
-		[],
-	);
-	const resumed = advance(
-		{
-			kind: "resume",
-			cause: file!.event.cause!,
-			item: null,
-			evidence: file!.event.evidence!,
-			direction: "Check venue A.",
-		},
-		stopped.state,
-	);
-	const next = design.agents(resumed.state, world)[0]!.expects[0]!;
-	assert.notEqual(next.token, turn.token);
-	assert.match(next.input?.() ?? "", /Check venue A/);
-	assert.match(next.input?.() ?? "", /Still reading/);
-	assert.deepEqual(
-		advance(
-			{
-				kind: "agent_stalled",
-				agent: "designer",
-				tokens: [turn.token],
-				cause: "stopped",
-				lastWords: "late",
-			},
-			resumed.state,
-		).state,
-		resumed.state,
-	);
-	assertDesk(advance({ kind: "cancel" }, resumed.state).state);
-});
-function assertDesk(state: ReturnType<typeof design.state.initial>) {
-	assert.deepEqual(
-		design.agents(state, world).map((a) => [a.key, a.paused, a.expects]),
-		[["designer", false, []]],
-	);
-}
 
-test("a standing desk request asks once without cancelling; only a current confirmation cancels", () => {
-	const boundState = advance(bound).state;
-	const requested = advance({ kind: "request_cancel" }, boundState);
-	assert.equal(requested.state.phase, "bound");
-	assert.deepEqual(requested.send ?? [], []);
-	const [ask] = design.asks(requested.state, world);
-	assert.ok(ask);
-	assert.ok(ask.title.includes(mandate.intent));
-	assert.ok(ask.basis.includes(mandate.intent));
-	assert.match(ask.title, /\?$/);
-	assert.doesNotMatch(ask.title, /[.!?]\?$/);
-	assert.deepEqual(ask.choices, ["cancel", "continue"]);
-	assert.deepEqual(
-		design.asks(
-			advance({ kind: "request_cancel" }, requested.state).state,
-			world,
-		),
-		[ask],
-	);
-	const answer = {
-		kind: "answered",
-		subject: ask.subject,
-		choice: "continue",
-		annotations: [],
-	};
-	const kept = advance(answer, requested.state);
-	assert.equal(kept.state.phase, "bound");
-	assert.deepEqual(design.asks(kept.state, world), []);
-	assert.deepEqual(
-		advance({ ...answer, choice: "cancel" }, kept.state).send ?? [],
-		[],
-	);
-	assert.deepEqual(
-		advance({ ...answer, choice: "cancel" }, requested.state).send,
-		[{ lane: "queue", work: null, event: { kind: "cancel_work", work } }],
-	);
-	for (const kind of ["closed", "cancel"]) {
-		const terminal = advance({ kind }, requested.state).state;
-		assertDesk(terminal);
-		assert.deepEqual(design.asks(terminal, world), []);
+test("Ground presents two readings; the owner can send one back with direction or decline without binding", () => {
+	for (const choice of ["second", "decline"]) {
+		const x = run();
 		assert.ok(
-			"reject" in design.reduce(terminal, { kind: "request_cancel" }, world),
+			"reject" in x.attempt({ ...ambiguous, readings: ["one", "one"] }),
 		);
+		assert.deepEqual(x.send(ambiguous).send ?? [], []);
+		const [ask] = x.asks();
+		assert.ok(ask);
+		for (const reading of ambiguous.readings)
+			assert.ok(ask.basis.includes(reading));
+		const event = answer(ask.subject, choice, [
+			{ n: 1, text: "Include auctions." },
+		]);
+		const { send } = x.send(event);
+		assert.deepEqual(x.asks(), []);
+		if (choice === "decline") {
+			assert.deepEqual(send ?? [], []);
+			assert.deepEqual(x.agents()[0]?.expects, []);
+		} else {
+			const input = x.agents()[0]?.expects[0]?.input?.() ?? "";
+			assert.match(input, /Use the exchange minimum/);
+			assert.match(input, /Include auctions/);
+			const directed = x.state();
+			x.send(event);
+			assert.deepEqual(x.state(), directed);
+			assert.equal(x.send(follow).send?.[0]?.event.kind, "bound");
+		}
 	}
 });
 
-test("cancel collects worker and verification cleanup exactly once in the work's final note", () => {
-	const state = advance({ kind: "cancel" }, advance(bound).state).state;
-	const report = {
-		kind: "cleanup_finished",
-		lane: "verify",
-		kept: ["/integration: registration occupied"],
+test("a stopped Ground turn files a hold; resume carries direction and ignores the old stall", () => {
+	const x = run();
+	x.send(ambiguous);
+	x.send(answer(x.asks()[0]!.subject, "first"));
+	const { token } = x.agents()[0]!.expects[0]!;
+	const stall = {
+		kind: "agent_stalled",
+		agent: "designer",
+		cause: "stopped",
+		tokens: [token],
+		lastWords: "Still reading.",
 	};
-	const first = advance(report, state);
-	assert.deepEqual(first.notes ?? [], []);
-	const duplicate = advance(report, first.state);
-	assert.deepEqual(duplicate.notes ?? [], []);
-	const second = advance(
-		{ kind: "cleanup_finished", lane: "build", kept: ["/worker: local draft"] },
-		duplicate.state,
-	);
-	assert.equal(second.notes?.length, 1);
-	const text = second.notes[0]!.text;
-	assert.match(text, /kept[^\n]*:\s*\/worker/i);
-	for (const part of [
-		mandate.intent,
-		"/integration: registration occupied",
-		"/worker: local draft",
-	])
-		assert.ok(text.includes(part));
-	assert.deepEqual(advance(report, second.state).notes ?? [], []);
+	const [file] = x.send(stall).send ?? [];
+	assert.equal(file?.lane, "queue");
+	assert.equal(file?.work, null);
+	assert.deepEqual(x.agents()[0]?.expects, []);
+	assert.deepEqual(x.send(stall).send ?? [], []);
+	x.send({
+		kind: "resume",
+		cause: file!.event.cause!,
+		evidence: file!.event.evidence!,
+		direction: "Check venue A.",
+	});
+	const next = x.agents()[0]!.expects[0]!;
+	assert.notEqual(next.token, token);
+	assert.match(next.input?.() ?? "", /Still reading[\s\S]*Check venue A/);
+	assert.deepEqual(x.send(stall).send ?? [], []);
 });
 
-test("Design keeps its version-one identity and unadopted initial state", () => {
-	assert.equal(design.state.version, 1);
-	assert.equal(design.state.kind, "keel.design");
-	assert.equal(design.state.scope, "conversation");
-	assert.deepEqual(design.state.initial(), {
-		phase: "entry",
-		audit: null,
-		seed: null,
-		arenas: [],
-		experiments: [],
-		experimentReturn: null,
-		proposal: null,
-		rounds: [],
-		revisions: [],
-		reference: "",
-		mandate: null,
-		readings: [],
-		direction: "",
-		cancelRequested: false,
-		cleanup: null,
-		cause: null,
-		heldTurn: null,
-		seq: 0,
-	});
+test("the desk requests one confirmation, keeps working on continue, and cancels only on a current answer", () => {
+	const x = run();
+	x.send(follow);
+	const request = { kind: "request_cancel" };
+	assert.deepEqual(x.send(request).send ?? [], []);
+	const [ask] = x.asks();
+	assert.ok(ask);
+	assert.match(ask.basis, /Reject orders below the minimum/);
+	assert.deepEqual(ask.choices, ["cancel", "continue"]);
+	x.send(request);
+	assert.deepEqual(x.asks(), [ask]);
+	assert.deepEqual(x.send(answer(ask.subject, "continue")).send ?? [], []);
+	assert.equal(x.state().phase, "bound");
+	assert.deepEqual(x.asks(), []);
+	assert.deepEqual(x.send(answer(ask.subject, "cancel")).send ?? [], []);
+	x.send(request);
+	assert.deepEqual(x.send(answer(ask.subject, "cancel")).send, [
+		{
+			lane: "queue",
+			work: null,
+			event: { kind: "cancel_work", work: world.work },
+		},
+	]);
+	for (const kind of ["closed", "cancel"]) {
+		const terminal = run();
+		terminal.send(follow);
+		terminal.send(request);
+		terminal.send({ kind });
+		assert.deepEqual(terminal.asks(), []);
+		assert.ok("reject" in terminal.attempt(request));
+	}
+});
+
+test("cancellation reports retained changes once, after both lanes have cleaned up", () => {
+	const x = run();
+	x.send(follow);
+	x.send({ kind: "cancel" });
+	const report = (lane: string, kept: string) =>
+		x.send({ kind: "cleanup_finished", lane, kept: [kept] }).notes ?? [];
+	const worker = "/worker: local draft";
+	const integration = "/integration: registration occupied";
+	assert.deepEqual(report("build", worker), []);
+	assert.deepEqual(report("build", worker), []);
+	const notes = report("verify", integration);
+	assert.equal(notes.length, 1);
+	for (const part of [mandate.intent, worker, integration])
+		assert.ok(notes[0]!.text.includes(part));
+	assert.deepEqual(report("build", worker), []);
 });

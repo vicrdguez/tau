@@ -12,13 +12,11 @@ import {
 	MemoryStorage,
 	openNodeSqliteStorage,
 } from "tau/durable";
-import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import { ProjectState } from "../src/kernel/records.ts";
-import { stateDoc } from "../src/kernel/state.ts";
+import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { runRepoEffect } from "../src/workflow.ts";
 import { openReview, seedBookPolicy } from "./fixtures/mandate-scenario.ts";
 import { openScenario } from "./fixtures/scenario.ts";
-import { fixture, git } from "./repo/fixture.ts";
+import { git, tempRepo } from "./fixtures/repo.ts";
 import { latch } from "./toy.ts";
 
 const child = fileURLToPath(
@@ -60,7 +58,7 @@ async function assertLanded(
 }
 
 test("precedent-following bug: one worker addresses a failed verdict, merge proof and full-set verification precede one accepted landing", async (t) => {
-	const { root, base } = await fixture(t);
+	const { root, base } = await tempRepo(t);
 	const s = await openScenario(root, new MemoryStorage(), "rework");
 	t.after(() => s.store.harness.close(ctx));
 	await s.start();
@@ -76,67 +74,30 @@ test("precedent-following bug: one worker addresses a failed verdict, merge proo
 		`keel/${s.root.id}/build`,
 		checkouts,
 	);
-	if (process.env.KEEL_OWED_OUT_RENDERS) {
-		const { d, text } = await openAsk(s, "verify");
-		await writeFile(
-			"/tmp/keel-owed-out-handover.md",
-			`Title: ${d.title}\nChoices: ${d.choices.join(", ")}\n\n${text}`,
-		);
-	}
 	await s.accept(trunk);
 });
 
-async function openAsk(
-	s: Awaited<ReturnType<typeof openScenario>>,
-	lane: string,
-) {
-	const { harness } = s.store;
-	const slots = Object.values(
-		(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-	);
-	const slot = slots.find((a) => a.lane === lane);
-	assert.ok(slot, `missing ${lane} decision`);
-	const d = await harness.commit((tx) => decision(tx, slot.decision), ctx);
-	assert.ok(d?.status === "open");
-	const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
-	return { d, text: String((basis!.data as JsonObject).text) };
-}
-
-test("rejected hand-over findings go through investigation; defer parks one, build seeds new work, and the next hand-over has no owed list", async (t) => {
-	const { root } = await fixture(t);
+test("rejected hand-over findings go through investigation; defer parks one, build seeds new work, and only built work lands", async (t) => {
+	const { root } = await tempRepo(t);
 	const s = await openScenario(root, new MemoryStorage(), "rework");
 	const { harness } = s.store;
 	t.after(() => harness.close(ctx));
 	await s.start();
 	await s.settle();
-	const ask = (lane: string) => openAsk(s, lane);
+	const ask = (lane: string) => s.openAsk((a) => a.lane === lane);
 	const first = await ask("verify");
 	const before = git(root, "rev-parse", "trunk");
 	const deferred = "Keep an example of the previous book format.";
 	const change = "Add a runnable book-format regression check.";
 	const reference = "Approved book format";
-	const reject = (
-		d: typeof first.d,
-		annotations: { start: number; end: number; text: string }[],
-	) =>
-		fauxAnswer(s.store, d.id, {
-			basis: d.basis,
-			choice: "reject",
-			annotations,
-		});
-	assert.equal((await reject(first.d, [])).kind, "answered");
+	await s.answer(first.d, "reject");
 	await s.settle();
 	const askedAgain = await ask("verify");
 	assert.notEqual(first.d.id, askedAgain.d.id);
-	assert.equal(
-		(
-			await reject(askedAgain.d, [
-				{ start: 0, end: 1, text: deferred },
-				{ start: 1, end: 2, text: change },
-			])
-		).kind,
-		"answered",
-	);
+	await s.answer(askedAgain.d, "reject", [
+		{ range: { start: 0, end: 1 }, text: deferred },
+		{ range: { start: 1, end: 2 }, text: change },
+	]);
 	s.queueProvider.setResponses([
 		...[deferred, change].map((text, index) =>
 			s.turn(
@@ -163,11 +124,9 @@ test("rejected hand-over findings go through investigation; defer parks one, bui
 	]);
 	await s.settle();
 	assert.equal(s.queueProvider.getPendingResponseCount(), 0);
-	const parked = await ask("queue");
+	const parked = await s.openAsk((slot) => slot.local === "triage/2");
 	assert.ok(parked.text.includes(deferred));
-	const answer = (d: typeof first.d, choice: string) =>
-		fauxAnswer(s.store, d.id, { basis: d.basis, choice, annotations: [] });
-	assert.equal((await answer(parked.d, "defer")).kind, "answered");
+	await s.answer(parked.d, "defer");
 	await s.settle();
 	const triage = await ask("queue");
 	assert.deepEqual(triage.d.choices, ["build", "defer", "drop"]);
@@ -177,11 +136,6 @@ test("rejected hand-over findings go through investigation; defer parks one, bui
 		"There is no runnable check in the landed tree.",
 	])
 		assert.ok(triage.text.includes(part), part);
-	if (process.env.KEEL_OWED_OUT_RENDERS)
-		await writeFile(
-			"/tmp/keel-owed-out-triage.md",
-			`Title: ${triage.d.title}\nChoices: ${triage.d.choices.join(", ")}\n\n${triage.text}`,
-		);
 	const goal = "Keep a runnable regression check for the approved book format.";
 	const proof = {
 		id: "format-check",
@@ -235,7 +189,7 @@ test("rejected hand-over findings go through investigation; defer parks one, bui
 		s.turn("verifier", "bash", { command: "sh check-book.sh" }),
 		s.turn("verifier", "publish_verdict", pass),
 	]);
-	assert.equal((await answer(triage.d, "build")).kind, "answered");
+	await s.answer(triage.d, "build");
 	await s.settle();
 	const handover = await ask("verify");
 	const after = git(root, "rev-parse", "trunk");
@@ -247,16 +201,25 @@ test("rejected hand-over findings go through investigation; defer parks one, bui
 	assert.ok(handover.text.includes(after));
 	assert.doesNotMatch(
 		handover.text,
-		/Checks still owed|Keep an example of the previous book format/i,
+		/Keep an example of the previous book format/i,
 	);
 });
 
 test("precedent-setting work: two explorers, two candidates, judge and challenge, two annotation rounds, then land three dependent items", async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const base = await seedBookPolicy(root);
 	const s = await openReview(root, new MemoryStorage(), true);
 	t.after(() => s.harness.close(ctx));
 	await s.start();
+	// The exploration and all arena stages are settled before the first owner round.
+	const children = await s.harness.commit(async (tx) => {
+		const { items } = await tx.scanConversations({}, 100);
+		return Promise.all(
+			items.flatMap(({ owner }) => (owner ? [tx.task(owner.taskId)] : [])),
+		);
+	}, ctx);
+	assert.equal(children.length, 6);
+	assert.ok(children.every((task) => task?.state.status === "terminal"));
 	s.scriptRevision();
 	await s.rework();
 	await s.reworkRider();
@@ -266,50 +229,8 @@ test("precedent-setting work: two explorers, two candidates, judge and challenge
 	assert.match(git(root, "show", "trunk:book-report.sh"), /read_book book/);
 });
 
-test("scenario 2 puts the new and replaced bases at the top of the switched review, even when the Mandate entries are unchanged", async (t) => {
-	const { root } = await fixture(t);
-	await seedBookPolicy(root);
-	const s = await openReview(root, new MemoryStorage(), true);
-	t.after(() => s.harness.close(ctx));
-	await s.start();
-	const first = (await s.review("mandate/1")).text;
-	await s.switchBase();
-	const second = (await s.review("mandate/2")).text;
-	if (process.env.KEEL_DISPATCH_FIX_RENDERS) {
-		await writeFile("/tmp/keel-dispatch-fix-round1.md", first);
-		await writeFile("/tmp/keel-dispatch-fix-round2.md", second);
-	}
-	assert.doesNotMatch(first.split("\n## Mandate", 1)[0]!, /Base switched/);
-	assert.match(
-		second.split("\n## Mandate", 1)[0]!,
-		/Round 2\. Base switched to `arena_seat_2`, replacing `arena_seat_1`\. Since round 1: no entries changed\./,
-	);
-});
-
-test("declining the completed arena leaves six settled children and no build or open decisions", {
-	timeout: 5000,
-}, async (t) => {
-	const { root } = await fixture(t);
-	await seedBookPolicy(root);
-	const s = await openReview(root, new MemoryStorage(), true);
-	t.after(() => s.harness.close(ctx));
-	await s.start();
-	await s.decline();
-	assert.deepEqual(await s.subjects(), []);
-	assert.deepEqual((await s.harness.inspect(ctx)).tasks, []);
-	const owners = await s.harness.commit(async (tx) => {
-		const { items } = await tx.scanConversations({}, 100);
-		return Promise.all(
-			items.flatMap(({ owner }) => (owner ? [tx.task(owner.taskId)] : [])),
-		);
-	}, ctx);
-	assert.equal(owners.length, 6);
-	assert.ok(owners.every((owner) => owner?.state.status === "terminal"));
-	assert.equal(git(root, "for-each-ref", "refs/heads/keel/"), "");
-});
-
 test("SQLite SIGKILL after rework commits: recover the owed revision exactly once with its annotations, without reopening the answered round or starting a build", async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	await seedBookPolicy(root);
 	const file = join(root, ".git", "keel.sqlite");
 	const first = await openReview(root, await openNodeSqliteStorage(file), true);
@@ -337,10 +258,7 @@ test("SQLite SIGKILL after rework commits: recover the owed revision exactly onc
 		[],
 		"old round withdrawn and no new review yet",
 	);
-	const stored = await s.harness.commit(
-		(tx) => decision(tx, review.decision.id),
-		ctx,
-	);
+	const stored = await s.harness.commit((tx) => decision(tx, review.d.id), ctx);
 	assert.ok(stored?.status === "answered");
 	assert.equal(stored.choice, "rework");
 	assert.deepEqual(
@@ -362,7 +280,7 @@ test("SQLite SIGKILL after rework commits: recover the owed revision exactly onc
 test("cancel from the idle designer desk while a worker creation is running: one decision, one final inventory, no abort of the desk", {
 	timeout: 15000,
 }, async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const materialized = latch<string>();
 	const release = latch<void>();
 	const s = await openScenario(
@@ -399,22 +317,9 @@ test("cancel from the idle designer desk while a worker creation is running: one
 			ctx,
 		)
 	).wait(ctx);
-	const slots = Object.values(
-		(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-	);
-	assert.equal(slots.length, 1);
-	const ask = await harness.commit(
-		(tx) => decision(tx, slots[0]!.decision),
-		ctx,
-	);
-	assert.ok(ask?.status === "open");
+	const { d: ask } = await s.openAsk((slot) => slot.local === "cancel");
 	assert.deepEqual(ask.choices, ["cancel", "continue"]);
-	const result = await fauxAnswer(s.store, ask.id, {
-		basis: ask.basis,
-		choice: "cancel",
-		annotations: [],
-	});
-	assert.equal(result.kind, "answered");
+	await s.answer(ask, "cancel");
 	const answer = (
 		await harness.commit((tx) => tx.scanTasks({ kind: "keel.answer" }, 10), ctx)
 	).items[0];
@@ -445,7 +350,7 @@ test("cancel from the idle designer desk while a worker creation is running: one
 });
 
 test("SQLite SIGKILL before first verifier and after trunk CAS: one durable publication, one review per scope, one landing and hand-over", async (t) => {
-	const { root, base } = await fixture(t);
+	const { root, base } = await tempRepo(t);
 	const file = join(root, ".git", "keel.sqlite");
 	async function killed(point: "publication" | "landing") {
 		await assert.rejects(

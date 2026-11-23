@@ -39,7 +39,8 @@ export async function openScenario(
 		turn,
 		settle,
 		asks,
-		readAsk,
+		openAsk,
+		submit,
 		answer,
 	} = await openScriptedWorkflow(cwd, storage, first, runner, now);
 	const { harness } = store;
@@ -250,11 +251,10 @@ export async function openScenario(
 			0,
 			"all scripted agent turns ran",
 		);
-		const open = await asks();
-		assert.equal(open.length, 1, "only hand-over needs the owner");
-		const handOver = open[0]!;
-		assert.equal(handOver.lane, "verify");
-		const { d, text: rendered } = await readAsk(handOver);
+		assert.equal((await asks()).length, 1, "only hand-over needs the owner");
+		const { d, text: rendered } = await openAsk(
+			(slot) => slot.lane === "verify",
+		);
 		assert.deepEqual([...d.choices].sort(), ["accept", "reject"]);
 		assert.match(rendered, /no action/i);
 		assert.match(rendered, /no other reader needs a change/);
@@ -276,6 +276,8 @@ export async function openScenario(
 		settle,
 		assertHistory,
 		accept,
-		start: () => root.submit({ type: "input", content: prompt }, ctx),
+		start: () => submit(prompt),
+		openAsk,
+		answer,
 	};
 }

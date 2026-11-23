@@ -3,32 +3,27 @@ import { access, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { decision } from "tau";
-import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import { MemoryStorage } from "tau/durable";
 import {
 	type FauxResponseStep,
 	fauxAssistantMessage,
 	fauxToolCall,
 } from "tau/testing";
-import { ProjectState } from "../src/kernel/records.ts";
-import { stateDoc } from "../src/kernel/state.ts";
 import {
 	arenaFrame,
 	candidateResponse,
 	judgeReport,
 	seats,
 } from "./fixtures/arena-script.ts";
-import { openScriptedWorkflow } from "./fixtures/scenario.ts";
-import { fixture } from "./repo/fixture.ts";
+import { openScriptedWorkflow } from "./fixtures/kernel.ts";
+import { tempRepo } from "./fixtures/repo.ts";
 
 test("protocol-first prototypes use separate scratch directories and put the comparison and winning rider in the node's review", {
 	timeout: 5000,
 }, async (t) => {
-	const { root } = await fixture(t);
+	const { root } = await tempRepo(t);
 	const s = await openScriptedWorkflow(root, new MemoryStorage(), true);
-	const { harness } = s.store;
-	t.after(() => harness.close(ctx));
+	t.after(s.close);
 	const paths = new Map<string, string>();
 	t.after(async () => {
 		for (const path of paths.values())
@@ -142,10 +137,7 @@ test("protocol-first prototypes use separate scratch directories and put the com
 		}),
 		s.turn("designer", "answer_challenger", { dispositions: [] }),
 	]);
-	await s.root.submit(
-		{ type: "input", content: "Find the smaller representation" },
-		ctx,
-	);
+	await s.submit("Find the smaller representation");
 	await s.settle();
 	assert.equal(paths.size, 2);
 	assert.equal(new Set(paths.values()).size, 2);
@@ -156,13 +148,7 @@ test("protocol-first prototypes use separate scratch directories and put the com
 		assert.equal(await readFile(join(path, "specimen"), "utf8"), variant);
 	}
 	await assert.rejects(access(join(root, "specimen")), { code: "ENOENT" });
-	const open = (await harness.snapshot(stateDoc(ProjectState), ctx))?.asks;
-	const slot = Object.values(open ?? {})[0];
-	assert.ok(slot && slot.local === "mandate/1");
-	const ask = await harness.commit((tx) => decision(tx, slot.decision), ctx);
-	assert.ok(ask?.status === "open");
-	const basis = await harness.commit((tx) => tx.entry(ask.basis), ctx);
-	const text = (basis?.data as { text: string }).text;
+	const { text } = await s.openAsk((slot) => slot.local === "mandate/1");
 	assert.match(
 		text,
 		/## Evidence \(does not bind\)[\s\S]*representation[\s\S]*The plain specimen is smaller under the written rule/,

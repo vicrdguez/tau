@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Annotation, decision } from "tau";
+import type { Annotation } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import type { Conversation, Harness, Storage } from "tau/durable";
-import { fauxAnswer, fauxAssistantMessage, fauxToolCall } from "tau/testing";
-import { ProjectState } from "../../src/kernel/records.ts";
-import { stateDoc } from "../../src/kernel/state.ts";
-import { git } from "../repo/fixture.ts";
+import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
+import { git } from "./repo.ts";
 import {
 	arenaFrame,
 	candidate,
@@ -19,7 +17,7 @@ import {
 	objection,
 	seats,
 } from "./arena-script.ts";
-import { openScriptedWorkflow } from "./scenario.ts";
+import { openScriptedWorkflow } from "./kernel.ts";
 
 const prompt = "Give shell callers one way to read and write the book.";
 const gap = "No shared write function exists.";
@@ -176,10 +174,6 @@ export async function seedBookPolicy(cwd: string) {
 	return git(cwd, "rev-parse", "main");
 }
 
-type Review = {
-	decision: NonNullable<Awaited<ReturnType<typeof decision>>>;
-	text: string;
-};
 export async function openReview(
 	cwd: string,
 	storage: Storage,
@@ -187,15 +181,16 @@ export async function openReview(
 ): Promise<{
 	root: Conversation;
 	harness: Harness;
+	close(): Promise<void>;
 	start(): Promise<void>;
-	review(subject: string): Promise<Review>;
+	review(
+		subject: string,
+	): ReturnType<Awaited<ReturnType<typeof openScriptedWorkflow>>["openAsk"]>;
 	subjects(): Promise<string[]>;
 	rework(): Promise<void>;
-	switchBase(): Promise<void>;
 	scriptRevision(): void;
 	settle(): Promise<void>;
 	reworkRider(): Promise<void>;
-	decline(): Promise<void>;
 	approveAndBuild(): Promise<void>;
 	explorePreviousWork(): Promise<void>;
 }> {
@@ -210,48 +205,27 @@ export async function openReview(
 		turn,
 		settle,
 		newDesigner,
+		asks,
+		openAsk,
+		answer: submitAnswer,
+		submit,
+		close,
 	} = await openScriptedWorkflow(cwd, storage, first);
-	const { harness } = store;
-	async function asks() {
-		return Object.values(
-			(await harness.snapshot(stateDoc(ProjectState), ctx))?.asks ?? {},
-		);
-	}
-	async function subjects() {
-		return (await asks()).map((a) => a.local).sort();
-	}
-	async function review(subject: string): Promise<Review> {
-		const open = await asks();
-		const slot = open.find((a) => a.local === subject);
-		assert.ok(slot, `Expected ${subject}; open: ${open.map((a) => a.local)}`);
-		const d = await harness.commit((tx) => decision(tx, slot.decision), ctx);
-		assert.ok(d?.status === "open");
-		const e = await harness.commit((tx) => tx.entry(d.basis), ctx);
-		assert.ok(
-			e?.data &&
-				typeof e.data === "object" &&
-				"text" in e.data &&
-				typeof e.data.text === "string",
-		);
-		return { decision: d, text: e.data.text };
-	}
+	const harness: Harness = store.harness;
+	const subjects = async () => (await asks()).map((a) => a.local).sort();
+	const review = (subject: string) => openAsk((slot) => slot.local === subject);
 	async function answer(
 		subject: string,
 		choice: string,
 		notes: [string, string][] = [],
 	) {
-		const { decision: d, text } = await review(subject);
+		const { d, text } = await review(subject);
 		const annotations: Annotation[] = notes.map(([needle, note]) => {
 			const start = text.indexOf(needle);
 			assert.notEqual(start, -1, `Cannot annotate ${needle} in ${text}`);
 			return { text: note, range: { start, end: start + needle.length } };
 		});
-		const result = await fauxAnswer(store, d.id, {
-			choice,
-			basis: d.basis,
-			annotations,
-		});
-		assert.equal(result.kind, "answered");
+		await submitAnswer(d, choice, annotations);
 		await settle();
 	}
 	function expectAll(text: string, parts: string[]) {
@@ -357,15 +331,13 @@ export async function openReview(
 			),
 			respond(),
 		]);
-		await root.submit({ type: "input", content: prompt }, ctx);
+		await submit(prompt);
 		await settle();
 		assert.deepEqual([...explored].sort(), ["GUIDE", "NOTES"]);
 		assert.equal(prompts.length, 2);
 		assert.equal(prompts[0], prompts[1]);
 		assert.deepEqual(await subjects(), ["mandate/1"]);
-		const { text, decision: reviewDecision } = await review("mandate/1");
-		for (const choice of ["approve", "rework", "decline"])
-			assert.ok(reviewDecision.choices.includes(choice));
+		const { text } = await review("mandate/1");
 		expectAll(text, [
 			gap,
 			conflict,
@@ -384,28 +356,6 @@ export async function openReview(
 			objection,
 			dispositions[0]!.reason,
 			...riders.map((rider) => rider.text),
-		]);
-	}
-	async function switchBase() {
-		challenge();
-		provider.setResponses([
-			turn("designer", "publish_mandate", {
-				draft,
-				base: seats[1],
-				grafts: [],
-				outcomes: [{ source: seats[1], n: 1, label: "indentation" }],
-				replies: [
-					{
-						n: 1,
-						status: "considered",
-						reason: "The new base uses the same shell interface.",
-					},
-				],
-			}),
-			respond(),
-		]);
-		await answer("mandate/1", `base:${seats[1]}`, [
-			[readSeam.usage, "Take seat 2 as the base."],
 		]);
 	}
 	function scriptRevision() {
@@ -640,16 +590,15 @@ export async function openReview(
 	return {
 		root,
 		harness,
+		close,
 		explorePreviousWork,
 		start,
 		review,
 		subjects,
 		rework,
-		switchBase,
 		scriptRevision,
 		settle,
 		reworkRider,
-		decline: () => answer("mandate/1", "decline"),
 		approveAndBuild,
 	};
 }

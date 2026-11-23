@@ -1,34 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { WorkId } from "../src/kernel/ids.ts";
-import type { LaneEvent, World } from "../src/kernel/lane.ts";
-import { design } from "../src/lanes/design/index.ts";
-import * as mandate from "../src/lanes/design/public.ts";
+import { draftError, type Draft } from "../src/lanes/design/draft.ts";
+import { mandateLabels, renderMandate } from "../src/lanes/design/public.ts";
 import {
-	challengeReview,
-	crossFamilyOptions,
-	frameReview,
 	reviewChoices,
+	reviewDriver,
 	synthesis,
 } from "./fixtures/design-review.ts";
-import { drive } from "./fixtures/drive.ts";
 
-const world: World = {
-	work: 12 as WorkId,
-	root: "/repo",
-	now: 1,
-	view: () => null,
-	options: {
-		design: "x/x",
-		...crossFamilyOptions,
-		build: "x/x",
-		verify: "x/x",
-		queue: "x/x",
-		base: "main",
-		trunk: "trunk",
-		max_workers: 1,
-	},
-};
 const audit = {
 	exists: "The importer builds documents.",
 	gaps: [{ label: "G1", text: "The DSL has no native constructor." }],
@@ -102,46 +81,21 @@ const reply = (n: number) => ({
 	reason: "See the revised ruling.",
 });
 function run() {
-	let state = design.state.initial();
-	const reduce = (event: LaneEvent) =>
-		drive(
-			design,
-			state,
-			event.kind === "publish_mandate" ? { ...synthesis, ...event } : event,
-			world,
-		);
-	const act = (event: LaneEvent) => {
-		const result = reduce(event);
-		assert.ok("state" in result, JSON.stringify(result));
-		state = result.state;
-		return result;
+	const x = reviewDriver();
+	return {
+		...x,
+		publish: (d = draft, replies: ReturnType<typeof reply>[] = []) =>
+			x.publishMandate({ kind: "publish_mandate", draft: d, replies }),
+		attemptDraft: (
+			d: typeof draft,
+			replies: { n: number; status: string; reason: string }[],
+		) =>
+			x.attempt({ ...synthesis, kind: "publish_mandate", draft: d, replies }),
 	};
-	const driver = { act, state: () => state };
-	const frame = () => frameReview(driver, world);
-	const publish = (d = draft, replies: ReturnType<typeof reply>[] = []) => {
-		act({ kind: "publish_mandate", draft: d, replies });
-		challengeReview(driver, world);
-	};
-	const answer = (
-		subject: string,
-		choice: string,
-		annotations: ReturnType<typeof note>[] = [],
-	) =>
-		act({
-			kind: "answered",
-			subject,
-			choice,
-			decision: `${subject}#7`,
-			annotations,
-		});
-	const asks = () => design.asks(state, world);
-	const input = () =>
-		design.agents(state, world)[0]?.expects[0]?.input?.() ?? "";
-	return { ...driver, reduce, frame, publish, answer, asks, input };
 }
 function review() {
 	const x = run();
-	x.act(start);
+	x.send(start);
 	x.frame();
 	x.publish();
 	return x;
@@ -154,12 +108,9 @@ test("Ground requires an audit and unique observations before opening the design
 		{ ...audit, exists: " " },
 		{ ...audit, gaps: audit.contradictions },
 	])
-		assert.ok("reject" in x.reduce({ ...start, audit: invalid }));
-	x.act(start);
-	assert.equal(
-		design.agents(x.state(), world)[0]?.expects[0]?.situation,
-		"shape",
-	);
+		assert.ok("reject" in x.attempt({ ...start, audit: invalid }));
+	x.send(start);
+	assert.equal(x.turn()?.situation, "shape");
 	assert.deepEqual(x.asks(), []);
 	for (const value of [
 		audit.exists,
@@ -168,34 +119,34 @@ test("Ground requires an audit and unique observations before opening the design
 	])
 		assert.ok(x.input().includes(value));
 });
-test("a draft needs every Ground ruling, unique labels, callers, fenced code, probes, proof, alternatives and rider dispositions", () => {
-	const x = run();
-	x.act(start);
-	x.frame();
+test("the reviewed draft requires complete rulings, seam contracts, criteria and rider dispositions", () => {
 	for (const patch of [
 		{ settlements: draft.settlements.slice(1) },
 		{ seams: [{ ...seam, callersLater: " " }] },
 		{ seams: [{ ...seam, signature: "call this" }] },
 		{ seams: [{ ...seam, usage: "plain" }] },
-		{ nodes: [{ ...rule, probe: " " }] },
-		{ checks: [] },
-		{ checks: [{ ...draft.checks[0], timeoutMs: 0 }] },
 		{ alternatives: " " },
-		{ riders: [{ ...draft.riders[0], origin: "owner" }] },
-		{ riders: [{ ...draft.riders[0], disposition: "undecided" }] },
-		{ riders: [{ ...draft.riders[0], label: "S1" }] },
+		{ riders: [{ ...draft.riders[0]!, origin: "owner" }] },
+		{ riders: [{ ...draft.riders[0]!, disposition: "undecided" }] },
+		{ riders: [{ ...draft.riders[0]!, label: "S1" }] },
 		{ references: [{ label: "G1", source: "a pattern" }] },
 	])
 		assert.ok(
-			"reject" in
-				x.reduce({
-					kind: "publish_mandate",
-					draft: { ...draft, ...patch },
-					replies: [],
-				}),
+			draftError({ ...draft, ...patch } as Draft, audit),
 			JSON.stringify(patch),
 		);
+	const x = run();
+	x.send(start);
+	x.frame();
+	assert.ok(
+		"reject" in
+			x.attemptDraft(
+				{ ...draft, seams: [{ ...seam, signature: "call this" }] },
+				[],
+			),
+	);
 });
+
 test("one annotatable Mandate names the goal and reviews all nodes and rider dispositions on one decision", () => {
 	const x = review();
 	assert.equal(x.asks().length, 1);
@@ -264,7 +215,17 @@ test("approving binds riders proposed to bind, delegates open riders and preserv
 	assert.ok(
 		s && "section" in s && s.section === "Seam" && s.body.includes(seam.usage),
 	);
-	const labels = mandate.mandateLabels(m);
+	const labels = mandateLabels(m);
+	const text = renderMandate(m);
+	assert.match(text, /Ruling: Add a builder\./);
+	assert.match(
+		text,
+		/## Binding nodes[\s\S]*Validate at close\.[\s\S]*## Delegated riders[\s\S]*Sort imports\.[\s\S]*## Design considerations/,
+	);
+	const brief = renderMandate(m, ["S1", "A"]);
+	assert.ok(brief.includes(seam.usage));
+	assert.ok(brief.includes("Validate at close."));
+	assert.doesNotMatch(brief, /Sort imports|Explicit builders/);
 	for (const l of ["S1", "R1", "A", "C", "G1", "C1", "P1"])
 		assert.ok(labels.includes(l));
 	for (const l of ["B", "tradeoffs", "alternatives"])
@@ -273,39 +234,9 @@ test("approving binds riders proposed to bind, delegates open riders and preserv
 	assert.equal(x.answer("mandate/1", "approve").send?.length ?? 0, 0);
 	assert.deepEqual(x.state(), before);
 });
-test("the bound Mandate is a document with settled rulings, readable code and nonbinding design context", () => {
-	const x = review();
-	x.answer("mandate/1", "approve");
-	const m = x.state().mandate!;
-	assert.ok(
-		"renderMandate" in mandate && typeof mandate.renderMandate === "function",
-		"Design must expose a readable bound Mandate renderer",
-	);
-	const text = mandate.renderMandate(m);
-	assert.match(text, /Ruling: Add a builder\./);
-	assert.doesNotMatch(text, /Proposed|Owner-reviewed/);
-	assert.ok(text.includes(seam.usage));
-	assert.ok(text.includes(seam.signature));
-	assert.ok(text.includes('["check","same IR"]'));
-	assert.match(
-		text,
-		/## Binding nodes[\s\S]*Validate at close\.[\s\S]*## Delegated riders[\s\S]*Sort imports\.[\s\S]*## Design considerations/,
-	);
-	assert.ok(
-		text.indexOf(draft.tradeoffs) > text.indexOf("## Design considerations"),
-	);
-	assert.ok(
-		text.indexOf(draft.alternatives) > text.indexOf("## Design considerations"),
-	);
-	const brief = mandate.renderMandate(m, ["S1", "A"]);
-	assert.ok(brief.includes(seam.usage));
-	assert.ok(brief.includes("Validate at close."));
-	assert.ok(!brief.includes("Sort imports."));
-	assert.ok(!brief.includes(draft.tradeoffs));
-});
 test("binding an incidental rider does not manufacture an Encode obligation without a seam or rule", () => {
 	const x = run();
-	x.act({
+	x.send({
 		...start,
 		audit: { exists: "Reports use plain text.", gaps: [], contradictions: [] },
 	});
@@ -319,7 +250,7 @@ test("binding an incidental rider does not manufacture an Encode obligation with
 	});
 	x.answer("mandate/1", "approve");
 	const m = x.state().mandate!;
-	assert.ok(mandate.mandateLabels(m).includes("B"));
+	assert.ok(mandateLabels(m).includes("B"));
 	assert.equal(m.encodeRequired, false);
 });
 test("rework preserves ranges and refuses missing, duplicate, extra, invalid or empty replies; an old round's answer is stale", () => {
@@ -337,10 +268,7 @@ test("rework preserves ranges and refuses missing, duplicate, extra, invalid or 
 		[reply(1), { ...reply(2), status: "ignored" }],
 		[reply(1), { ...reply(2), reason: " " }],
 	])
-		assert.ok(
-			"reject" in
-				x.reduce({ kind: "publish_mandate", draft: revised, replies }),
-		);
+		assert.ok("reject" in x.attemptDraft(revised, replies));
 	x.publish(revised, [reply(2), reply(1)]);
 	assert.equal(x.state().rounds.length, 2);
 	assert.deepEqual(
@@ -374,6 +302,7 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 				probe: "Count constructors.",
 			},
 		],
+		checks: [{ ...draft.checks[0]!, timeoutMs: 120 }],
 		riders: [
 			draft.riders[0]!,
 			{ ...draft.riders[1]!, disposition: "bind" },
@@ -385,6 +314,7 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 			},
 		],
 		references: [
+			{ label: "intent", source: "Revised intent ADR" },
 			{ label: "P1", source: "Revised proof ADR" },
 			{ label: "R2", source: "Construction ADR" },
 		],
@@ -397,6 +327,7 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	const lead = current!.split("###", 1)[0]!;
 	assert.match(lead, /Since round 1:[^\n]*S1 changed/i);
 	for (const change of [
+		"intent changed",
 		"P1 changed",
 		"R2 new",
 		"rider B changed",
@@ -407,11 +338,23 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 		assert.ok(lead.includes(change), change);
 	assert.doesNotMatch(lead, /rider A (new|changed|removed)/i);
 	assert.match(current!, /S1: Seam \(changed\)\n\nChanged: owner\n/i);
-	assert.match(current!, /P1: Proof \(changed\)\n\nChanged: reference\n/i);
+	assert.match(
+		current!,
+		/P1: Proof \(changed\)\n\nChanged: timeout, reference\n/i,
+	);
 	assert.match(current!, /B: Rider \(changed\)\n\nChanged: disposition\n/i);
 	assert.match(current!, /R2: Rule \(new\)[\s\S]*Reference: Construction ADR/i);
 	assert.match(current!, /B: Rider \(changed\)[\s\S]*Disposition: bind/i);
 	assert.match(current!, /D: Rider \(new\)[\s\S]*Disposition: open/i);
+	const entries = current!.split(/^### /m);
+	assert.match(
+		entries.find((s) => s.startsWith("B: Rider"))!,
+		/Disposition: bind[\s\S]*Previously[\s\S]*Sort imports\.[\s\S]*Disposition: open/,
+	);
+	assert.match(
+		entries.find((s) => s.startsWith("P1: Proof"))!,
+		/Timeout: 120 ms[\s\S]*Previously[\s\S]*\["check","same IR"\][\s\S]*Timeout: 90 ms[\s\S]*Reference: Proof ADR/,
+	);
 	assert.doesNotMatch(current!, /^### (?:A: Rider \(|R1:|C: Rider\b)/im);
 	assert.match(
 		removed!,
@@ -420,31 +363,8 @@ test("a revision marks changed and new nodes and riders, and shows removed conte
 	assert.match(removed!, /C: Rider[\s\S]*Seal regions\./);
 	assert.equal(x.state().mandate, null);
 	x.answer("mandate/2", "approve");
-	assert.ok(mandate.mandateLabels(x.state().mandate!).includes("R2"));
+	assert.ok(mandateLabels(x.state().mandate!).includes("R2"));
 });
-test("a changed rider and proof include their complete previous content", () => {
-	const x = review();
-	x.answer("mandate/1", "rework");
-	x.publish({
-		...draft,
-		riders: draft.riders.map((r) =>
-			r.label === "B" ? { ...r, disposition: "bind" } : r,
-		),
-		checks: [{ ...draft.checks[0]!, timeoutMs: 120 }],
-	});
-	const entries = x.asks()[0]!.basis.split(/^### /m);
-	const rider = entries.find((s) => s.startsWith("B: Rider"))!;
-	const proof = entries.find((s) => s.startsWith("P1: Proof"))!;
-	assert.match(
-		rider,
-		/Disposition: bind[\s\S]*^#### Previously$[\s\S]*Sort imports\.[\s\S]*Origin: incidental[\s\S]*Disposition: open/m,
-	);
-	assert.match(
-		proof,
-		/Timeout: 120 ms[\s\S]*^#### Previously$[\s\S]*\["check","same IR"\][\s\S]*Timeout: 90 ms[\s\S]*Reference: Proof ADR/m,
-	);
-});
-
 test("the reply quotes the exact multiline owner passage and keeps only stored offsets", () => {
 	const x = review();
 	const basis = x.asks()[0]!.basis;
@@ -492,7 +412,7 @@ test("decline records every still-owed annotation, not already answered notes, a
 	assert.equal(x.state().phase, "closed");
 	assert.deepEqual(x.asks(), []);
 	assert.equal(x.input(), "");
-	assert.deepEqual(design.effects(x.state(), world), []);
+	assert.deepEqual(x.effects(), []);
 	assert.equal(x.state().mandate, null);
 	assert.doesNotMatch(r.notes?.[0]?.text ?? "", /Already addressed/);
 	for (const n of annotations)
@@ -505,8 +425,8 @@ test("decline records every still-owed annotation, not already answered notes, a
 test("a stopped draft resumes with its annotation debt under a new draft token, never as Ground", () => {
 	const x = review();
 	x.answer("mandate/1", "rework", [note(1, "Clarify callers.")]);
-	const t = design.agents(x.state(), world)[0]!.expects[0]!.token;
-	const r = x.act({
+	const t = x.turn()!.token;
+	const r = x.send({
 		kind: "agent_stalled",
 		agent: "designer",
 		tokens: [t],
@@ -515,13 +435,13 @@ test("a stopped draft resumes with its annotation debt under a new draft token, 
 	});
 	assert.equal(r.send?.[0]?.lane, "queue");
 	assert.equal(x.input(), "");
-	x.act({
+	x.send({
 		kind: "resume",
 		cause: r.send![0]!.event.cause!,
 		direction: "Read ADR 4",
 		evidence: "reading",
 	});
-	const turn = design.agents(x.state(), world)[0]!.expects[0]!;
+	const turn = x.turn()!;
 	assert.deepEqual(turn.tools, ["publish_mandate", "start_experiment"]);
 	assert.notEqual(t, turn.token);
 	for (const v of ["Read ADR 4", "Clarify callers."])

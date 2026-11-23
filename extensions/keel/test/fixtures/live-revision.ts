@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
-import { decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
-import type { Harness, JsonObject, Storage } from "tau/durable";
-import {
-	type FauxResponseStep,
-	fauxAnswer,
-	fauxAssistantMessage,
-} from "tau/testing";
-import { ProjectState, WorkState } from "../../src/kernel/records.ts";
+import type { JsonObject, Storage } from "tau/durable";
+import { type FauxResponseStep, fauxAssistantMessage } from "tau/testing";
 import { stateDoc } from "../../src/kernel/state.ts";
 import { design } from "../../src/lanes/design/index.ts";
 import { options } from "../../src/roles/index.ts";
 import { runRepoEffect } from "../../src/workflow.ts";
-import { git } from "../repo/fixture.ts";
+import { git } from "./repo.ts";
 import { latch } from "../toy.ts";
 import {
 	arenaFrame,
@@ -20,7 +14,7 @@ import {
 	judgeReport,
 	seats,
 } from "./arena-script.ts";
-import { openScriptedWorkflow } from "./scenario.ts";
+import { openScriptedWorkflow } from "./kernel.ts";
 
 const intent = "Write a book export and an independent statistics file";
 const report =
@@ -67,27 +61,7 @@ export async function openLiveRevision(
 	cwd: string,
 	storage: Storage,
 	first: boolean,
-): Promise<{
-	harness: Harness;
-	build: string;
-	desk(): Promise<
-		Readonly<ReturnType<typeof design.state.initial>> | undefined
-	>;
-	asks(): Promise<unknown[]>;
-	review(prefix: string): Promise<{
-		decision: NonNullable<Awaited<ReturnType<typeof decision>>>;
-		text: string;
-	}>;
-	answer(
-		prefix: string,
-		choice: string,
-		annotations?: { text: string }[],
-	): Promise<void>;
-	permitStats(): void;
-	openTriage(): Promise<void>;
-	propose(): Promise<void>;
-	finish(): Promise<void>;
-}> {
+) {
 	const statsGate = latch<void>();
 	const investigationPrompt = latch<void>();
 	const s = await openScriptedWorkflow(
@@ -105,7 +79,7 @@ export async function openLiveRevision(
 			return runRepoEffect(input, context, owner);
 		},
 	);
-	const harness: Harness = s.store.harness;
+	const { harness } = s.store;
 	const work = s.root.id;
 	const build = `keel/${work}/build`;
 	if (first)
@@ -118,40 +92,18 @@ export async function openLiveRevision(
 				}),
 			ctx,
 		);
-	const project = () => harness.snapshot(stateDoc(ProjectState), ctx);
 	const desk = () => {
 		assert.equal(design.state.scope, "conversation");
 		return harness.snapshot(stateDoc(design.state), work, ctx);
 	};
-	async function asks() {
-		return Object.values((await project())?.asks ?? {});
-	}
-	async function review(prefix: string) {
-		const matching = (await asks()).filter((a) => a.local.startsWith(prefix));
-		assert.equal(matching.length, 1, `one ${prefix} decision`);
-		const d = await harness.commit(
-			(tx) => decision(tx, matching[0]!.decision),
-			ctx,
-		);
-		assert.ok(d?.status === "open");
-		const basis = await harness.commit((tx) => tx.entry(d.basis), ctx);
-		assert.ok(
-			basis?.data && typeof basis.data === "object" && "text" in basis.data,
-		);
-		return { decision: d, text: String(basis.data.text) };
-	}
+	const review = (prefix: string) =>
+		s.openAsk((a) => a.local.startsWith(prefix));
 	async function answer(
 		prefix: string,
 		choice: string,
 		annotations: { text: string }[] = [],
 	) {
-		const { decision: d } = await review(prefix);
-		const result = await fauxAnswer(s.store, d.id, {
-			basis: d.basis,
-			choice,
-			annotations,
-		});
-		assert.equal(result.kind, "answered");
+		await s.answer((await review(prefix)).d, choice, annotations);
 		await s.settle();
 	}
 	const brief = (item: typeof writer, label: string, fences = item.id) =>
@@ -228,7 +180,7 @@ export async function openLiveRevision(
 			}),
 			s.turn("designer", "answer_challenger", { dispositions: [] }),
 		]);
-		await s.root.submit({ type: "input", content: intent }, ctx);
+		await s.submit(intent);
 		await s.settle();
 		const point: Extract<FauxResponseStep, (...args: never[]) => unknown> = (
 			...args
@@ -407,12 +359,6 @@ export async function openLiveRevision(
 		for (const snippet of ["wire", seam.usage, revised.usage, report])
 			assert.ok(text.includes(snippet), text);
 		assert.doesNotMatch(text, /Emit a separate statistics file/);
-		const ledger = await harness.snapshot(stateDoc(WorkState), work, ctx);
-		assert.equal(
-			Object.values(ledger?.agents ?? {}).filter((a) => a.role === "designer")
-				.length,
-			1,
-		);
 		const results = (await s.root.entries({}, 100, undefined, ctx)).items
 			.flatMap((e) => e.model ?? [])
 			.filter(
@@ -482,10 +428,11 @@ export async function openLiveRevision(
 		assert.equal(s.provider.getPendingResponseCount(), 0);
 	}
 	return {
-		harness,
 		build,
 		desk,
-		asks,
+		asks: s.asks,
+		close: s.close,
+		commit: s.commit,
 		review,
 		answer,
 		permitStats,

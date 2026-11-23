@@ -182,6 +182,18 @@ export async function openScriptedWorkflow(
 			return { slot, d, text: (basis?.data as { text: string }).text };
 		});
 	}
+	async function openAsk(
+		matches: (slot: ProjectState["asks"][string]) => boolean,
+	) {
+		const open = await asks();
+		const matching = open.filter(matches);
+		assert.equal(
+			matching.length,
+			1,
+			`open decisions: ${open.map((a) => a.local)}`,
+		);
+		return readAsk(matching[0]!);
+	}
 	const answer = async (
 		d: { id: DecisionId; basis: Parameters<typeof fauxAnswer>[2]["basis"] },
 		choice: string,
@@ -220,6 +232,7 @@ export async function openScriptedWorkflow(
 		commit,
 		asks,
 		readAsk,
+		openAsk,
 		answer,
 		send,
 		fact,
