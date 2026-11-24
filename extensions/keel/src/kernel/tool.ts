@@ -20,6 +20,7 @@ import {
 	workId,
 } from "./ids.ts";
 import type { Delivery, LaneEvent, Result } from "./lane.ts";
+import { type Measure, record } from "./metrics.ts";
 import { type Address, BindingState, ReceiptState } from "./records.ts";
 import { RejectedSeed } from "./routing.ts";
 import { stateDoc } from "./state.ts";
@@ -391,8 +392,10 @@ export function wrapTool(
 		}, context);
 		if (first.done) return first.done;
 		const { event, terminate } = await prepare(first.self, first.view);
-		return api
+		let applied: { address: Address; measures: readonly Measure[] } | undefined;
+		const reply = await api
 			.commit(async (tx) => {
+				applied = undefined;
 				const doc = await tx.doc(receipt, api.taskId);
 				// The transcript cutoff is immutable, but a token, binding or cwd may
 				// have changed during observe. Never apply facts read for another agent.
@@ -415,9 +418,10 @@ export function wrapTool(
 				if (targetScope === "conversation" && self.work === null)
 					return finish(doc, { reject: "This tool needs a bound work" }, false);
 				const work = targetScope === "session" ? null : self.work;
+				const address = { lane: spec.lane, work };
 				const result = await transact(
 					tx,
-					{ lane: spec.lane, work, event },
+					{ ...address, event },
 					api.now(),
 					self.work,
 				);
@@ -438,6 +442,8 @@ export function wrapTool(
 					)
 						throw new Error("Adopting reduction must declare its designer");
 				}
+				if (!("reject" in result))
+					applied = { address, measures: result.measures };
 				return finish(doc, result, terminate);
 			}, context)
 			.catch((error) => {
@@ -452,6 +458,8 @@ export function wrapTool(
 					context,
 				);
 			});
+		if (applied) record(context, applied.measures, applied.address);
+		return reply;
 	};
 	return { roles: spec.roles, tool: spec.build(publish) };
 }

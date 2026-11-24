@@ -604,6 +604,43 @@ test("a backlogged investigation opens on the current plan and Mandate, not thos
 	assert.match(input, /Round after posting/);
 	assert.doesNotMatch(input, /Compare both ledger balances/);
 });
+test("an investigation records its bounded class, not the finding evidence", () => {
+	for (const cls of [
+		"defect_in_scope",
+		"determined",
+		"sets_precedent",
+		"mandate_wrong",
+		"unapproved_pattern",
+		"no_action",
+	]) {
+		const q = queue();
+		const intake = {
+			...filing,
+			...(cls === "unapproved_pattern" && { pattern: "rounding pattern" }),
+		};
+		const filed = q.attempt(intake);
+		assert.ok(!("reject" in filed));
+		assert.deepEqual(filed.measures ?? [], []);
+		q.send(intake);
+		const report = q.investigation(
+			1,
+			cls,
+			cls === "no_action"
+				? { nodes: [], recommendation: "no_action" }
+				: cls === "unapproved_pattern"
+					? { recommendation: "bless" }
+					: {},
+		);
+		const classified = q.attempt(report);
+		assert.ok(!("reject" in classified), JSON.stringify(classified));
+		assert.deepEqual(classified.measures, [
+			{ name: "keel.finding", value: 1, attributes: { class: cls } },
+		]);
+		q.send(report);
+		assert.ok("reject" in q.attempt(report));
+	}
+});
+
 test("a defect goes to the coordinator without triage; determined work waits for build", () => {
 	for (const cls of ["defect_in_scope", "determined"]) {
 		const q = queue();

@@ -5,6 +5,7 @@ import {
 	type Ask,
 	type KernelEvent,
 	type LaneEvent,
+	type Measure,
 	type Message,
 	prose,
 	type Reduction,
@@ -366,6 +367,9 @@ export function classify(
 			reject: "A principle proposal goes to the owner as sets_precedent.",
 		};
 	const found = { ...f, investigation: i };
+	const measures: Measure[] = [
+		{ name: "keel.finding", value: 1, attributes: { class: i.classification } },
+	];
 	const work = f.intake.work;
 	if (i.classification === "no_action") {
 		if (
@@ -384,6 +388,7 @@ export function classify(
 		)?.landed;
 		return {
 			state: update(q, f, { ...found, ...close(`no action: ${i.evidence}`) }),
+			measures,
 			...(afterHandover && {
 				send: [
 					findingNote(
@@ -423,6 +428,7 @@ export function classify(
 		}
 		return {
 			state: update(q, f, { ...found, status: "defect", group: earlier.group }),
+			measures,
 			// Move the filer to the shared cause before releasing its provisional hold.
 			send: f.intake.blocking ? [hold(found, [], shared), release(found)] : [],
 		};
@@ -434,6 +440,7 @@ export function classify(
 			};
 		return {
 			state: update(q, f, { ...found, status: "defect", group: f.id }),
+			measures,
 			send: [plan(f, [found], reportText(found), null)],
 		};
 	}
@@ -457,6 +464,7 @@ export function classify(
 		state: update(state, first, {
 			basis: triageBasis(state, first, related, live),
 		}),
+		measures,
 		send:
 			live.active && i.classification === "mandate_wrong" && !f.intake.edgeCase
 				? [hold(found, i.nodes)]

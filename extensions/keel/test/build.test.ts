@@ -453,7 +453,16 @@ for (const outcome of ["occupied", "moved", "effect_failed"]) {
 								? { kind: outcome, path: "/foreign" }
 								: { kind: outcome, actual: sha },
 					};
-		b.send(fact);
+		assert.deepEqual(b.send(fact).measures, [
+			{
+				name: "keel.hold",
+				value: 1,
+				attributes: {
+					lane: "build",
+					cause: outcome === "effect_failed" ? "failed" : outcome,
+				},
+			},
+		]);
 		const [ask] = b.asks();
 		assert.equal(b.effects().length, 0);
 		assert.match(ask!.basis, /build\/fix reports:/);
@@ -521,14 +530,24 @@ for (const order of ["merge first", "move first"]) {
 test("a sibling merge at the wrong SHA or a failed review cannot explain a moved preparation", () => {
 	for (const kind of ["merged", "rework"]) {
 		const b = preparingBesidePublication();
-		b.done({ kind: "moved", actual: sha });
-		b.send({
+		assert.deepEqual(b.done({ kind: "moved", actual: sha }).measures ?? [], []);
+		const result = b.send({
 			kind,
 			item: "fix",
 			head: merged,
 			evidence: "conflict",
 			threads: [],
 		});
+		assert.deepEqual(
+			result.measures?.filter((m) => m.name === "keel.hold"),
+			[
+				{
+					name: "keel.hold",
+					value: 1,
+					attributes: { lane: "build", cause: "moved" },
+				},
+			],
+		);
 		assert.equal(b.asks().length, 1);
 		assert.match(b.asks()[0]!.basis, /build\/other reports:/);
 		assert.match(b.asks()[0]!.basis, new RegExp(sha));
@@ -872,8 +891,11 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 	const b = setup();
 	b.working();
 	b.send({ kind: "ruling", agent: b.agent("worker").key, ruling });
-	b.pub();
-	b.send({ kind: "merged", item: "fix", head: merged });
+	assert.deepEqual(b.pub().measures ?? [], []);
+	assert.deepEqual(
+		b.send({ kind: "merged", item: "fix", head: merged }).measures,
+		[{ name: "keel.item.attempts", value: 1, attributes: { kind: "build" } }],
+	);
 	const op = b.effect().spec.op as JsonObject;
 	assert.equal(op.kind, "remove");
 	assert.equal(op.merged, true);
@@ -888,12 +910,13 @@ test("merge authorizes cleanup; kept private files are reported and the coordina
 	assert.deepEqual(b.effects(), []);
 	b.resume("leave my notes intact");
 	assert.deepEqual(b.effect().spec.op, op);
-	assert.match(
-		JSON.stringify(
-			b.done({ kind: "kept", files: ["private"], reason: "untracked" }).notes,
-		),
-		/private/,
-	);
+	const cleanup = b.done({
+		kind: "kept",
+		files: ["private"],
+		reason: "untracked",
+	});
+	assert.deepEqual(cleanup.measures ?? [], []);
+	assert.match(JSON.stringify(cleanup.notes), /private/);
 	assert.match(b.request("coordinator").text, /leave my notes intact/);
 	const h = b.send({
 		kind: "handoff",

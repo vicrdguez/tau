@@ -13,6 +13,7 @@ import {
 	type EffectDecl,
 	type KernelEvent,
 	type Lane,
+	type Measure,
 	type Message,
 	type Reduction,
 	type StaticFacts,
@@ -280,11 +281,16 @@ function exposeHold(s: Build, w: World, h: Build["holds"][number]) {
 		direction: null,
 	});
 }
+function holdMeasure(
+	cause: Extract<Measure, { name: "keel.hold" }>["attributes"]["cause"],
+): Measure {
+	return { name: "keel.hold", value: 1, attributes: { lane: "build", cause } };
+}
 function hold(
 	s: Build,
 	w: World,
 	item: string | null,
-	obstruction: string,
+	obstruction: Parameters<typeof holdMeasure>[0] | "unattributed",
 	evidence: string,
 	actual: Sha | null = null,
 ): Accepted<Build> {
@@ -299,11 +305,15 @@ function hold(
 	s.holds.push(h);
 	return obstruction === "unattributed"
 		? { state: s }
-		: { state: s, send: [exposeHold(s, w, h)] };
+		: {
+				state: s,
+				send: [exposeHold(s, w, h)],
+				measures: [holdMeasure(obstruction)],
+			};
 }
 /** A merge can have written Git before Verify records its result. */
 function settleMovedPreparations(s: Build, w: World) {
-	return s.holds.flatMap((h) => {
+	const send = s.holds.flatMap((h) => {
 		if (h.obstruction !== "unattributed") return [];
 		const i = s.items.find((i) => i.id === h.item)!;
 		if (ourAdvance(s, i, h.actual)) {
@@ -315,6 +325,7 @@ function settleMovedPreparations(s: Build, w: World) {
 		h.obstruction = "moved";
 		return [exposeHold(s, w, h)];
 	});
+	return { send, measures: send.map(() => holdMeasure("moved")) };
 }
 function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
 	const state = s;
@@ -753,9 +764,9 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 			i.evidence = e.evidence;
 			i.threads = e.threads;
 			i.seq = ++s.seq;
-			const send = settleMovedPreparations(s, w);
+			const moved = settleMovedPreparations(s, w);
 			schedule(s, w);
-			return { state, send };
+			return { state, ...moved };
 		}
 		case "item_verified": {
 			const i = s.items.find((i) => i.id === e.item);
@@ -820,9 +831,21 @@ function reduce(s: Build, e: Event, w: World): Reduction<Build> {
 				);
 				s.findings = s.findings.filter((other) => other !== f);
 			}
-			send.push(...settleMovedPreparations(s, w));
+			const moved = settleMovedPreparations(s, w);
+			send.push(...moved.send);
 			schedule(s, w);
-			return { state, send };
+			return {
+				state,
+				send,
+				measures: [
+					{
+						name: "keel.item.attempts",
+						value: i.attempt,
+						attributes: { kind: i.kind },
+					},
+					...moved.measures,
+				],
+			};
 		}
 		case "handoff":
 			if (

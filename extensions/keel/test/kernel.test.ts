@@ -9,6 +9,7 @@ import {
 } from "tau/testing";
 import { agentKey, token, workId } from "../src/kernel/ids.ts";
 import { stateDoc } from "../src/kernel/state.ts";
+import { captureTelemetry } from "./fixtures/telemetry.ts";
 import { latch, Shared, toolTurn, toy } from "./toy.ts";
 
 async function setup(t: TestContext, opts?: Parameters<typeof toy>[0]) {
@@ -56,7 +57,8 @@ for (const stale of [false, true])
 			? "an answered decision cannot move a replacement situation"
 			: "duplicate answer continuations consume the slot once and number annotations",
 		async (t) => {
-			const x = await setup(t);
+			const { telemetry, spans, samples } = captureTelemetry();
+			const x = await setup(t, { telemetry });
 			await x.send("ask", { basis: "A" });
 			const d = await x.harness.commit(
 				(tx) => decision(tx, id(1, x.root.id)),
@@ -66,7 +68,7 @@ for (const stale of [false, true])
 			assert.equal(d.then.task, "keel.answer");
 			const a = await fauxAnswer(x.store, d.id, {
 				basis: d.basis,
-				choice: "accept",
+				choice: "base:seat_1",
 				annotations: [{ text: "one" }],
 			});
 			assert.equal(a.kind, "answered");
@@ -76,7 +78,7 @@ for (const stale of [false, true])
 					(tx) =>
 						tx.createTask(
 							x.k.tasks.answer,
-							{ decision: d.id, choice: "accept" },
+							{ decision: d.id, choice: "base:seat_1" },
 							{
 								ownership: { kind: "conversation" },
 								conversationId: x.root.id,
@@ -91,6 +93,34 @@ for (const stale of [false, true])
 			assert.equal(s.answers, stale ? 0 : 1);
 			if (stale) assert.equal(s.ask, "B");
 			else assert.deepEqual(JSON.parse(s.notes[0]!), [{ text: "one", n: 1 }]);
+			const answered = await x.harness.commit((tx) => decision(tx, d.id), ctx);
+			assert.equal(answered?.status, "answered");
+			assert.deepEqual(
+				samples.filter((m) => m.name === "keel.decision.wait"),
+				stale
+					? []
+					: [
+							{
+								kind: "histogram",
+								name: "keel.decision.wait",
+								unit: "ms",
+								value: answered.at - d.requestedAt,
+								attributes: { lane: "toy", choice: "base" },
+							},
+						],
+			);
+			assert.equal(
+				samples.filter((m) => m.name === "keel.work.started").length,
+				stale ? 0 : 1,
+			);
+			if (!stale)
+				assert.ok(
+					spans.some(
+						({ attributes }) =>
+							attributes["keel.lane"] === "toy" &&
+							attributes["keel.work"] === String(x.root.id),
+					),
+				);
 		},
 	);
 test("a plain owner message matching a choice does not answer the open decision", async (t) => {
@@ -169,6 +199,54 @@ test("one commit can ask, create a worker, and emit its note; only a later commi
 	await x.finish("keel.deliver");
 	assert.equal((await x.state()).publications, 1);
 });
+for (const refusal of [undefined, "chain", "seed"] as const)
+	test(`tool measures ${refusal ? `discard the ${refusal} refusal` : "survive adapter failure"}`, async (t) => {
+		const { telemetry, samples, spans } = captureTelemetry(!refusal);
+		const x = await setup(t, { telemetry });
+		x.provider.setResponses([
+			toolTurn("publish", refusal ? { refusal } : {}),
+			fauxAssistantMessage("done"),
+			fauxAssistantMessage("still done"),
+		]);
+		await x.send("agent");
+		x.harness.resume();
+		await x.finish("keel.deliver");
+		const [worker] = await x.agents();
+		assert.ok(worker);
+		const conv = await x.harness.conversation(worker, ctx);
+		assert.ok(conv);
+		await conv.waitForIdle(ctx);
+		const replies = (await conv.entries({}, 100, undefined, ctx)).items
+			.flatMap(({ model }) => model ?? [])
+			.filter((m) => m.role === "toolResult");
+		assert.deepEqual(
+			replies.map((r) => r.isError),
+			[!!refusal],
+		);
+		assert.equal((await x.state()).publications, refusal ? 0 : 1);
+		assert.deepEqual(
+			samples.filter((m) => m.name.startsWith("keel.")),
+			refusal
+				? []
+				: [
+						{
+							kind: "counter",
+							name: "keel.work.started",
+							unit: "{work}",
+							value: 1,
+							attributes: { route: "follow" },
+						},
+					],
+		);
+		if (!refusal)
+			assert.ok(
+				spans.some(
+					({ attributes }) =>
+						attributes["keel.lane"] === "toy" &&
+						attributes["keel.work"] === String(x.root.id),
+				),
+			);
+	});
 test("closing a token before its delivery prevents even the first input", async (t) => {
 	const x = await setup(t);
 	await x.send("agent");
@@ -499,7 +577,7 @@ test("a platform-faulted effect reports one failure and releases its running slo
 	const facts = (await x.state()).facts;
 	assert.equal(facts.length, 1);
 	assert.match(facts[0]!, /could not read effect result/);
-	assert.deepEqual(await x.send("claimed"), { reply: "false" });
+	assert.deepEqual(await x.send("claimed"), { reply: "false", measures: [] });
 });
 
 test("three failed effect attempts deliver one failure to the lane", async (t) => {
@@ -542,16 +620,17 @@ test("an effect runs once per key and records its result even after cancellation
 	});
 	await x.send("effect");
 	await x.send("effect");
-	assert.deepEqual(await x.send("claimed"), { reply: "false" });
+	assert.deepEqual(await x.send("claimed"), { reply: "false", measures: [] });
 	x.harness.resume();
 	await entered.promise;
-	assert.deepEqual(await x.send("claimed"), { reply: "true" });
+	assert.deepEqual(await x.send("claimed"), { reply: "true", measures: [] });
 	const other = await x.harness.createConversation(
 		{ ownership: { kind: "ownerless" } },
 		ctx,
 	);
 	assert.deepEqual(await x.deliver("toy", other.id, { kind: "claimed" }), {
 		reply: "false",
+		measures: [],
 	});
 	await x.send("cancel");
 	release.resolve();
@@ -560,5 +639,5 @@ test("an effect runs once per key and records its result even after cancellation
 	await x.finish("keel.effect");
 	assert.equal(runs, 1);
 	assert.deepEqual((await x.state()).facts, ["it happened"]);
-	assert.deepEqual(await x.send("claimed"), { reply: "false" });
+	assert.deepEqual(await x.send("claimed"), { reply: "false", measures: [] });
 });

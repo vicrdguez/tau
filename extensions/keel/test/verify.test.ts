@@ -633,6 +633,31 @@ test("Verify opens only the published checkout, renders the proof, brief, ruling
 		);
 	}
 });
+test("item review count includes only that item and appears on pass", () => {
+	const x = flow();
+	x.review("other-sha", [], "other");
+	x.fail();
+	x.review();
+	assert.deepEqual(x.fail().measures, [
+		{
+			name: "keel.verdict",
+			value: 1,
+			attributes: { scope: "item", outcome: "fail" },
+		},
+	]);
+	x.publish("fix", ["totals"]);
+	x.clean();
+	x.checkout();
+	assert.deepEqual(x.pass().measures, [
+		{
+			name: "keel.verdict",
+			value: 1,
+			attributes: { scope: "item", outcome: "pass" },
+		},
+		{ name: "keel.item.reviews", value: 2, attributes: {} },
+	]);
+});
+
 test("surviving two addressed fixes opens a fresh diagnosis, then a finding, then directed rework; resets the count", () => {
 	const x = flow();
 	x.review();
@@ -678,7 +703,7 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 	assert.match(request, /negative balance/);
 	assert.match(request, /Diagnoser only: inspect floats/);
 	assert.match(request, /Threads that survived two claimed fixes: totals/);
-	x.call(
+	const diagnosed = x.call(
 		{
 			kind: "diagnosis",
 			premise: "float is exact",
@@ -687,6 +712,13 @@ test("surviving two addressed fixes opens a fresh diagnosis, then a finding, the
 		},
 		"diagnoser",
 	);
+	assert.deepEqual(diagnosed.measures, [
+		{
+			name: "keel.hold",
+			value: 1,
+			attributes: { lane: "verify", cause: "nonconvergent" },
+		},
+	]);
 	const [ask] = x.asks();
 	assert.match(ask!.basis, /verify\/bug reports:/);
 	assert.match(ask!.basis, /Two claimed fixes failed on totals/);
@@ -867,6 +899,9 @@ test("item merges serialize against successive heads with Mandate checks; verifi
 		sha: "first-merged",
 		checks: [],
 	});
+	assert.deepEqual(merged.measures, [
+		{ name: "keel.integration", value: 1, attributes: { result: "merged" } },
+	]);
 	assert.deepEqual(merged.send?.find((m) => m.lane === "build")?.event, {
 		kind: "merged",
 		item: "bug",
@@ -902,6 +937,13 @@ for (const { phase, failure, evidence } of [
 		const op = x.effect(phase).op;
 		assert.deepEqual(op.checks, mandate.checks);
 		const r = x.done(phase, failure);
+		assert.deepEqual(r.measures, [
+			{
+				name: "keel.integration",
+				value: 1,
+				attributes: { result: failure.kind },
+			},
+		]);
 		const event = r.send?.find((m) => m.lane === "build")?.event;
 		assert.equal(event?.kind, "integration");
 		assert.equal(event?.inheritedTrunk, takingTrunk ? "base" : undefined);
@@ -934,6 +976,13 @@ test("a moved trunk gets a verifier on the exact prepared SHA before CAS; either
 		!x.effects().some((d) => (d.spec.op as LaneEvent)?.kind === "land"),
 	);
 	const r = x.fail();
+	assert.deepEqual(r.measures, [
+		{
+			name: "keel.verdict",
+			value: 1,
+			attributes: { scope: "landing", outcome: "fail" },
+		},
+	]);
 	assert.equal(r.send?.find((m) => m.lane === "build")?.event.head, "combined");
 	assert.equal(r.send?.find((m) => m.lane === "build")?.event.item, "full");
 	assert.ok(r.send?.some((m) => m.event.kind === "release_slot"));
@@ -947,14 +996,23 @@ test("a moved trunk gets a verifier on the exact prepared SHA before CAS; either
 	z.merged();
 	z.handoff();
 	z.checkout();
+	const full = z.fail();
+	assert.deepEqual(full.measures, [
+		{
+			name: "keel.verdict",
+			value: 1,
+			attributes: { scope: "full", outcome: "fail" },
+		},
+	]);
 	assert.equal(
-		z.fail().send?.find((m) => m.lane === "build")?.event.kind,
+		full.send?.find((m) => m.lane === "build")?.event.kind,
 		"rework",
 	);
 });
 test("changed and unchanged landings withdraw cancel confirmation and redirect to hand-over", () => {
 	for (const result of ["landed", "unchanged"]) {
-		const desk = laneDriver(design, world);
+		const clock = { ...world, now: 10 };
+		const desk = laneDriver(design, clock);
 		desk.send({
 			kind: "ground",
 			route: "follow",
@@ -967,20 +1025,44 @@ test("changed and unchanged landings withdraw cancel confirmation and redirect t
 		assert.ok(confirmation);
 		const x = flow();
 		x.full();
-		x.prepare();
+		x.take();
+		assert.deepEqual(
+			x.done("take_trunk", {
+				kind: "combined",
+				sha: "combined",
+				trunk: "base",
+				checks: [],
+			}).measures,
+			[
+				{
+					name: "keel.integration",
+					value: 1,
+					attributes: { result: "combined" },
+				},
+			],
+		);
+		x.clean();
 		if (result === "landed")
-			x.done("prepare_landing", { kind: "prepared", sha: "target" });
+			assert.deepEqual(
+				x.done("prepare_landing", { kind: "prepared", sha: "target" })
+					.measures ?? [],
+				[],
+			);
 		const recorded = x.done(result === "landed" ? "land" : "prepare_landing", {
 			kind: result,
 			sha: result === "landed" ? "target" : "base",
 		});
+		assert.deepEqual(recorded.measures, [
+			{ name: "keel.landing", value: 1, attributes: { result } },
+		]);
 		if (result === "unchanged") {
 			assert.ok(recorded.send?.some((m) => m.event.kind === "release_slot"));
 			assert.deepEqual(x.effects(), []);
 			assert.match(x.asks()[0]!.basis, /unchanged|no change/i);
 		}
 		for (const m of recorded.send ?? [])
-			if (m.lane === "design" && m.work === world.work) desk.send(m.event);
+			if (m.lane === "design" && m.work === world.work)
+				assert.deepEqual(desk.send(m.event).measures ?? [], []);
 		assert.deepEqual(desk.asks(), []);
 		const late = desk.send({
 			kind: "answered",
@@ -994,6 +1076,25 @@ test("changed and unchanged landings withdraw cancel confirmation and redirect t
 			"reject" in again ? again.reject : "",
 			/landed[\s\S]*hand-over/i,
 		);
+		const choice = result === "landed" ? "accept" : "reject";
+		const handedOver = x.apply({
+			kind: "answered",
+			subject: x.asks()[0]!.subject,
+			choice,
+			annotations:
+				choice === "reject" ? [{ n: 1, text: "Missing coverage." }] : [],
+		});
+		const close = handedOver.send?.find((m) => m.lane === "design");
+		assert.ok(close);
+		clock.now = 42;
+		assert.deepEqual(desk.send(close.event).measures, [
+			{
+				name: "keel.work.duration",
+				value: 32,
+				attributes: { outcome: choice === "accept" ? "accepted" : "rejected" },
+			},
+		]);
+		assert.deepEqual(desk.send(close.event).measures ?? [], []);
 	}
 });
 for (const result of [
@@ -1004,7 +1105,13 @@ for (const result of [
 		const x = flow();
 		x.publish();
 		const op = x.effect("checkout");
-		x.done("checkout", result as LaneEvent);
+		assert.deepEqual(x.done("checkout", result as LaneEvent).measures, [
+			{
+				name: "keel.hold",
+				value: 1,
+				attributes: { lane: "verify", cause: result.kind },
+			},
+		]);
 		assert.match(x.asks()[0]!.basis, /foreign/);
 		assert.ok(!x.effects().length);
 		x.resume();

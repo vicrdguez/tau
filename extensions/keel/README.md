@@ -133,6 +133,26 @@ Set four lane models in `provider/modelId` form. The defaults and overrides belo
 
 `sweep_minutes` is optional; clear it to turn the sweep off. `sweeper` selects the inspecting model independently of `investigator`; it defaults to the `queue` lane model.
 
+## Project metrics
+
+Keel records metrics in Tau after each relevant commit. Replaying a committed transition adds no samples. A crash between commit and recording can lose a sample. Keel does not record cost yet.
+
+| Metric | What it tells you |
+| --- | --- |
+| `keel.work.started` | How many works start on each Ground route. It counts only the first accepted Ground. |
+| `keel.work.duration` | How many milliseconds elapse between Ground and closure, by outcome. Works without a start time have no sample. |
+| `keel.mandate.rounds` | How many answered rounds a Mandate review takes, including the approval or decline. |
+| `keel.revision.rounds` | How many answered rounds a live revision review takes, including the approval or decline. |
+| `keel.arena.seat` | How often a seat succeeds or fails, by stage and pinned model. A run without receipts adds no seat samples. |
+| `keel.item.attempts` | How many build or Encode attempts an item takes to merge. |
+| `keel.verdict` | How many `item`, `full`, and `landing` verdicts pass or fail. |
+| `keel.item.reviews` | How many verdicts an item receives through its passing verdict. |
+| `keel.integration` | How often integration returns `merged`, `combined`, `conflict`, or `checks_failed`. |
+| `keel.landing` | How often landing advances trunk or leaves it unchanged. |
+| `keel.hold` | How often Design, Build, or Verify opens a holding decision, by cause. |
+| `keel.finding` | How many findings the investigator classifies in each class. |
+| `keel.decision.wait` | How many milliseconds the owner takes to answer, by lane and choice. It groups `base:<seat>` choices under `base`. |
+
 ## Known limitations
 
 - Ordinary deferrals have no scheduled revisit; changed or newly reported evidence can bring them back.
