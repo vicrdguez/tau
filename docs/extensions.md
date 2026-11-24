@@ -6,7 +6,7 @@ The extension name must match its folder. The [host reference](host.md#options) 
 
 ## Imports and helpers
 
-Import Tau's extension author API from `tau`, `tau/durable`, `tau/schema`, and `tau/chord`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
+Import Tau's extension author API from `tau`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
 
 ```ts
 function options<T extends JsonObject>(
@@ -41,7 +41,7 @@ Mark a secret string with `format: "secret"`. The host returns `true` for a set 
 
 ## Agent selection
 
-The project default contains `coding-tools` and available project extensions without `entry`. A workflow is not part of the default.
+The project default contains the built-in `coding-tools` and `codemode` extensions and available project extensions without `entry`. A workflow is not part of the default.
 
 | Agent selection | Extensions received |
 | --- | --- |
@@ -52,6 +52,28 @@ The project default contains `coding-tools` and available project extensions wit
 An open role follows changes to the default on its next model request. An in-flight request keeps its selection. A closed role does not acquire extensions added to the project.
 
 If a role must exclude particular tools, select both its extensions and tools exactly. An open role must remove the other roles' tools from its own extension by name. A prompt section must check its intended audience because a tool filter does not hide sections.
+
+### Decision models in codemode
+
+The `codemode` tool runs JavaScript in a sandbox. A script can call tools that permit nested calls and return just the results the agent needs. `models.getAvailableOfType("classifier")` lists classifiers with configured credentials. Jev uses the server's TypeSafe or OpenRouter credentials and needs no separate extension.
+
+For example, this script asks Jev for the probability that two findings describe the same defect:
+
+```js
+const model = await models.getModelOfType("classifier", "typesafe", "jev-latest");
+const result = await models.classify(model, {
+	state: { first: "Save drops edits", second: "Changes vanish after saving" },
+	questions: {
+		duplicate: {
+			type: "bool",
+			instructions: "Do these findings describe the same defect?",
+			criteria: { true: "Same defect", false: "Separate defects" },
+		},
+	},
+});
+if (result.stopReason !== "stop") throw new Error(result.errorMessage);
+return result.answers.duplicate.probability;
+```
 
 ## Author rules
 
@@ -88,6 +110,47 @@ await runtime.commit(async tx => {
 	await handle?.submit(tx, { type: "input", content, requestId: causeId });
 }, context);
 ```
+
+## Record metrics
+
+In a tool or task phase, use `context.telemetry.metrics` to record measurements. Use `defineTelemetrySchema` to describe your metrics and spans, and export the schema as `telemetry` so clients can discover it. Each metric and span name starts with the extension name followed by a dot.
+
+```ts
+import {
+	createTypedMetrics,
+	defineTelemetrySchema,
+	NOOP_TELEMETRY_METRICS,
+} from "tau/telemetry";
+
+const schema = defineTelemetrySchema({
+	version: 1,
+	spans: {},
+	metrics: {
+		"example.review.loops": {
+			kind: "counter",
+			description: "Completed review loops.",
+			attributes: {},
+		},
+	},
+});
+export { schema as telemetry };
+```
+
+In the phase, use `createTypedMetrics` to type-check the metric name and attributes. `NOOP_TELEMETRY_METRICS` lets the same code run when recording is unavailable.
+
+```ts
+const metrics = createTypedMetrics(
+	context.telemetry.metrics ?? NOOP_TELEMETRY_METRICS,
+	[schema],
+);
+metrics.counter("example.review.loops").add(1);
+```
+
+Record only finite measurements. Use metric attributes with few distinct values, such as an outcome or choice. Put IDs on spans with `context.telemetry.setAttributes` instead of making a metric series for each ID.
+
+Record after the commit that makes the fact true returns. If a replay finds that the change already landed, skip the sample. This records each sample at most once. A crash between the commit and recording can lose the sample.
+
+To measure the cost of a unit of work, read `UsageDoc` from `tau/durable` for each conversation in that unit. Sum the `cost.total` values in the documents' `models` and `tools` buckets.
 
 ## Write a workflow
 
@@ -405,7 +468,7 @@ flowchart TB
 
 To install an extension from another repository:
 
-1. Choose a name that matches `^[a-z0-9][a-z0-9-]{0,62}$` and is not `coding-tools`.
+1. Choose a name that matches `^[a-z0-9][a-z0-9-]{0,62}$` and is neither `coding-tools` nor `codemode`.
 2. Place or symlink the extension folder at `~/.tau/extensions/<name>/`, with `index.ts` and its dependencies at the folder root.
 
 To install a sample from this repository:

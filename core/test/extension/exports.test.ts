@@ -10,11 +10,13 @@ import * as nodeEnv from "@earendil-works/pi-durable/env/node";
 import * as sqlite from "@earendil-works/pi-durable/storage/sqlite/node";
 import * as durableTools from "@earendil-works/pi-durable/tools";
 import * as piSchema from "@earendil-works/pi-schema";
+import * as piTelemetry from "@earendil-works/pi-telemetry";
 import * as root from "tau";
 import * as chord from "tau/chord";
 import * as durable from "tau/durable";
 import * as schema from "tau/schema";
 import * as server from "tau/server";
+import * as telemetry from "tau/telemetry";
 import * as testing from "tau/testing";
 import ts from "typescript";
 import * as helpers from "../../src/extension/helpers.js";
@@ -34,11 +36,12 @@ const entries = {
 	"./durable": durable,
 	"./schema": schema,
 	"./chord": chord,
+	"./telemetry": telemetry,
 	"./testing": testing,
 	"./server": server,
 };
 
-test("tau exposes exactly six package entries", () => {
+test("tau exposes exactly seven package entries", () => {
 	assert.deepEqual(
 		Object.keys(manifest.exports).sort(),
 		Object.keys(entries).sort(),
@@ -173,6 +176,7 @@ test("extension re-exports preserve Tau and pi object identity", () => {
 		"@earendil-works/pi-durable/storage/sqlite/node": sqlite,
 		"@earendil-works/pi-durable/tools": durableTools,
 		"@earendil-works/pi-schema": piSchema,
+		"@earendil-works/pi-telemetry": piTelemetry,
 	};
 	for (const [entry, values] of Object.entries(entries)) {
 		for (const { name, kind, origin } of rows(entry)) {

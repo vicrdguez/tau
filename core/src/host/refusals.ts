@@ -9,6 +9,7 @@ export const statusOf = {
 	unknown_project: 404,
 	unknown_conversation: 404,
 	unknown_decision: 404,
+	unknown_trace: 404,
 	too_large: 413,
 	conflict: 409,
 	not_open: 409,
@@ -23,6 +24,7 @@ export const statusOf = {
 	busy: 409,
 	idle: 409,
 	event_log: 409,
+	telemetry_unavailable: 409,
 } as const;
 
 export type Code = keyof typeof statusOf;

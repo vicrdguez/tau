@@ -1,7 +1,9 @@
+import { isDeepStrictEqual } from "node:util";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import type { WatchHandle } from "@earendil-works/chord/watch";
 import type { Models } from "@earendil-works/pi-ai";
+import { AI_TELEMETRY_SCHEMA } from "@earendil-works/pi-ai/models";
 import {
 	type Conversation,
 	ConversationBusy,
@@ -9,6 +11,7 @@ import {
 	ConversationIdle,
 	type Cursor,
 	configure,
+	DURABLE_TELEMETRY_SCHEMA,
 	type EntryId,
 	type EntryQuery,
 	LiveDoc,
@@ -32,7 +35,12 @@ import {
 import { answer } from "../store/host.js";
 import { type DecisionId, decision } from "../store/index.js";
 import type { Catalogue } from "./catalogue.js";
-import { decodeCursor, encodeCursor } from "./cursors.js";
+import {
+	decodeCursor,
+	encodeCursor,
+	telemetryBounds,
+	traceFilters,
+} from "./cursors.js";
 import type { Devices } from "./devices.js";
 import { type Positions, scanFaults } from "./faults.js";
 import { watchInbox } from "./inbox.js";
@@ -40,6 +48,7 @@ import { hasModel, modelRef } from "./options.js";
 import { type OpenProject, PROJECT, type Projects } from "./projects.js";
 import { type Outcome, refuse } from "./refusals.js";
 import type { StructuralQueue } from "./structural.js";
+import { TAU_TELEMETRY_SCHEMA, type Telemetry } from "./telemetry.js";
 
 /** What every call reaches, bound once when the server starts. */
 export type Host = {
@@ -89,6 +98,19 @@ function inProject<T extends { project: string }, R>(
 			: run(host, device, input, open);
 	};
 }
+function inTelemetry<T extends { project: string }, R>(
+	run: (input: T, adapter: Telemetry["adapter"]) => Promise<Outcome<R>>,
+): Run<T, R> {
+	return inProject(async (_host, _device, input, { telemetry }) =>
+		telemetry === undefined
+			? refuse(
+					"telemetry_unavailable",
+					`Telemetry is unavailable in ${input.project}.`,
+				)
+			: run(input, telemetry.adapter),
+	);
+}
+
 const unary = <T, R>(schema: Schema<T>, run: Run<T, R>): Call => ({
 	stream: false,
 	dispatch: checked(schema, run),
@@ -592,6 +614,8 @@ export const calls: Readonly<Record<string, Call>> = {
 				device,
 				context,
 			);
+			if (answered.kind === "answered" && !answered.repeated)
+				open.telemetry?.recordAnswer(answered.decision);
 			return answered.kind === "answered"
 				? {
 						result: {
@@ -609,6 +633,79 @@ export const calls: Readonly<Record<string, Call>> = {
 			if (log === undefined)
 				throw new Error(`${input.project} has lost its event log`);
 			return watchOf(log, input.after);
+		}),
+	),
+	telemetry: unary(obj({}), async (host) => ({
+		result: {
+			items: [
+				{ source: "pi-durable", schema: DURABLE_TELEMETRY_SCHEMA },
+				{ source: "pi-ai", schema: AI_TELEMETRY_SCHEMA },
+				{ source: "tau", schema: TAU_TELEMETRY_SCHEMA },
+				...host.projects.catalogue
+					.entries()
+					.flatMap(([source, { module }]) =>
+						module.telemetry === undefined
+							? []
+							: [{ source, schema: module.telemetry }],
+					),
+			],
+		},
+	})),
+	metrics: unary(
+		obj({ project, name: str(), ...telemetryBounds }),
+		inTelemetry(async ({ project: _project, ...query }, adapter) => ({
+			result: { items: await adapter.findMetrics(query) },
+		})),
+	),
+	traces: unary(
+		obj({ project, cursor, limit, ...traceFilters }),
+		inTelemetry(async ({ project, cursor, limit, ...asked }, adapter) => {
+			let query = asked;
+			let position: string | undefined;
+			if (cursor !== undefined) {
+				const decoded = decodeCursor(cursor, "traces", project);
+				if (
+					decoded === undefined ||
+					Object.entries(asked).some(
+						([key, value]) =>
+							value !== undefined &&
+							!isDeepStrictEqual(value, decoded.query[key]),
+					)
+				)
+					return badCursor();
+				query = decoded.query as typeof asked;
+				position = decoded.position as string;
+			}
+			const { errors, ...filters } = query;
+			try {
+				const found = await adapter.findTraces({
+					...filters,
+					limit: limit ?? DEFAULT_LIMIT,
+					...(errors === true ? { errors } : {}),
+					...(position === undefined ? {} : { cursor: position }),
+				});
+				const next =
+					found.cursor === undefined
+						? undefined
+						: encodeCursor("traces", project, query, found.cursor);
+				return { result: page([...found.traces], next) };
+			} catch (error) {
+				if (
+					position !== undefined &&
+					(error instanceof SyntaxError || error instanceof TypeError)
+				)
+					return badCursor();
+				throw error;
+			}
+		}),
+	),
+	trace: unary(
+		obj({ project, traceId: str() }),
+		inTelemetry(async ({ project, traceId }, adapter) => {
+			const trace = await adapter.getTrace(traceId);
+			return trace === undefined
+				? refuse("unknown_trace", `${project} has no trace ${traceId}.`)
+				: { result: { trace } };
 		}),
 	),
 	faults: unary(

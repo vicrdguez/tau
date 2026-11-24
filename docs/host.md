@@ -21,7 +21,9 @@ Provider login uses pi's `/login` on the server machine as the server's OS user,
 
 ## Data and backup
 
-An ordinary file-copy backup requires Tau to be stopped. SQLite uses WAL, so a copy of only the live database file is unsafe. A backup needs `~/.tau/projects/`, `~/.tau/devices.json`, extension code and dependencies or recoverable snapshot targets, provider credentials, and working repositories and worktrees. Extension links alone do not preserve their targets. Stores and credentials can contain secrets, so the backup needs protection.
+An ordinary file-copy backup requires Tau to be stopped. SQLite uses WAL, so a copy of only the live database file is unsafe. A backup needs `~/.tau/projects/`, `~/.tau/devices.json`, extension code and dependencies or recoverable snapshot targets, provider credentials, and working repositories and worktrees. Extension links alone do not preserve their targets. Stores, telemetry, and credentials can contain sensitive data, so protect the backup.
+
+While Tau is stopped, you can delete or omit a project's `telemetry.sqlite` without losing work.
 
 ## Restart
 
@@ -36,9 +38,9 @@ A project has a name, an absolute working directory on the server, and an ordere
 The server starts in this order:
 
 1. It loads extensions and prepares the Tau home.
-2. It loads devices and scans project directories. For each project, it takes the lock and opens the store with an empty registry.
+2. It loads devices and scans project directories. For each project, it takes the lock, opens telemetry, and opens the store with an empty registry.
 3. It reads the project record and skips directories with invalid names, missing records, or records for another project.
-4. It finds the event log, installs coding tools and available project extensions, builds the default selection, and resumes the project's harness.
+4. It finds the event log, installs the built-in `coding-tools` and `codemode` extensions and the available project extensions, builds the default selection, and resumes the project's harness.
 5. It reports task warnings, opens the admin socket, and listens for HTTP requests.
 
 A repeated `bind` can finish opening a store that has no project record. A project extension absent at startup is not installed, so its tasks cannot run until its code is available.
@@ -50,6 +52,7 @@ An extension can give the host this contract, from `core/src/host/index.ts`.
 ```ts
 export type ExtensionModule = {
 	readonly extension: Extension;
+	readonly telemetry?: TelemetrySchemaDefinition;
 	readonly entry?: AgentChange | ((tx: Tx) => Promise<AgentChange>);
 	readonly options?: {
 		readonly schema: JsonSchema;
@@ -89,10 +92,14 @@ Each row gives the fields in the JSON body and inside `result`. A question mark 
 | `answer` | `project, decision, basis, choice, annotations` | `decision, repeated` | `unknown_project`, `unknown_decision`, `not_open`, `stale_basis`, `unknown_choice`, `bad_annotation`, `conflict`, `extension_not_loaded` |
 | `timeline` | `project, after?` | stream | `unknown_project` |
 | `faults` | `project, cursor?, limit?` | page of faults | `unknown_project`, `bad_cursor` |
+| `metrics` | `project, name, startMin?, startMax?, attributes?` | `items: StoredMetric[]` | `unknown_project`, `telemetry_unavailable` |
+| `traces` | `project, name?, startMin?, startMax?, errors?, attributes?, cursor?, limit?` | page of `StoredTrace` | `unknown_project`, `telemetry_unavailable`, `bad_cursor` |
+| `trace` | `project, traceId` | `trace: StoredTrace` | `unknown_project`, `telemetry_unavailable`, `unknown_trace` |
+| `telemetry` | `{}` | `items: { source: string, schema: TelemetrySchemaDefinition }[]` | none |
 
 `ProjectView` contains `project`, `workdir`, `extensions`, and `missing`. Conversation and entry IDs are positive integers. `after` is a nonnegative entry ID, and `limit` is a positive integer. History `order` is `ascending` or `descending`. Each answer annotation has `text` and an optional `range` with numeric `start` and `end`.
 
-The `extensions` field is an array of strings, `patch` is a JSON object, and `basis` is a positive entry ID. All other body fields are strings, except the fields described above. `workflow` and `model` are mutually exclusive. The [wire shapes](protocol.md#versions-and-owned-shapes) describe records and result fields.
+The `extensions` field is an array of strings, `patch` is a JSON object, and `basis` is a positive entry ID. Telemetry filters are described below. Other body fields are strings. `workflow` and `model` are mutually exclusive. The [wire shapes](protocol.md#versions-and-owned-shapes) describe records and result fields.
 
 ## Conversations
 
@@ -124,6 +131,18 @@ export type Fault = {
 ```
 
 The decision appears only when its current continuation is that task. The result omits faults of missing extension kinds. The scan can read more tasks than the requested page size.
+
+## Telemetry
+
+Tau stores telemetry in `~/.tau/projects/<project>/telemetry.sqlite` and keeps 90 days of data. pi-ai records model cost, tokens, and request duration. pi-durable records task phase durations and outcomes. `tau.decision.wait` measures the time in milliseconds between a decision's request and its first accepted answer. Its attributes are the continuation `task` and the accepted `choice`.
+
+Recording does not wait for SQLite. If the telemetry database fails to open, Tau logs the error as `tau: telemetry <project>: <message>` and opens the project without telemetry. Settled spans usually appear within a second. Metrics appear after their 10-second interval ends. A clean shutdown also writes partial intervals.
+
+`metrics` returns measurements aggregated by interval and attribute values. Its inclusive `startMin` and `startMax` bounds apply to interval start times in Unix epoch milliseconds. Attribute filters take strings, numbers, or booleans and must all match the same row.
+
+`traces` returns whole traces, newest first, with a default limit of 50. Its `name` and inclusive time bounds match the earliest stored span in each trace. All supplied attributes must match a single span, which can be anywhere in the trace. Pass `errors: true` to require at least one error span. Omitting `errors` or setting it to `false` leaves error status unfiltered. With a cursor, any filters you supply must match the saved filters. `trace` fetches one trace by ID in the given project.
+
+`telemetry` lists the pi-durable, pi-ai, and Tau schemas, then schemas from loaded extensions in catalogue order. See [Record metrics](extensions.md#record-metrics) to add an extension schema.
 
 ## Structural calls and reload
 

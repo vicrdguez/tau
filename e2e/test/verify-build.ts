@@ -23,9 +23,14 @@ assert.ok(command, "Pass the installed tau executable.");
 assert.equal(
 	outputs.length,
 	4,
-	"Pass the keel, w1, w2 and websearch source outputs.",
+	"Pass the keel, w1, w2 and webkit source outputs.",
 );
-const [keelSource, w1Source, w2Source] = outputs as [string, string, string];
+const [keelSource, w1Source, w2Source, webkitSource] = outputs as [
+	string,
+	string,
+	string,
+	string,
+];
 const root = await mkdtemp(join(tmpdir(), "tau-installed-"));
 const home = join(root, ".tau");
 const env = {
@@ -50,11 +55,18 @@ async function post(url: string, name: string, body: object, token?: string) {
 	return reply.result;
 }
 
-async function check(initial: "empty" | "writable" | "file" = "empty") {
-	const child = spawn(command!, ["--port", "0"], {
-		env,
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+async function check(
+	initial: "empty" | "writable" | "file" | "codemode" = "empty",
+) {
+	const fixture = join(root, "installed-codemode.ts");
+	const child = spawn(
+		initial === "codemode" ? process.execPath : command!,
+		initial === "codemode" ? [fixture, home] : ["--port", "0"],
+		{
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
 	let stdout = "";
 	let stderr = "";
 	child.stdout.on("data", (chunk) => {
@@ -88,6 +100,51 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			initial === "writable" ? ["w2"] : [],
 			stderr,
 		);
+		if (initial === "codemode") {
+			const project = "smoke";
+			await post(
+				url,
+				"bind",
+				{ project, workdir: root, extensions: [] },
+				token,
+			);
+			const { conversation } = await post(
+				url,
+				"create",
+				{ project, model: "faux/smoke" },
+				token,
+			);
+			await post(
+				url,
+				"input",
+				{
+					project,
+					conversation,
+					text: "Run the smoke script",
+					requestId: "smoke",
+				},
+				token,
+			);
+			const deadline = Date.now() + 10_000;
+			for (;;) {
+				const { items } = await post(
+					url,
+					"history",
+					{ project, conversation },
+					token,
+				);
+				if (JSON.stringify(items).includes("codemode-smoke=42")) break;
+				assert.ok(
+					Date.now() < deadline,
+					`installed Tau did not return the script output: ${JSON.stringify(items)}`,
+				);
+				await new Promise((done) => setTimeout(done, 25));
+			}
+			process.stdout.write(
+				"default conversation ran codemode: codemode-smoke=42\n",
+			);
+			return;
+		}
 		if (initial === "file") {
 			assert.ok(stderr.includes(join(home, "extensions")), stderr);
 			assert.match(stderr, /not a folder/);
@@ -104,7 +161,7 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			return;
 		}
 		process.stdout.write("empty extensions []\n");
-		for (const [i, name] of ["keel", "w1", "w2", "websearch"].entries()) {
+		for (const [i, name] of ["keel", "w1", "w2", "webkit"].entries()) {
 			const output = outputs[i]!;
 			await access(join(output, "index.ts"));
 			for await (const file of glob("**/*.{js,mjs,cjs}", {
@@ -130,25 +187,27 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 					["keel", true],
 					["w1", true],
 					["w2", true],
-					["websearch", false],
+					["webkit", false],
 				],
 				stderr,
 			);
 			assert.deepEqual(
-				items.map((item: any) =>
-					item.name === "keel"
-						? item.schema.required
-								.filter(
-									(key: string) => !("default" in item.schema.properties[key]),
-								)
-								.sort()
-						: item.schema.required,
-				),
+				items
+					.filter((item: any) => item.name !== "webkit")
+					.map((item: any) =>
+						item.name === "keel"
+							? item.schema.required
+									.filter(
+										(key: string) =>
+											!("default" in item.schema.properties[key]),
+									)
+									.sort()
+							: item.schema.required,
+					),
 				[
 					["build", "design", "queue", "verify"],
 					["designer", "implementer", "reviewer", "base"],
 					["model"],
-					["provider", "apiKey"],
 				],
 			);
 			assert.ok(
@@ -175,14 +234,16 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 			}
 			assert.equal(items[1].schema.properties.designer.format, "model");
 			assert.equal(items[2].schema.properties.model.format, "model");
-			assert.equal(items[3].schema.properties.apiKey.format, "secret");
+			assert.equal(items[3].schema.properties.exaApiKey.format, "secret");
+			assert.equal(items[3].schema.properties.tavilyApiKey.format, "secret");
+			assert.equal(items[3].schema.properties.provider.default, "auto");
 			process.stdout.write(
-				"loaded keel, w1, w2, websearch with options schemas\n",
+				"loaded keel, w1, w2, webkit with options schemas\n",
 			);
 			const bound = await post(
 				url,
 				"bind",
-				{ project: "p", workdir: root, extensions: ["w2", "websearch"] },
+				{ project: "p", workdir: root, extensions: ["w2", "webkit"] },
 				token,
 			);
 			assert.deepEqual(bound.project.missing, []);
@@ -228,6 +289,9 @@ async function check(initial: "empty" | "writable" | "file" = "empty") {
 		const listed = await run(command!, ["device", "list"], { env });
 		assert.match(listed.stdout, new RegExp(device));
 		process.stdout.write("models HTTP 200; paired device listed\n");
+	} catch (error) {
+		console.error("Installed verifier failed.", error, { stdout, stderr });
+		throw error;
 	} finally {
 		if (child.exitCode === null && child.signalCode === null) {
 			const exit = once(child, "exit", { signal: AbortSignal.timeout(60_000) });
@@ -261,10 +325,22 @@ try {
 		if (!/\.(?:js|json)$/.test(file)) continue;
 		assert.doesNotMatch(
 			await readFile(resolve(command, "../..", file), "utf8"),
-			/tau-wf-keel|tau-w1|tau-w2|tau-websearch/,
+			/tau-wf-keel|tau-w1|tau-w2|tau-webkit/,
 			file,
 		);
 	}
+	await cp(
+		new URL("./installed-codemode.ts", import.meta.url),
+		join(root, "installed-codemode.ts"),
+	);
+	await mkdir(join(root, "node_modules"));
+	await symlink(join(lib, "core"), join(root, "node_modules/tau"));
+	await symlink(
+		join(lib, "node_modules/@earendil-works"),
+		join(root, "node_modules/@earendil-works"),
+	);
+	await check("codemode");
+	await rm(home, { recursive: true });
 	const directory = join(home, "extensions");
 	await mkdir(directory, { recursive: true });
 	await chmod(directory, 0o777);
@@ -307,7 +383,52 @@ try {
 			(await readFile(join(keelSource, "prose", `${file}.md`), "utf8")).length >
 				0,
 		);
-	process.stdout.write("extension source and Markdown installed\n");
+	assert.match(
+		await readFile(join(webkitSource, "LICENSE"), "utf8"),
+		/Nico Bailon/,
+	);
+	assert.match(
+		await readFile(join(webkitSource, "UPSTREAM.md"), "utf8"),
+		/4af1a7f7757d450ba0afefe2d98737384dc9a9b4/,
+	);
+	const nativeTools = JSON.parse(
+		await readFile(join(webkitSource, "native-tools.json"), "utf8"),
+	);
+	for (const tool of ["git", "curl"] as const) {
+		assert.match(nativeTools[tool], /^\/nix\/store\//);
+		const version = await run(nativeTools[tool], ["--version"], {
+			env: { ...env, PATH: "" },
+		});
+		assert.ok(version.stdout.length > 0);
+	}
+	const extraction = await run(
+		process.execPath,
+		[
+			"--input-type=module",
+			"-e",
+			`
+		import assert from "node:assert/strict";
+		for (const name of ["linkedom", "@mozilla/readability", "turndown", "defuddle/node", "p-limit", "unpdf", "unpdf/pdfjs"])
+			await import(name);
+		const { fetchPages } = await import("./extract.ts");
+		const body = "<html><head><title>Installed artifact</title></head><body><article><h1>Installed artifact</h1><p>" + "INSTALLED-EXTRACTION-MARKER The installed parser reads this source text. ".repeat(25) + "</p></article></body></html>";
+		const settings = { provider: "auto", fallbackProviders: "", hostedExtraction: false, timeoutMs: 60000, maxResponseBytes: 5242880 };
+		const result = await fetchPages({ urls: ["https://example.com/article"], mode: "readable", forceClone: false, redirects: "follow" }, {
+			settings, signal: new AbortController().signal, now: () => Date.now(), endpoints: {},
+			http: { request: async () => ({ url: "https://example.com/article", status: 200, headers: { "content-type": "text/html" }, body: new TextEncoder().encode(body) }) },
+		});
+		assert.equal(result.items[0].status, "ok", JSON.stringify(result.items));
+		assert.equal(result.documents[0].extractor, "readability");
+		assert.match(result.documents[0].text, /INSTALLED-EXTRACTION-MARKER/);
+		process.stdout.write("installed webkit extracts HTML and resolves all lazy extraction dependencies\\n");
+	`,
+		],
+		{ cwd: webkitSource, env },
+	);
+	process.stdout.write(extraction.stdout);
+	process.stdout.write(
+		"extension source, notices, upstream guide and native tools installed\n",
+	);
 } finally {
 	await rm(root, { recursive: true, force: true });
 }

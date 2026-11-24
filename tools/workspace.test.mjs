@@ -23,7 +23,7 @@ test("every source workspace references its emitted dependency", async () => {
 	for (const directory of [
 		"extensions/w1",
 		"extensions/w2",
-		"extensions/websearch",
+		"extensions/webkit",
 		"e2e",
 	]) {
 		const config = JSON.parse(
@@ -217,12 +217,12 @@ async function extensionFixture(t) {
 		"tau-w1": { extension: true },
 		"tau-w2": {
 			extension: true,
-			tau: [".", "./durable", "./schema", "./chord"],
+			tau: [".", "./durable", "./schema", "./chord", "./telemetry"],
 			testOnly: { tau: ["./testing"] },
 		},
 	};
 	const extension = {
-		dependencies: { tau: "0.0.0", webfox: "4.11.0" },
+		dependencies: { tau: "0.0.0", library: "1.0.0" },
 		devDependencies: { "test-helper": "1.0.0" },
 		name: "tau-w2",
 	};
@@ -236,9 +236,15 @@ async function extensionFixture(t) {
 		await put(`${directory}/tsconfig.json`, {});
 	await put("core/package.json", {
 		exports: Object.fromEntries(
-			[".", "./durable", "./schema", "./chord", "./testing", "./server"].map(
-				(entry) => [entry, "./dist/src/index.js"],
-			),
+			[
+				".",
+				"./durable",
+				"./schema",
+				"./chord",
+				"./telemetry",
+				"./testing",
+				"./server",
+			].map((entry) => [entry, "./dist/src/index.js"]),
 		),
 		name: "tau",
 	});
@@ -417,7 +423,7 @@ test("assets preserve emitted prose and leave noEmit packages without dist", asy
 	});
 });
 
-for (const name of ["websearch", "w2", "w1"]) {
+for (const name of ["webkit", "w2", "w1"]) {
 	for (const [label, source, diagnostic] of [
 		["no output", "export const value: number = 1;", null],
 		["type errors", 'export const value: number = "wrong";', /TS2322/],
@@ -467,6 +473,7 @@ for (const [specifier, replacement] of [
 	["@earendil-works/pi-durable/tools", "tau/durable"],
 	["@earendil-works/pi-schema", "tau/schema"],
 	["@earendil-works/chord/context", "tau/chord"],
+	["@earendil-works/pi-telemetry", "tau/telemetry"],
 	["@earendil-works/pi-ai/providers/faux", "tau/testing"],
 	["@earendil-works/future", "tau"],
 	["tau/dist/src/store/decisions.js", "tau"],
@@ -551,12 +558,13 @@ test("extensions accept only canonical facade entries with testing limited to te
 			"./local.ts",
 			"node:fs",
 			"path",
-			"webfox",
-			"webfox/subpath",
+			"library",
+			"library/subpath",
 			"tau",
 			"tau/durable",
 			"tau/schema",
 			"tau/chord",
+			"tau/telemetry",
 		]
 			.map((specifier) => `import "${specifier}";`)
 			.join("\n"),
@@ -715,7 +723,7 @@ test("boundaries accept nested test files and ignore generated tests", async (t)
 });
 
 for (const [name, directory, specifier, allowed] of [
-	...["tau-websearch", "tau-w2", "tau-w1"].flatMap((name) => [
+	...["tau-webkit", "tau-w2", "tau-w1"].flatMap((name) => [
 		[name, "src", "tau/server", false],
 		[name, "test", "tau/server", false],
 		[name, "test", "tau/testing", true],
