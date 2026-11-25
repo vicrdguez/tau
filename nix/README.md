@@ -30,7 +30,7 @@ The development npm derivation serves the workspace. It uses root manifests and 
 
 The private `packages.tauRuntime` copies compiled core and manifests from `tau`, links the production tree, and wraps slim Node 24. Copying core prevents Node's realpath resolution from reaching the public package's development dependencies. Nix rejects references to public `tau`, the development dependency tree, or full Node in the private runtime closure. Compilation still happens only in `tau`.
 
-`nix build .#standalone` archives the compiled core and production dependencies from `tauRuntime`. It uses an official Node 24 binary with a pinned checksum instead of the Nix-built Node and wrapper. It replaces the Nix Node and Bash shebangs in dependency commands, and Nix rejects store references in the unpacked tree before archiving it. The users who download the archive do not need Nix. Release runners verify the extracted archive outside the Nix sandbox.
+`nix build .#standalone` archives the compiled core and production dependencies from `tauRuntime`. It uses an official Node 24 binary with a pinned checksum instead of the Nix-built Node and wrapper. It replaces the Nix Node shebangs in dependency commands, and Nix rejects store references in the unpacked tree before archiving it. The users who download the archive do not need Nix. Release runners verify the extracted archive outside the Nix sandbox.
 
 ## Run Tau directly from a flake
 

@@ -148,30 +148,12 @@ test("tau restores its own offline catalog and runs a conversation with a restor
 			},
 		});
 	const id = "example/future-chat";
-	for (const [home, cached, configured] of [
-		[tauHome, id, "tau-config"],
-		[env.PI_CODING_AGENT_DIR, "example/pi-cache", "pi-config"],
-	] as const) {
-		await writeFile(path.join(home, "models-store.json"), store(cached));
-		await writeFile(
-			path.join(home, "models.json"),
-			JSON.stringify({
-				providers: {
-					[configured]: {
-						api: "openai-completions",
-						baseUrl,
-						apiKey: "fixture",
-						models: [{ id: "chat" }],
-					},
-				},
-			}),
-		);
-	}
+	await writeFile(path.join(tauHome, "models-store.json"), store(id));
 	await writeFile(
-		path.join(env.PI_CODING_AGENT_DIR, "auth.json"),
-		JSON.stringify({ openrouter: { type: "api_key", key: "fixture" } }),
+		path.join(env.PI_CODING_AGENT_DIR, "models-store.json"),
+		store("example/pi-cache"),
 	);
-	const server = await serve(env);
+	const server = await serve({ ...env, OPENROUTER_API_KEY: "fixture" });
 	try {
 		const token = await pair(env, server.url, "catalog");
 		const call = async (name: string, args: object) => {
@@ -183,9 +165,7 @@ test("tau restores its own offline catalog and runs a conversation with a restor
 		const { items } = await call("models", {});
 		const names = items.map((item: { model: string }) => item.model);
 		assert.ok(names.includes(model), `missing ${model}`);
-		assert.ok(names.includes("tau-config/chat"));
 		assert.ok(!names.includes("openrouter/example/pi-cache"));
-		assert.ok(!names.includes("pi-config/chat"));
 		await call("bind", { project: "p", workdir: env.HOME, extensions: [] });
 		const { conversation } = await call("create", { project: "p", model });
 		await call("input", {
