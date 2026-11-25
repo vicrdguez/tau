@@ -21,6 +21,7 @@ import * as testing from "tau/testing";
 import ts from "typescript";
 import * as helpers from "../../src/extension/helpers.js";
 import * as admin from "../../src/host/admin.js";
+import * as catalogue from "../../src/host/catalogue.js";
 import * as host from "../../src/host/index.js";
 import * as loader from "../../src/host/loader.js";
 import * as decisions from "../../src/store/decisions.js";
@@ -159,9 +160,18 @@ test("README tables match every emitted value, type, and origin exactly once", (
 	}
 });
 
+test("tau/durable exports the codemode extension installed by the host", () => {
+	const installed = catalogue.builtInExtensions.find(
+		(ext) => ext.name === "codemode",
+	);
+	assert.ok(installed);
+	assert.equal(durable.Codemode, installed);
+});
+
 test("extension re-exports preserve Tau and pi object identity", () => {
 	const origins: Record<string, Record<string, unknown>> = {
 		"./helpers.js": helpers,
+		"../host/catalogue.js": catalogue,
 		"../store/decisions.js": decisions,
 		"../store/events.js": events,
 		"../store/testing.js": storeTesting,

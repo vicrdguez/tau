@@ -1,6 +1,7 @@
 import { modelRef, options as projectOptions, prose } from "tau";
 import {
 	type AgentChange,
+	Codemode,
 	CodingTools,
 	type Extension,
 	type ToolRegistration,
@@ -17,7 +18,9 @@ function coding(name: string): ToolRegistration {
 	if (!tool) throw new Error(`Missing coding tool: ${name}`);
 	return tool;
 }
-const read = [coding("read")];
+export const roleBuiltIns = [CodingTools, Codemode] as const;
+
+const read = [coding("read"), ...(Codemode.tools ?? [])];
 const inspect = [...read, coding("bash")];
 const change = [...inspect, coding("edit"), coding("write")];
 
@@ -140,7 +143,7 @@ export function settings(
 	return {
 		...("instructions" in entry && { instructions: entry.instructions }),
 		model: modelRef(opts[role] ?? opts[entry.lane]),
-		extensions: [CodingTools, extension],
+		extensions: [...roleBuiltIns, extension],
 		tools: [
 			...entry.tools,
 			...toolSpecs

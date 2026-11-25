@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
+	Codemode,
 	CodingTools,
 	createRegistry,
 	defineExtension,
@@ -15,8 +16,10 @@ import { explorerDispatch } from "../src/roles/dispatch.ts";
 import {
 	type KeelOptions,
 	options,
+	ROLES,
 	type RoleName,
 	settings,
+	storedRole,
 } from "../src/roles/index.ts";
 
 const lanes = {
@@ -127,24 +130,21 @@ test("role settings retain lane defaults, independent overrides and tool authori
 		}
 	}
 
-	// Settings own the closed tool list; entry.test.ts proves Tau uses it.
-	for (const [role, expected] of [
-		["coordinator", ["read"]],
-		["diagnoser", ["bash", "read"]],
-		["worker", ["bash", "edit", "inspect", "publish", "read", "write"]],
-		["verifier", ["bash", "inspect", "read"]],
-		["designer", ["bash", "read"]],
-	] as const) {
-		const agent = settings(role, defaults, extension, specs);
-		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
-		assert.ok(Array.isArray(agent.tools), role);
-		assert.deepEqual(
-			agent.tools.map((t: ToolRegistration) => t.name).sort(),
-			expected,
-			role,
-		);
-		assert.deepEqual(agent.extensions, [CodingTools, extension], role);
-	}
+	const codemodeTools = Codemode.tools ?? [];
+	await t.test("every role selects Codemode and all its tools", () => {
+		for (const role of Object.keys(ROLES).map(storedRole)) {
+			const agent = settings(role, defaults, extension, specs);
+			assert.deepEqual(
+				agent.extensions,
+				[CodingTools, Codemode, extension],
+				role,
+			);
+			assert.ok(Array.isArray(agent.tools), role);
+			for (const tool of codemodeTools)
+				assert.ok(agent.tools.includes(tool), `${role} lacks ${tool.name}`);
+		}
+	});
+
 	assert.deepEqual([...explorerDispatch.roles].sort(), [
 		"designer",
 		"investigator",
@@ -165,6 +165,9 @@ test("role settings retain lane defaults, independent overrides and tool authori
 		provider: "custom",
 		modelId: "build_explorer",
 	});
+	assert.deepEqual(seat?.extensions, [CodingTools, Codemode]);
+	for (const tool of codemodeTools)
+		assert.ok(seat?.tools.includes(tool), `build_explorer lacks ${tool.name}`);
 	assert.equal(
 		await explorerDispatch.resolve(worker, {
 			seat: "design_explorer",
@@ -172,4 +175,20 @@ test("role settings retain lane defaults, independent overrides and tool authori
 		}),
 		undefined,
 	);
+	for (const [role, expected] of [
+		["coordinator", ["read"]],
+		["diagnoser", ["bash", "read"]],
+		["worker", ["bash", "edit", "inspect", "publish", "read", "write"]],
+		["verifier", ["bash", "inspect", "read"]],
+		["designer", ["bash", "read"]],
+	] as const) {
+		const agent = settings(role, defaults, extension, specs);
+		assert.match(agent.instructions ?? "", new RegExp(`You are the ${role}`));
+		assert.ok(Array.isArray(agent.tools), role);
+		assert.deepEqual(
+			agent.tools.map((t: ToolRegistration) => t.name).sort(),
+			[...expected, ...codemodeTools.map((tool) => tool.name)].sort(),
+			role,
+		);
+	}
 });
