@@ -11,15 +11,21 @@ pkgs.writeShellApplication {
     pkgs.nix
   ];
   text = ''
-    usage='Usage: nix run .#install-launchagent [-- --help]'
-    if [[ $# -ne 0 ]]; then
-      if [[ $# -eq 1 && $1 == --help ]]; then
-        printf '%s\n' "$usage"
-        exit 0
-      fi
-      printf '%s\n' "$usage" >&2
-      exit 2
+    usage='Usage: nix run .#install-launchagent [-- {--help | --allow-host NAME [--allow-host NAME ...]}]'
+    if [[ $# -eq 1 && $1 == --help ]]; then
+      printf '%s\n' "$usage"
+      exit 0
     fi
+
+    allowed_hosts=()
+    while (( $# > 0 )); do
+      if [[ $1 != --allow-host || $# -lt 2 || -z $2 || $2 == -* ]]; then
+        printf '%s\n' "$usage" >&2
+        exit 2
+      fi
+      allowed_hosts+=("$2")
+      shift 2
+    done
 
     template=${pkgs.lib.escapeShellArg "${plist}"}
     label=$(/usr/bin/plutil -extract Label raw -o - "$template")
@@ -49,23 +55,28 @@ pkgs.writeShellApplication {
     /usr/bin/plutil -remove ProgramArguments.0 "$staged"
     /usr/bin/plutil -insert ProgramArguments.0 -string "$profile/bin/tau" "$staged"
 
-    config="$HOME/.tau/config.json"
-    if [[ ( -e $installed || -L $installed ) && ! -e $config && ! -L $config ]]; then
-      legacy_config=$(/usr/bin/plutil -extract ProgramArguments json -o - "$installed" | jq '
-        if type != "array" then error("ProgramArguments must be an array") else . end
-        | [range(1; length; 2) as $i
-           | select(.[$i] == "--allow-host")
-           | .[$i + 1]
-           | if type != "string" then error("--allow-host requires a string value") else . end]
-        | if length == 0 then empty else {allowedHosts: .} end
-      ')
-      if [[ -n $legacy_config ]]; then
-        mkdir -p "$(dirname "$config")"
-        staged_config=$(mktemp "$config.XXXXXX")
-        staged_files+=("$staged_config")
-        printf '%s\n' "$legacy_config" > "$staged_config"
-        ln -T "$staged_config" "$config"
+    if (( ''${#allowed_hosts[@]} > 0 )); then
+      config="$HOME/.tau/config.json"
+      mkdir -p "$(dirname "$config")"
+      staged_config=$(mktemp "$config.XXXXXX")
+      staged_files+=("$staged_config")
+      if ! {
+        if [[ -e $config || -L $config ]]; then
+          cat -- "$config"
+        else
+          printf '%s\n' '{"allowedHosts":[]}'
+        fi
+      } | jq -es --args '
+        select(length == 1) | .[0]
+        | select(type == "object")
+        | select(.allowedHosts | type == "array" and all(.[]; type == "string"))
+        | reduce $ARGS.positional[] as $host (.;
+            if (.allowedHosts | index($host)) == null then .allowedHosts += [$host] else . end)
+      ' -- "''${allowed_hosts[@]}" > "$staged_config"; then
+        printf 'Cannot read valid config from %s. Expected a JSON object with an allowedHosts array of strings.\n' "$config" >&2
+        exit 1
       fi
+      mv -fT "$staged_config" "$config"
     fi
 
     nix-env --profile "$profile" --set ${pkgs.lib.escapeShellArg (toString tau)}

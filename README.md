@@ -90,7 +90,15 @@ On Apple Silicon macOS, stop any Tau server you started in a terminal. To instal
 nix run .#install-launchagent
 ```
 
-Rerun this command after `git pull` to update the service. It uses your existing `~/.tau` and does not require `sudo`. If `~/.tau/config.json` does not exist, the installer copies any `--allow-host` values from the old plist to that file before replacing the plist. The installer never replaces an existing config file. To stop the service, follow the [LaunchAgent instructions](#run-at-login-on-macos).
+Rerun this command after `git pull` to update the service. It uses your existing `~/.tau` and does not require `sudo`. To stop the service, follow the [LaunchAgent instructions](#run-at-login-on-macos).
+
+To add a proxy hostname when installing or updating, run:
+
+```sh
+nix run .#install-launchagent -- --allow-host tau.example.com
+```
+
+Repeat `--allow-host` for each hostname. The installer adds them to `~/.tau/config.json` and keeps any hosts already saved there. If you previously put `--allow-host` flags in the plist, pass those names on the first upgrade. The installer does not copy them from the old plist. Later upgrades can omit the flags.
 
 See the [Nix guide](nix/README.md) for the Linux container image and other build options.
 
