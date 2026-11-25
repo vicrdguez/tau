@@ -45,7 +45,7 @@ Keep the extracted files together. Use the same `bin/tau` for [device pairing](d
 
 #### Run at login on macOS
 
-The macOS archive includes a LaunchAgent that starts Tau at login and restarts it if it exits. Move the extracted directory to its permanent location and stop any Tau server already running. From the extracted directory, run:
+The macOS archive includes a LaunchAgent that starts Tau at login and restarts it if it exits. Move the extracted directory to its permanent location and stop any Tau server already running. If the old LaunchAgent has `--allow-host` flags, [copy their hostnames to `~/.tau/config.json`](docs/host.md#allow-clients-through-a-proxy) before replacing the plist. From the extracted directory, run:
 
 ```sh
 agent="$HOME/Library/LaunchAgents/dev.tau.server.plist"
@@ -90,7 +90,7 @@ On Apple Silicon macOS, stop any Tau server you started in a terminal. To instal
 nix run .#install-launchagent
 ```
 
-Rerun this command after `git pull` to update the service. It uses your existing `~/.tau` and does not require `sudo`. To stop the service, follow the [LaunchAgent instructions](#run-at-login-on-macos).
+Rerun this command after `git pull` to update the service. It uses your existing `~/.tau` and does not require `sudo`. If `~/.tau/config.json` does not exist, the installer copies any `--allow-host` values from the old plist to that file before replacing the plist. The installer never replaces an existing config file. To stop the service, follow the [LaunchAgent instructions](#run-at-login-on-macos).
 
 See the [Nix guide](nix/README.md) for the Linux container image and other build options.
 

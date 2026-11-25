@@ -7,6 +7,7 @@ pkgs.writeShellApplication {
   name = "install-launchagent";
   runtimeInputs = [
     pkgs.coreutils
+    pkgs.jq
     pkgs.nix
   ];
   text = ''
@@ -42,10 +43,31 @@ pkgs.writeShellApplication {
 
     mkdir -p "$(dirname "$profile")" "$(dirname "$installed")"
     staged=$(mktemp "$installed.XXXXXX")
-    trap 'rm -f "$staged"' EXIT
+    staged_files=("$staged")
+    trap 'rm -f "''${staged_files[@]}"' EXIT
     cp "$template" "$staged"
     /usr/bin/plutil -remove ProgramArguments.0 "$staged"
     /usr/bin/plutil -insert ProgramArguments.0 -string "$profile/bin/tau" "$staged"
+
+    config="$HOME/.tau/config.json"
+    if [[ ( -e $installed || -L $installed ) && ! -e $config && ! -L $config ]]; then
+      legacy_config=$(/usr/bin/plutil -extract ProgramArguments json -o - "$installed" | jq '
+        if type != "array" then error("ProgramArguments must be an array") else . end
+        | [range(1; length; 2) as $i
+           | select(.[$i] == "--allow-host")
+           | .[$i + 1]
+           | if type != "string" then error("--allow-host requires a string value") else . end]
+        | if length == 0 then empty else {allowedHosts: .} end
+      ')
+      if [[ -n $legacy_config ]]; then
+        mkdir -p "$(dirname "$config")"
+        staged_config=$(mktemp "$config.XXXXXX")
+        staged_files+=("$staged_config")
+        printf '%s\n' "$legacy_config" > "$staged_config"
+        ln -T "$staged_config" "$config"
+      fi
+    fi
+
     nix-env --profile "$profile" --set ${pkgs.lib.escapeShellArg (toString tau)}
 
     if [[ $loaded == true ]]; then
