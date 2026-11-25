@@ -245,7 +245,6 @@ export async function openScriptedWorkflow(
 		root,
 		transact: k.transact,
 		options: k.options,
-		models,
 		provider,
 		queueProvider,
 		sweeper,

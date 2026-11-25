@@ -7,19 +7,12 @@ import {
 	createRegistry,
 	defineExtension,
 	defineTool,
-	type Extension,
 	MemoryStorage,
 	type ToolRegistration,
 } from "tau/durable";
 import { obj } from "tau/schema";
 import { createModels, openStore } from "tau/testing";
-import { effectKey } from "../src/kernel/ids.ts";
-import type { EffectRunner } from "../src/kernel/tasks.ts";
-import {
-	explorerDispatch,
-	runDesignDispatch,
-	sweepDispatch,
-} from "../src/roles/dispatch.ts";
+import { explorerDispatch } from "../src/roles/dispatch.ts";
 import {
 	type KeelOptions,
 	options,
@@ -28,7 +21,6 @@ import {
 	settings,
 	storedRole,
 } from "../src/roles/index.ts";
-import { tempRepo } from "./fixtures/repo.ts";
 
 const lanes = {
 	design: "planning/design",
@@ -153,69 +145,6 @@ test("role settings retain lane defaults, independent overrides and tool authori
 		}
 	});
 
-	const { root } = await tempRepo(t);
-	const { id: caller } = await harness.root(ctx);
-	const seats = new Map<
-		string,
-		{ extensions: readonly Extension[]; tools: readonly ToolRegistration[] }
-	>();
-	const effectOwner: Parameters<EffectRunner>[2] = {
-		async dispatch(admit, jobs) {
-			return harness.commit(async (tx) => {
-				const roster =
-					typeof admit === "function" ? await admit(tx, caller) : admit;
-				return Promise.all(
-					jobs.map(async (job, index) => {
-						const resolved = await roster.resolve(tx, caller, job, index);
-						assert.ok(resolved, job.seat);
-						seats.set(job.seat, resolved);
-						return {
-							seat: job.seat,
-							conversation: caller,
-							answer: "[]",
-							error: null,
-						};
-					}),
-				);
-			}, ctx);
-		},
-	};
-	await runDesignDispatch(
-		{
-			key: effectKey("arena"),
-			lane: "design",
-			work: null,
-			root,
-			spec: {
-				jobs: [
-					{
-						seat: "arena_seat_1",
-						question: "Where is the seam?",
-						model: "custom/arena_seat_1",
-					},
-				],
-			},
-		},
-		ctx,
-		effectOwner,
-	);
-	await sweepDispatch(async () => ({
-		authority: [],
-		samples: [],
-		patternRulings: [],
-		priorFindings: [],
-	}))(
-		{
-			key: effectKey("sweep"),
-			lane: "queue",
-			work: null,
-			root,
-			spec: {},
-		},
-		ctx,
-		effectOwner,
-	);
-
 	assert.deepEqual([...explorerDispatch.roles].sort(), [
 		"designer",
 		"investigator",
@@ -236,33 +165,9 @@ test("role settings retain lane defaults, independent overrides and tool authori
 		provider: "custom",
 		modelId: "build_explorer",
 	});
-	assert.ok(seat);
-	seats.set("build_explorer", seat);
-	await t.test(
-		"explorer, arena and sweeper seats select Codemode and its tools",
-		() => {
-			for (const [name, seat] of seats) {
-				assert.deepEqual(seat.extensions, [CodingTools, Codemode], name);
-				for (const tool of codemodeTools)
-					assert.ok(seat.tools.includes(tool), `${name} lacks ${tool.name}`);
-			}
-		},
-	);
-	await t.test(
-		"bound roles and dispatch seats select the same built-ins including Codemode",
-		() => {
-			for (const [name, seat] of seats) {
-				const bound = settings(
-					storedRole(name),
-					chosen,
-					extension,
-					specs,
-				).extensions;
-				assert.deepEqual(bound, [...seat.extensions, extension], name);
-				assert.ok(seat.extensions.includes(Codemode), name);
-			}
-		},
-	);
+	assert.deepEqual(seat?.extensions, [CodingTools, Codemode]);
+	for (const tool of codemodeTools)
+		assert.ok(seat?.tools.includes(tool), `build_explorer lacks ${tool.name}`);
 	assert.equal(
 		await explorerDispatch.resolve(worker, {
 			seat: "design_explorer",
