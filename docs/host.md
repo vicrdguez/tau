@@ -15,13 +15,23 @@ nix run .#tau -- device revoke phone
 nix run .#tau -- extension reload
 ```
 
-A `nix build` also provides `result/bin/tau`, which can replace `nix run .#tau --` in each command. The server uses `~/.tau` under the process home and has no `--home` flag. `--port PORT` selects a port from 0 through 65535. Port 0 asks the OS to choose one. Repeated `--allow-host NAME` flags allow additional Host and Origin names. The pair command prints a one-use code. A device exists only after a client exchanges that code, as described in [pairing](protocol.md#devices-and-administration).
+A `nix build` also provides `result/bin/tau`, which can replace `nix run .#tau --` in each command. The server uses `~/.tau` under the process home and has no `--home` flag. `--port PORT` selects a port from 0 through 65535. Port 0 asks the OS to choose one. The pair command prints a one-use code. A device exists only after a client exchanges that code, as described in [pairing](protocol.md#devices-and-administration).
 
 Provider login uses pi's `/login` on the server machine as the server's OS user, or a provider API key variable in the server's environment. Tau reads `${PI_CODING_AGENT_DIR:-~/.pi/agent}/auth.json`, creates it if absent, and writes refreshed credentials there. Client calls cannot set a login.
 
+### Allow clients through a proxy
+
+To allow additional HTTP Host and Origin names, create `~/.tau/config.json` as the server's OS user:
+
+```json
+{"allowedHosts": ["tau.example.com"]}
+```
+
+Use hostnames without a scheme, port, or path. Restart Tau after editing the file. Tau still listens only on loopback, and clients still need to pair. Repeated `--allow-host NAME` flags add hosts for that process without changing the file. The file is optional. If it exists but cannot be read or does not contain an `allowedHosts` array of strings, Tau refuses to start.
+
 ## Data and backup
 
-An ordinary file-copy backup requires Tau to be stopped. SQLite uses WAL, so a copy of only the live database file is unsafe. A backup needs `~/.tau/projects/`, `~/.tau/devices.json`, extension code and dependencies or recoverable snapshot targets, provider credentials, and working repositories and worktrees. Extension links alone do not preserve their targets. Stores, telemetry, and credentials can contain sensitive data, so protect the backup.
+An ordinary file-copy backup requires Tau to be stopped. SQLite uses WAL, so a copy of only the live database file is unsafe. A backup needs `~/.tau/projects/`, `~/.tau/devices.json`, `~/.tau/config.json` if present, extension code and dependencies or recoverable snapshot targets, provider credentials, and working repositories and worktrees. Extension links alone do not preserve their targets. Stores, telemetry, and credentials can contain sensitive data, so protect the backup.
 
 While Tau is stopped, you can delete or omit a project's `telemetry.sqlite` without losing work.
 

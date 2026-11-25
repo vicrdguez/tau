@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -48,6 +49,35 @@ export function serverConfig(
 	return { port, allowedHosts };
 }
 
+async function readAllowedHosts(home: string): Promise<string[]> {
+	const filename = path.join(home, "config.json");
+	const contents = await readFile(filename, "utf8").catch(
+		(error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return undefined;
+			throw error;
+		},
+	);
+	if (contents === undefined) return [];
+
+	let config: unknown;
+	try {
+		config = JSON.parse(contents);
+	} catch (error) {
+		throw new Error(`Invalid JSON in ${filename}`, { cause: error });
+	}
+	if (
+		config === null ||
+		typeof config !== "object" ||
+		!("allowedHosts" in config) ||
+		!Array.isArray(config.allowedHosts) ||
+		!config.allowedHosts.every((host: unknown) => typeof host === "string")
+	)
+		throw new Error(
+			`Invalid ${filename}: expected an allowedHosts array of strings`,
+		);
+	return config.allowedHosts;
+}
+
 async function serve(
 	home: string,
 	config: { port: number; allowedHosts: string[] },
@@ -90,7 +120,13 @@ async function serve(
 export async function run(argv: readonly string[]): Promise<number> {
 	const home = path.join(homedir(), ".tau");
 	const config = argv[0] === "device" ? undefined : serverConfig(argv);
-	if (config !== undefined) return serve(home, config);
+	if (config !== undefined) {
+		const allowedHosts = await readAllowedHosts(home);
+		return serve(home, {
+			...config,
+			allowedHosts: [...allowedHosts, ...config.allowedHosts],
+		});
+	}
 	const request = parse(argv);
 	if (request === undefined) {
 		process.stderr.write(USAGE);
