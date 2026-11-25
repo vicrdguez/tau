@@ -39,6 +39,10 @@ Call `prose` at module scope to read and check a template before rendering a sec
 
 Mark a secret string with `format: "secret"`. The host returns `true` for a set top-level secret instead of its value. The extension's `set` owns storage. The `options` helper stores secrets in the project store, not a separate vault, so the store and its backups contain secrets in plain text. Read secrets when needed and keep them out of tool results, entries, events, sections, errors, and logs.
 
+## Add a model provider
+
+Export `providers` as an array of pi-ai provider objects. Import the `Provider` type from `tau`. Clients can select a model as `providerId/modelId` without adding the extension to the project. To remove a provider on reload, remove it from the module's export. See the [host reference](host.md#options) for provider ID rules.
+
 ## Agent selection
 
 The project default contains the built-in `coding-tools` and `codemode` extensions and available project extensions without `entry`. A workflow is not part of the default.
@@ -438,7 +442,7 @@ test("publish and answer", async () => {
 
 ## Load and reload
 
-The server scans `~/.tau/extensions/` at startup. Each visible entry other than `node_modules` must resolve to a distinct folder with `index.ts`. The loader rejects JavaScript files outside `node_modules`, bad imports, invalid module shapes, mismatched names, invalid options, and conflicting tasks. An extension supplies its own npm dependencies. The loader aliases Tau imports to the server's package.
+The server scans `~/.tau/extensions/` at startup. Each visible entry other than `node_modules` must resolve to a distinct folder with `index.ts`. The loader rejects JavaScript files outside `node_modules`, bad imports, invalid module shapes, mismatched names, invalid options, invalid or conflicting providers, and conflicting tasks. An extension supplies its own npm dependencies. The loader aliases Tau imports to the server's package.
 
 The server reports each failure on standard error as `tau: extension NAME [STAGE]: MESSAGE`, with an optional path after the name. A failed extension does not prevent the server or other extensions from starting. An extension is [trusted code](design.md#limits).
 
@@ -447,7 +451,7 @@ After an extension changes, `tau extension reload` reloads extensions on a runni
 1. The server scans and imports the folders, then combines them with the loaded extensions. A missing folder keeps its loaded extension.
 2. It checks the proposed extensions in a scratch registry and checks task compatibility.
 3. If a scan, load, or compatibility check fails, it refuses the entire reload before publishing the proposed extensions.
-4. Otherwise, it publishes the extensions to open projects, rebuilds their defaults, and returns extensions, task warnings, and skipped projects.
+4. Otherwise, it updates the server's model providers, publishes the extensions to open projects, and rebuilds their defaults. It returns extensions, task warnings, and skipped projects.
 
 Reload refuses duplicate task names, dropped task kinds, lower task versions, and phases removed without a version increase. An in-flight tool call or task phase finishes with its old code. A waiting task uses new code when it wakes. An existing conversation keeps its stored instructions. New conversations use the new instructions.
 
