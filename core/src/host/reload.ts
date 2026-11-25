@@ -7,7 +7,7 @@ import {
 	str,
 	union,
 } from "@earendil-works/pi-schema";
-import { Catalogue } from "./catalogue.js";
+import { Catalogue, reconcileProviders } from "./catalogue.js";
 import {
 	type ExtensionFailure,
 	type ExtensionScan,
@@ -38,6 +38,7 @@ export type ReloadReport = Static<typeof ReloadReport>;
 export async function reload(
 	projects: Projects,
 	options: Pick<ServerOptions, "source" | "models">,
+	builtInProviders: ReadonlySet<string>,
 ): Promise<ReloadReport> {
 	const skipped = projects.skipped.filter(
 		(p) => projects.get(p.project) === undefined,
@@ -60,6 +61,7 @@ export async function reload(
 	const loaded = await loadExtensions(
 		() => ({ modules: proposed, failures: scan.failures }),
 		options.models,
+		builtInProviders,
 	);
 	failures.push(...loaded.failures);
 	for (const [name, before] of current.entries()) {
@@ -118,6 +120,7 @@ export async function reload(
 	let installed: Map<string, string[]>;
 	let reached: ReloadReport["reached"];
 	try {
+		reconcileProviders(options.models, builtInProviders, catalogue);
 		installed = projects.publish(catalogue, found, (project, extension) => {
 			reached = { project, extension };
 		});

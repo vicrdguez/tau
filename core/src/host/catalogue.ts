@@ -1,3 +1,4 @@
+import type { MutableModels, Provider } from "@earendil-works/pi-ai";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import type { Extension } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
@@ -57,4 +58,19 @@ export class Catalogue {
 				.map(({ module }) => module.extension),
 		];
 	}
+}
+
+export function reconcileProviders(
+	models: MutableModels,
+	builtInProviders: ReadonlySet<string>,
+	catalogue: Catalogue,
+): void {
+	const exported = new Map<string, Provider>();
+	for (const [, { module }] of catalogue.entries())
+		for (const provider of module.providers ?? [])
+			exported.set(provider.id, provider);
+	for (const { id } of models.getProviders())
+		if (!builtInProviders.has(id) && !exported.has(id))
+			models.deleteProvider(id);
+	for (const provider of exported.values()) models.setProvider(provider);
 }
