@@ -9,6 +9,8 @@
 | Store, host, or command code imports the extension author directory. | tools/workspace.test.mjs |
 | The faux answer accepts a trailing device identity. | core/test/store/types.test.ts |
 | The core adds an unlisted export path. | core/test/store/exports.test.ts |
+| `tau/durable` exports a codemode extension other than the one the host installs, so a role that names it selects nothing. | exports.test.ts |
+| A closed role that lists `Codemode` and its tools cannot run a script or call `models.classify` on a real server. | core/test/host/conversations.test.ts |
 
 The server entry re-exports no pi names or helpers. The README test follows each server export to its declaration.
 

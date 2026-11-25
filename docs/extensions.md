@@ -53,6 +53,8 @@ An open role follows changes to the default on its next model request. An in-fli
 
 If a role must exclude particular tools, select both its extensions and tools exactly. An open role must remove the other roles' tools from its own extension by name. A prompt section must check its intended audience because a tool filter does not hide sections.
 
+A closed role gets codemode only if it lists `Codemode` from `tau/durable` in its extensions and all of `Codemode.tools` in its tools. Listing only the `codemode` tool leaves `models.classify` unavailable inside scripts.
+
 ### Decision models in codemode
 
 The `codemode` tool runs JavaScript in a sandbox. A script can call tools that permit nested calls and return just the results the agent needs. `models.getAvailableOfType("classifier")` lists classifiers with configured credentials. Jev uses the server's TypeSafe or OpenRouter credentials and needs no separate extension.

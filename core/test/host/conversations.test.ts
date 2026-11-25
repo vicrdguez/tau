@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import {
 	createModels,
 	type FauxResponseFactory,
@@ -11,7 +11,8 @@ import {
 import { typesafeProvider } from "@earendil-works/pi-ai/providers/typesafe";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj } from "@earendil-works/pi-schema";
-import { gate, modules } from "./extensions.js";
+import { Codemode, CodingTools } from "tau/durable";
+import { gate, modules, Search } from "./extensions.js";
 import { type Running, start, until } from "./helpers.js";
 
 type Seen = { model: string; tools: string[]; text: string };
@@ -194,7 +195,10 @@ test("the bare agent follows the project default, and an added extension reaches
 	}
 });
 
-test("a default conversation classifies a nested tool result with Jev from a codemode script", async (t) => {
+async function classifyWithCodemode(
+	t: TestContext,
+	selection: "default" | "closed",
+) {
 	const transport = t.mock.method(globalThis, "fetch", async () =>
 		Response.json({ answers: { relevant: { type: "noul", noul: 0.875 } } }),
 	);
@@ -210,11 +214,33 @@ test("a default conversation classifies a nested tool result with Jev from a cod
 	models.setProvider(typesafeProvider());
 	const s = await start({
 		models: { models, faux },
-		source: () => ({ modules, failures: [] }),
+		source: () => ({
+			modules:
+				selection === "default"
+					? modules
+					: {
+							search: {
+								extension: Search,
+								entry: {
+									model: { provider: "faux", modelId: "a" },
+									extensions: [CodingTools, Codemode, Search],
+									tools: [
+										...(CodingTools.tools ?? []),
+										...(Codemode.tools ?? []),
+										...(Search.tools ?? []),
+									],
+								},
+							},
+						},
+			failures: [],
+		}),
 	});
 	try {
 		await project(s, ["search"]);
-		const conversation = await create(s, { model: "faux/a" });
+		const conversation = await create(
+			s,
+			selection === "default" ? { model: "faux/a" } : { workflow: "search" },
+		);
 		let result: ToolResultMessage | undefined;
 		s.faux.setResponses([
 			call("codemode", {
@@ -255,7 +281,13 @@ test("a default conversation classifies a nested tool result with Jev from a cod
 	} finally {
 		await s.close();
 	}
-});
+}
+
+test("a default conversation classifies a nested tool result with Jev from a codemode script", (t) =>
+	classifyWithCodemode(t, "default"));
+
+test("a closed role classifies a nested tool result with Jev from a codemode script", (t) =>
+	classifyWithCodemode(t, "closed"));
 
 test("conversations pages each one's state, leaves out the event log, and its cursor survives a restart", async () => {
 	const s = await start({ source: () => ({ modules, failures: [] }) });
