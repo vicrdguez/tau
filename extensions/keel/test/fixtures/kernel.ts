@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { type Annotation, type DecisionId, decision } from "tau";
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
+	Codemode,
 	CodingTools,
 	createRegistry,
 	type JsonObject,
@@ -39,6 +40,7 @@ export async function openScriptedWorkflow(
 	const k = createWorkflow(runner);
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	registry.install(Codemode);
 	registry.install(k.extension);
 	const roles = ["designer", "coordinator", "worker", "verifier"];
 	const provider = fauxProvider({ models: roles.map((id) => ({ id })) });
@@ -243,6 +245,7 @@ export async function openScriptedWorkflow(
 		root,
 		transact: k.transact,
 		options: k.options,
+		models,
 		provider,
 		queueProvider,
 		sweeper,

@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from "tau/chord";
 import {
+	Codemode,
 	CodingTools,
 	type ConversationId,
 	createRegistry,
@@ -277,6 +278,7 @@ export async function toy({
 	});
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	registry.install(Codemode);
 	registry.install(k.extension);
 	const provider = fauxProvider();
 	const models = createModels();

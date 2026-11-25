@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { modelRef, prose } from "tau";
-import { CodingTools, type Tx } from "tau/durable";
+import type { Tx } from "tau/durable";
 import type { DispatchJob } from "../dispatch/index.ts";
 import type { createKernel } from "../kernel/kernel.ts";
 import type { EffectRunner } from "../kernel/tasks.ts";
@@ -17,7 +17,13 @@ import { projectPrinciplesText } from "../principles/catalog.ts";
 import { principleUsage } from "../principles/index.ts";
 import { replyJson } from "../reply-json.ts";
 import { nodeExec, readRepo } from "../repo/index.ts";
-import { dispatchBounds, options, ROLES, type RoleName } from "./index.ts";
+import {
+	dispatchBounds,
+	options,
+	ROLES,
+	type RoleName,
+	roleBuiltIns,
+} from "./index.ts";
 
 const dir = import.meta.dirname + "/../prose";
 const explorer = prose(dir, "roles/explorer.md", [])({});
@@ -53,7 +59,7 @@ function seat(
 		model: modelRef(model),
 		cwd,
 		instructions,
-		extensions: [CodingTools],
+		extensions: roleBuiltIns,
 		tools: ROLES[role].tools,
 	};
 }
