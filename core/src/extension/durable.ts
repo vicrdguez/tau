@@ -46,3 +46,4 @@ export {
 export { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 export { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 export { CodingTools } from "@earendil-works/pi-durable/tools";
+export { Codemode } from "../host/catalogue.js";

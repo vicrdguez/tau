@@ -34,6 +34,7 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `Agent` | type | `@earendil-works/pi-durable` |
 | `AgentChange` | type | `@earendil-works/pi-durable` |
 | `AgentDoc` | value | `@earendil-works/pi-durable` |
+| `Codemode` | value | `../host/catalogue.js` |
 | `CodingTools` | value | `@earendil-works/pi-durable/tools` |
 | `Conversation` | type | `@earendil-works/pi-durable` |
 | `ConversationId` | type | `@earendil-works/pi-durable` |

@@ -20,7 +20,17 @@ import { promisify } from "node:util";
 
 const [command, ...outputs] = process.argv.slice(2);
 assert.ok(command, "Pass the installed tau executable.");
-assert.equal(outputs.length, 3, "Pass the w1, w2 and webkit source outputs.");
+assert.equal(
+	outputs.length,
+	4,
+	"Pass the keel, w1, w2 and webkit source outputs.",
+);
+const [keelSource, w1Source, w2Source, webkitSource] = outputs as [
+	string,
+	string,
+	string,
+	string,
+];
 const root = await mkdtemp(join(tmpdir(), "tau-installed-"));
 const home = join(root, ".tau");
 const env = {
@@ -151,7 +161,7 @@ async function check(
 			return;
 		}
 		process.stdout.write("empty extensions []\n");
-		for (const [i, name] of ["w1", "w2", "webkit"].entries()) {
+		for (const [i, name] of ["keel", "w1", "w2", "webkit"].entries()) {
 			const output = outputs[i]!;
 			await access(join(output, "index.ts"));
 			for await (const file of glob("**/*.{js,mjs,cjs}", {
@@ -165,7 +175,7 @@ async function check(
 		assert.equal(
 			added.stdout.split("\n").filter((line) => line.startsWith("added "))
 				.length,
-			3,
+			4,
 			added.stdout,
 		);
 		process.stdout.write(added.stdout);
@@ -174,6 +184,7 @@ async function check(
 			assert.deepEqual(
 				items.map((item: any) => [item.name, item.workflow]),
 				[
+					["keel", true],
 					["w1", true],
 					["w2", true],
 					["webkit", false],
@@ -183,8 +194,21 @@ async function check(
 			assert.deepEqual(
 				items
 					.filter((item: any) => item.name !== "webkit")
-					.map((item: any) => item.schema.required),
-				[["designer", "implementer", "reviewer", "base"], ["model"]],
+					.map((item: any) =>
+						item.name === "keel"
+							? item.schema.required
+									.filter(
+										(key: string) =>
+											!("default" in item.schema.properties[key]),
+									)
+									.sort()
+							: item.schema.required,
+					),
+				[
+					["build", "design", "queue", "verify"],
+					["designer", "implementer", "reviewer", "base"],
+					["model"],
+				],
 			);
 			assert.ok(
 				items.every(
@@ -193,12 +217,29 @@ async function check(
 						item.schema.additionalProperties === false,
 				),
 			);
-			assert.equal(items[0].schema.properties.designer.format, "model");
-			assert.equal(items[1].schema.properties.model.format, "model");
-			assert.equal(items[2].schema.properties.exaApiKey.format, "secret");
-			assert.equal(items[2].schema.properties.tavilyApiKey.format, "secret");
-			assert.equal(items[2].schema.properties.provider.default, "auto");
-			process.stdout.write("loaded w1, w2, webkit with options schemas\n");
+			for (const [name, property] of Object.entries<{ format?: string }>(
+				items[0].schema.properties,
+			)) {
+				if (
+					![
+						"base",
+						"trunk",
+						"max_workers",
+						"dispatch_rounds",
+						"dispatch_minutes",
+						"sweep_minutes",
+					].includes(name)
+				)
+					assert.equal(property.format, "model", `keel option ${name}`);
+			}
+			assert.equal(items[1].schema.properties.designer.format, "model");
+			assert.equal(items[2].schema.properties.model.format, "model");
+			assert.equal(items[3].schema.properties.exaApiKey.format, "secret");
+			assert.equal(items[3].schema.properties.tavilyApiKey.format, "secret");
+			assert.equal(items[3].schema.properties.provider.default, "auto");
+			process.stdout.write(
+				"loaded keel, w1, w2, webkit with options schemas\n",
+			);
 			const bound = await post(
 				url,
 				"bind",
@@ -230,7 +271,7 @@ async function check(
 			);
 		}
 		const changed = join(root, "changed-w2");
-		await cp(outputs[1]!, changed, { recursive: true, dereference: false });
+		await cp(w2Source, changed, { recursive: true, dereference: false });
 		await chmod(changed, 0o777);
 		const prose = join(changed, "agent.md");
 		await chmod(prose, 0o664);
@@ -284,7 +325,7 @@ try {
 		if (!/\.(?:js|json)$/.test(file)) continue;
 		assert.doesNotMatch(
 			await readFile(resolve(command, "../..", file), "utf8"),
-			/tau-w1|tau-w2|tau-webkit/,
+			/tau-wf-keel|tau-w1|tau-w2|tau-webkit/,
 			file,
 		);
 	}
@@ -308,7 +349,7 @@ try {
 	await mkdir(directory, { recursive: true });
 	await chmod(directory, 0o777);
 	const copied = join(directory, "w2");
-	await cp(outputs[1]!, copied, { recursive: true });
+	await cp(w2Source, copied, { recursive: true });
 	await chmod(copied, 0o775);
 	for await (const file of glob("**/*.{ts,md}", { cwd: copied }))
 		await chmod(join(copied, file), 0o664);
@@ -328,19 +369,30 @@ try {
 		"revise",
 	])
 		assert.ok(
-			(await readFile(join(outputs[0]!, `${file}.md`), "utf8")).length > 0,
+			(await readFile(join(w1Source, `${file}.md`), "utf8")).length > 0,
 		);
-	assert.ok((await readFile(join(outputs[1]!, "agent.md"), "utf8")).length > 0);
+	assert.ok((await readFile(join(w2Source, "agent.md"), "utf8")).length > 0);
+	for (const file of [
+		"roles/designer",
+		"inputs/build/brief",
+		"documents/mandate",
+		"principles/prove-it-works",
+		"playbooks/architect/rationale-template",
+	])
+		assert.ok(
+			(await readFile(join(keelSource, "prose", `${file}.md`), "utf8")).length >
+				0,
+		);
 	assert.match(
-		await readFile(join(outputs[2]!, "LICENSE"), "utf8"),
+		await readFile(join(webkitSource, "LICENSE"), "utf8"),
 		/Nico Bailon/,
 	);
 	assert.match(
-		await readFile(join(outputs[2]!, "UPSTREAM.md"), "utf8"),
+		await readFile(join(webkitSource, "UPSTREAM.md"), "utf8"),
 		/4af1a7f7757d450ba0afefe2d98737384dc9a9b4/,
 	);
 	const nativeTools = JSON.parse(
-		await readFile(join(outputs[2]!, "native-tools.json"), "utf8"),
+		await readFile(join(webkitSource, "native-tools.json"), "utf8"),
 	);
 	for (const tool of ["git", "curl"] as const) {
 		assert.match(nativeTools[tool], /^\/nix\/store\//);
@@ -371,7 +423,7 @@ try {
 		process.stdout.write("installed webkit extracts HTML and resolves all lazy extraction dependencies\\n");
 	`,
 		],
-		{ cwd: outputs[2], env },
+		{ cwd: webkitSource, env },
 	);
 	process.stdout.write(extraction.stdout);
 	process.stdout.write(
