@@ -13,7 +13,7 @@ JSON replies have `Content-Type: application/json`, `Cache-Control: no-store`, a
 | Body | HTTP status | Meaning |
 | --- | --- | --- |
 | `{ "result": ... }` | 200 | The call returned a result. |
-| `{ "refused": { "code": ..., "message": ..., ... } }` | 400, 401, 404, 409, or 413 | The call was refused. Other fields can give details. |
+| `{ "refused": { "code": ..., "message": ..., ... } }` | 400, 401, 404, 409, 413, or 503 | The call was refused. Other fields can give details. |
 | `{ "unknown": { "code": "storage_failed", "message": ... } }` | 500 | The outcome is unknown. |
 
 The body determines the outcome. A missing, unreadable, or unrecognized body leaves the outcome unknown regardless of HTTP status. The `code` field identifies a refusal, while `message` is for a person. A retry needs care because `create` can create a second conversation and `stop` can stop a newer run.
@@ -45,6 +45,7 @@ Every refusal has string `code` and `message` fields. The table lists all additi
 | `event_log` | 409 | A call tried to run work in the event log. |
 | `telemetry_unavailable` | 409 | The project opened without telemetry. |
 | `too_large` | 413 | The request body exceeds 1 MiB. |
+| `model_refresh_failed` | 503 | `models` with `refresh: true` could not complete. Clients can retry. The refusal omits provider error details. |
 
 ## Transcript
 

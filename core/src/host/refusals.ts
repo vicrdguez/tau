@@ -25,6 +25,7 @@ export const statusOf = {
 	idle: 409,
 	event_log: 409,
 	telemetry_unavailable: 409,
+	model_refresh_failed: 503,
 } as const;
 
 export type Code = keyof typeof statusOf;

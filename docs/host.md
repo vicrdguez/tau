@@ -19,6 +19,8 @@ A `nix build` also provides `result/bin/tau`, which can replace `nix run .#tau -
 
 Provider login uses pi's `/login` on the server machine as the server's OS user, or a provider API key variable in the server's environment. Tau reads `${PI_CODING_AGENT_DIR:-~/.pi/agent}/auth.json`, creates it if absent, and writes refreshed credentials there. Client calls cannot set a login.
 
+To check for new models, send `POST /v1/models` with `{"refresh":true}` from a paired client. Tau uses Pi's catalog updater for configured providers and keeps its own cache in `~/.tau/models-store.json`. It does not read Pi's model catalog or require the Pi CLI. An ordinary `models` call uses the bundled catalog and the last saved update, even after an offline restart. New models that require an unsupported provider or API still need a Tau update.
+
 ### Allow clients through a proxy
 
 To allow additional HTTP Host and Origin names, create `~/.tau/config.json` as the server's OS user:
@@ -83,7 +85,7 @@ Each row gives the fields in the JSON body and inside `result`. A question mark 
 | Call | Body | Result | Additional refusals |
 | --- | --- | --- | --- |
 | `extensions` | `{}` | `items: { name, workflow, schema? }[]` | none |
-| `models` | `{}` | `items: { model, name }[]` | none |
+| `models` | `{ refresh?: boolean }` | `items: { model, name }[]` | `model_refresh_failed` |
 | `projects` | `{}` | `items: ProjectView[]` | none |
 | `bind` | `project, workdir, extensions` | `project, repeated` | `conflict`, `busy` |
 | `addExtensions` | `project, extensions` | `project` | `unknown_project`, `busy` |
@@ -109,7 +111,13 @@ Each row gives the fields in the JSON body and inside `result`. A question mark 
 
 `ProjectView` contains `project`, `workdir`, `extensions`, and `missing`. Conversation and entry IDs are positive integers. `after` is a nonnegative entry ID, and `limit` is a positive integer. History `order` is `ascending` or `descending`. Each answer annotation has `text` and an optional `range` with numeric `start` and `end`.
 
-The `extensions` field is an array of strings, `patch` is a JSON object, and `basis` is a positive entry ID. Telemetry filters are described below. Other body fields are strings. `workflow` and `model` are mutually exclusive. The [wire shapes](protocol.md#versions-and-owned-shapes) describe records and result fields.
+The `extensions` field is an array of strings, `patch` is a JSON object, `basis` is a positive entry ID, and `refresh` is a boolean. Telemetry filters are described below. Other body fields are strings. `workflow` and `model` are mutually exclusive. The [wire shapes](protocol.md#versions-and-owned-shapes) describe records and result fields.
+
+### Model list
+
+`models` with `{}` or `{ "refresh": false }` lists locally known available chat models. The list call itself does not request a refresh. With `{ "refresh": true }`, Tau requests fresh catalogs from configured providers that support refresh and waits before listing models. New entries can then be used with `create` or `setModel`.
+
+If a provider refresh fails, that provider keeps its last known catalog. The refresh call returns `model_refresh_failed` rather than a partial success. You can retry the refresh or make a plain list call.
 
 ## Conversations
 

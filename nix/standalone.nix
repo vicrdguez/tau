@@ -49,7 +49,9 @@ let
         cp -R ${tauRuntime}/lib/tau/node_modules/. "$bundle/node_modules/"
         chmod -R u+w "$bundle/node_modules"
         find "$bundle/node_modules" -type f -perm -u+x -exec \
-          sed -i '1s|^#!${pkgs.nodejs-slim_24}/bin/node$|#!/usr/bin/env node|' {} +
+          sed -i \
+            -e '1s|^#!${pkgs.nodejs-slim_24}/bin/node$|#!/usr/bin/env node|' \
+            -e '1s|^#!${pkgs.stdenv.shell}$|#!/usr/bin/env bash|' {} +
 
         cat > "$bundle/bin/tau" <<'EOF'
         #!/bin/sh

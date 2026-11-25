@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-durable";
 import {
 	arr,
+	bool,
 	compile,
 	int,
 	map,
@@ -195,6 +196,8 @@ const page = <T>(
 	next === undefined ? { items } : { items, next };
 const badCursor = () =>
 	refuse("bad_cursor", "This cursor was not made by this call.");
+const modelRefreshFailed = () =>
+	refuse("model_refresh_failed", "Could not refresh models. Try again later.");
 const DEFAULT_LIMIT = 50;
 
 const project = str({ pattern: PROJECT });
@@ -224,14 +227,32 @@ export const calls: Readonly<Record<string, Call>> = {
 			})),
 		},
 	})),
-	models: unary(obj({}), async (host) => ({
-		result: {
-			items: (await host.models().getAvailable()).map((model) => ({
-				model: `${model.provider}/${model.id}`,
-				name: model.name,
-			})),
+	models: unary(
+		obj({ refresh: opt(bool()) }),
+		async (host, _device, { refresh }) => {
+			try {
+				const models = host.models();
+				if (refresh) {
+					const { aborted, errors } = await models.refresh({
+						allowNetwork: true,
+						force: true,
+					});
+					if (aborted || errors.size > 0) return modelRefreshFailed();
+				}
+				return {
+					result: {
+						items: (await models.getAvailable()).map((model) => ({
+							model: `${model.provider}/${model.id}`,
+							name: model.name,
+						})),
+					},
+				};
+			} catch (error) {
+				if (refresh) return modelRefreshFailed();
+				throw error;
+			}
 		},
-	})),
+	),
 	projects: unary(obj({}), async (host) => ({
 		result: { items: host.projects.list() },
 	})),
