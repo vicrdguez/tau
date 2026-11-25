@@ -34,6 +34,7 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `Agent` | type | `@earendil-works/pi-durable` |
 | `AgentChange` | type | `@earendil-works/pi-durable` |
 | `AgentDoc` | value | `@earendil-works/pi-durable` |
+| `Codemode` | value | `../host/catalogue.js` |
 | `CodingTools` | value | `@earendil-works/pi-durable/tools` |
 | `Conversation` | type | `@earendil-works/pi-durable` |
 | `ConversationId` | type | `@earendil-works/pi-durable` |
@@ -63,6 +64,8 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `ToolExecutionResult` | type | `@earendil-works/pi-durable` |
 | `ToolRegistration` | type | `@earendil-works/pi-durable` |
 | `Tx` | type | `@earendil-works/pi-durable` |
+| `UsageDoc` | value | `@earendil-works/pi-durable` |
+| `UsageState` | type | `@earendil-works/pi-durable` |
 | `configure` | value | `@earendil-works/pi-durable` |
 | `createRegistry` | value | `@earendil-works/pi-durable` |
 | `defineDoc` | value | `@earendil-works/pi-durable` |
@@ -96,6 +99,16 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `BACKGROUND_CONTEXT` | value | `@earendil-works/chord/context` |
 | `Context` | type | `@earendil-works/chord/context` |
 | `Draft` | type | `@earendil-works/chord/delta` |
+
+## `tau/telemetry`
+
+| Name | Kind | Origin |
+| --- | --- | --- |
+| `NOOP_TELEMETRY_METRICS` | value | `@earendil-works/pi-telemetry` |
+| `TelemetrySchemaDefinition` | type | `@earendil-works/pi-telemetry` |
+| `TypedTelemetryMetrics` | type | `@earendil-works/pi-telemetry` |
+| `createTypedMetrics` | value | `@earendil-works/pi-telemetry` |
+| `defineTelemetrySchema` | value | `@earendil-works/pi-telemetry` |
 
 ## `tau/testing`
 

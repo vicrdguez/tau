@@ -77,11 +77,18 @@ test("the bind and input calls of protocol.md replay against the real server", a
 			},
 		);
 		assert.equal(typeof submission.id, "number");
+		assert.ok(Object.values(submission.trace).length > 0);
+		assert.ok(
+			Object.values(submission.trace).every(
+				(value) => typeof value === "string",
+			),
+		);
 		release();
 		assert.deepEqual(Object.keys(submission), [
 			"id",
 			"conversationId",
 			"requestId",
+			"trace",
 			"type",
 			"status",
 		]);

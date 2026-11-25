@@ -24,6 +24,7 @@ export type {
 	ToolExecutionResult,
 	ToolRegistration,
 	Tx,
+	UsageState,
 } from "@earendil-works/pi-durable";
 export {
 	AgentDoc,
@@ -40,7 +41,9 @@ export {
 	LiveDoc,
 	MemoryStorage,
 	runEndTask,
+	UsageDoc,
 } from "@earendil-works/pi-durable";
 export { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 export { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 export { CodingTools } from "@earendil-works/pi-durable/tools";
+export { Codemode } from "../host/catalogue.js";

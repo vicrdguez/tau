@@ -217,7 +217,7 @@ async function extensionFixture(t) {
 		"tau-w1": { extension: true },
 		"tau-w2": {
 			extension: true,
-			tau: [".", "./durable", "./schema", "./chord"],
+			tau: [".", "./durable", "./schema", "./chord", "./telemetry"],
 			testOnly: { tau: ["./testing"] },
 		},
 	};
@@ -236,9 +236,15 @@ async function extensionFixture(t) {
 		await put(`${directory}/tsconfig.json`, {});
 	await put("core/package.json", {
 		exports: Object.fromEntries(
-			[".", "./durable", "./schema", "./chord", "./testing", "./server"].map(
-				(entry) => [entry, "./dist/src/index.js"],
-			),
+			[
+				".",
+				"./durable",
+				"./schema",
+				"./chord",
+				"./telemetry",
+				"./testing",
+				"./server",
+			].map((entry) => [entry, "./dist/src/index.js"]),
 		),
 		name: "tau",
 	});
@@ -467,6 +473,7 @@ for (const [specifier, replacement] of [
 	["@earendil-works/pi-durable/tools", "tau/durable"],
 	["@earendil-works/pi-schema", "tau/schema"],
 	["@earendil-works/chord/context", "tau/chord"],
+	["@earendil-works/pi-telemetry", "tau/telemetry"],
 	["@earendil-works/pi-ai/providers/faux", "tau/testing"],
 	["@earendil-works/future", "tau"],
 	["tau/dist/src/store/decisions.js", "tau"],
@@ -557,6 +564,7 @@ test("extensions accept only canonical facade entries with testing limited to te
 			"tau/durable",
 			"tau/schema",
 			"tau/chord",
+			"tau/telemetry",
 		]
 			.map((specifier) => `import "${specifier}";`)
 			.join("\n"),

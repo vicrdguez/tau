@@ -1,0 +1,2 @@
+{{brief}}
+Worker report: {{summary}}

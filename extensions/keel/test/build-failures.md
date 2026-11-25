@@ -1,0 +1,30 @@
+# Build lane: failure inventory (slice 3)
+
+- Only a confirmed build branch opens planning. Discovery retries may use corrected branch options. A start retries its original git plan unless the repository proves trunk moved through Keel's own landing and a fresh snapshot confirms that exact head.
+- Empty plans, unsafe or duplicate IDs, missing dependencies and cycles cannot start workers.
+- The coordinator cannot brief a future item, cite missing authority or hand off before every merge.
+- Ready briefs respect dependencies and worker capacity. Only confirmed worktrees receive worker input.
+- A dirty or unrelated worker cannot publish. The public tool schema and the actual worker publication are exercised separately.
+- Rulings belong to the writing item. Publication carries its brief, named threads, git SHA and rulings.
+- A failed verdict or merge returns evidence and thread IDs to the same worker under a fresh token. Neither advances the build head.
+- Worker preparation racing Keel's recorded advance replans under a new key and path. An unknown move, occupied path or exhausted effect files one holding finding. Resume rechecks a moved head against the latest recorded merge. Stale results never create workers.
+- Stopping a worker or coordinator holds only its current token, once. Resume delivers direction for one turn. Cancel retires agents, withdraws unclaimed creations and waits for claimed creations before removal. All failed and kept paths reach the work's final cleanup note, even from previously held attempts.
+- Only a confirmed merge moves the head, authorizes worker cleanup and enables dependent briefs and handoff. Kept private files are reported. A cleanup obstruction keeps handoff closed, and cleanup direction reaches the coordinator because the worker is retired.
+- A full-set failure or trunk conflict after handoff reaches the coordinator as a new correction plan, preserving merged history.
+- The verifier receives the worker's publication summary, observed item diff base and Git-reported principle and playbook changes. The current build head orders later integration; it does not supply the review comparison.
+- A full-set thread reaches the correction brief and worker. The worker can still claim that thread after an item-level rework, but cannot invent a claim.
+
+## Reviewed Mandate and principles (slice 4)
+
+- A reviewed Mandate with seams or rules refuses a missing or misplaced Encode, and any later item without a direct dependency on the first Encode.
+- The first plan must answer every approval annotation exactly once by number with a valid disposition and a nonblank reason. Fabricated numbers are refused.
+- Planning shows numbered approval notes and bound nodes. The accepted replies are kept, and the brief carries the cited node's label and content.
+- The planner, worker and verifier can distinguish binding design sections and falsifiable rules from delegated, non-binding riders. A delegated label cannot authorize a brief.
+- A correction adds work without reopening the first plan's approval replies or scheduling a second initial Encode.
+- Each worker input uses the policy from its own confirmed checkout base, including after publication and rework. An unrelated checkout cannot supply that policy.
+- The worker and the verifier see whether the brief authorizes Encode or ordinary work, not just an ambiguous goal.
+- A worker input supplies its fences for project principles. Only a rework in which a claimed fix survived triggers the premise check.
+- Item publication hands Verify the same path fences for matching verifier and diagnoser principles. Full-set handoff supplies no invented fences.
+- A ruling preserves cited principle names through publication; a worker cannot cite an undelivered principle.
+
+The scripted real-repository scenarios cover the tool-to-git boundary, authenticated model roles, durable publication and recovery. Kernel and repo suites cover retry timing, stale decisions, lock evidence, and exact path matching. Lane tests exercise the decisions above without filesystem or model scheduling.

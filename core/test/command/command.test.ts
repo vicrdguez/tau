@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,7 +31,7 @@ function run(env: NodeJS.ProcessEnv, args: string[]) {
 			execFile(
 				process.execPath,
 				[tau, ...args],
-				{ env },
+				{ env, timeout: 5000 },
 				(error, stdout, stderr) => {
 					resolve({
 						code: error === null ? 0 : Number(error.code ?? 1),
@@ -85,6 +85,29 @@ async function pair(env: NodeJS.ProcessEnv, url: string, device: string) {
 	return paired.body.result.token as string;
 }
 
+function proxied(url: string, token: string, host: string, origin?: string) {
+	return new Promise<number>((resolve, reject) => {
+		http
+			.request(
+				`${url}/v1/projects`,
+				{
+					method: "POST",
+					headers: {
+						Host: host,
+						Authorization: `Bearer ${token}`,
+						...(origin === undefined ? {} : { Origin: origin }),
+					},
+				},
+				(response) => {
+					response.resume();
+					resolve(response.statusCode ?? 0);
+				},
+			)
+			.on("error", reject)
+			.end("{}");
+	});
+}
+
 test("tau starts on ~/.tau at an ephemeral port, and the device commands reach it through the admin socket", async () => {
 	const env = await home();
 	await mkdir(path.join(env.HOME, ".tau", "projects", "Bad"), {
@@ -97,24 +120,8 @@ test("tau starts on ~/.tau at an ephemeral port, and the device commands reach i
 		assert.equal(socket.mode & 0o777, 0o600);
 		const token = await pair(env, server.url, "phone");
 		assert.equal((await post(server.url, "projects", {}, token)).status, 200);
-		const proxied = (host: string) =>
-			new Promise<number>((resolve) => {
-				http
-					.request(
-						`${server.url}/v1/projects`,
-						{
-							method: "POST",
-							headers: { Host: host, Authorization: `Bearer ${token}` },
-						},
-						(response) => {
-							response.resume();
-							resolve(response.statusCode ?? 0);
-						},
-					)
-					.end("{}");
-			});
-		assert.equal(await proxied("tau.example.ts.net"), 200);
-		assert.equal(await proxied("evil.example"), 401);
+		assert.equal(await proxied(server.url, token, "tau.example.ts.net"), 200);
+		assert.equal(await proxied(server.url, token, "other.example"), 401);
 		const listed = await run(env, ["device", "list"]);
 		assert.equal(listed.code, 0);
 		assert.match(listed.stdout, /phone/);
@@ -132,6 +139,65 @@ test("tau starts on ~/.tau at an ephemeral port, and the device commands reach i
 	} finally {
 		server.child.kill("SIGKILL");
 		await once(server.child, "exit");
+	}
+});
+
+test("the persisted allowlist keeps a paired client connected after its launch flags are removed", async () => {
+	const env = await home();
+	const tauHome = path.join(env.HOME, ".tau");
+	await mkdir(tauHome);
+	await writeFile(
+		path.join(tauHome, "config.json"),
+		JSON.stringify({ allowedHosts: ["proxy.example"] }),
+	);
+	const first = await serve(env, ["--allow-host", "temporary.example"]);
+	let token: string;
+	try {
+		token = await pair(env, first.url, "phone");
+		assert.equal(await proxied(first.url, token, "temporary.example"), 200);
+		assert.equal(await proxied(first.url, token, "proxy.example"), 200);
+	} finally {
+		first.child.kill("SIGTERM");
+		await once(first.child, "exit");
+	}
+	const second = await serve(env);
+	try {
+		assert.equal(
+			await proxied(
+				second.url,
+				token,
+				"proxy.example",
+				"https://proxy.example",
+			),
+			200,
+		);
+		assert.equal(await proxied(second.url, token, "temporary.example"), 401);
+		assert.equal(
+			await proxied(
+				second.url,
+				token,
+				"proxy.example",
+				"https://other.example",
+			),
+			401,
+		);
+	} finally {
+		second.child.kill("SIGTERM");
+		await once(second.child, "exit");
+	}
+});
+
+test("tau refuses to start with an invalid allowlist and names the config file", async () => {
+	const env = await home();
+	const tauHome = path.join(env.HOME, ".tau");
+	await mkdir(tauHome);
+	const config = path.join(tauHome, "config.json");
+	for (const contents of ["{", '{"allowedHosts":[42]}']) {
+		await writeFile(config, contents);
+		const result = await run(env, ["--port", "0"]);
+		assert.equal(result.code, 1, result.stderr);
+		assert.ok(result.stderr.includes(config), result.stderr);
+		assert.doesNotMatch(result.stdout, /listening/);
 	}
 });
 

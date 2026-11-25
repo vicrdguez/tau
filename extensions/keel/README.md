@@ -1,0 +1,174 @@
+# Keel development workflow
+
+Start a Keel conversation in a Git project and describe a change. For a bug, performance issue or other change fully determined by an approved reference, the designer binds a small Mandate under the authority of the prompt. There is **no Mandate approval step** on this path. The reference, intent, labelled rules and probes, and timed proof commands are the starting record. You first see that bound Mandate at hand-over. If no approved reference settles a direction, seam, crossing, domain rule or first of its kind, the designer audits the code and documents against your intent. Keel runs an arena before asking you to settle the proposed Mandate.
+
+## Before the first run
+
+- In the Tau client, use `setOptions` to set `design`, `build`, `verify` and `queue` as `provider/modelId`. Put `verify` on a different provider from `build`; Keel does not enforce this separation.
+- Set `arena_seat_1` and `arena_seat_2` to different providers. Set `arena_judge` to a different provider from `designer` (which defaults to `design`). If the seat and judge options are unset, they fall back to `design`. If the designer routes to `precedent`, the two seats then share a provider and Keel refuses to run the arena until you change the options and retry.
+- `base` defaults to `main` and must name an existing local branch with a commit. `trunk` defaults to `trunk`. Check that no stray branch already uses the configured trunk name. Keel creates a missing trunk from base and refuses an existing trunk that does not descend from base.
+- Try the proof commands in a fresh checkout under `.git/keel/` with the Tau server's environment. Keel installs nothing there. Use a runner and dependencies available in that environment, and check that the runner discovers tests in that path: some runners, including Jest by default, ignore paths under `.git/`. A proof must leave tracked files and HEAD unchanged.
+- Leave `sweep_minutes` unset to keep the sweep off.
+
+## Roles and tools
+
+| Who | What they do | Keel tools |
+| --- | --- | --- |
+| Designer (the entry conversation) | Classifies the request, frames the arena, writes the synthesis and proposes live revisions. Records two readings if they lead to different results. Remains the owner's desk. | `dispatch`, `ground`, `frame_arena`, `start_experiment`, `record_experiment`, `publish_mandate`, `answer_challenger`, `publish_revision`, `request_cancel` (standing) |
+| Coordinator (one per work) | Plans goals and dependencies, briefs ready items against named Mandate nodes, and hands the merged build to Verify. It has `read` and does not implement. | `publish_plan`, `brief_item`, `handoff_build` |
+| Worker (one checkout per attempt) | Implements the brief inside its fences. Records rulings with their reference and cost if wrong. Publishes a clean committed build and names the block threads it addressed. Keel reads the commit from Git. | `dispatch`, `record_ruling` (standing), `publish_build` |
+| Verifier | Checks each published commit in a detached checkout, then checks the whole build. Names block threads and their evidence, and keeps lesser findings as notes. | `publish_verdict` |
+| Diagnoser | After the same block survives two **claimed** fixes, independently tests the shared premise before the owner is asked. | `publish_diagnosis` |
+| Investigator (one per project) | Reproduces or measures, checks the queue and plan for duplicates, and recommends a route. Does not design the fix. | `dispatch`, `report_investigation` |
+| Sweeper (one child per scheduled tick) | Reads a pinned repository revision, compares it with the playbook and reviewed history, and reports drift and principle proposals. | None; uses `read` and `bash` for inspection. |
+
+Bound agents can use the standing `file_finding` tool. Designers, verifiers, diagnosers and the investigator have `read` and `bash`. Workers also have `edit` and `write`. Every role and dispatch child can use codemode to call only its own tools that permit nested calls, which excludes Keel tools. A role's tool list is not a filesystem sandbox. In particular, proof commands are executable project data: the designer must choose trusted, replay-safe commands suitable for a disposable checkout. Item, full-set and landing reviews all show the changed `.keel/principles/` and `.keel/playbooks/` paths reported by Git. These should be unchanged unless an item under review was tasked with creating or changing them. A weakened check is a block.
+
+## Dispatch and the arena
+
+`dispatch` joins up to eight independent questions and returns every answer or failure in job order. The designer can use `design_explorer` before or after Ground. Workers use `build_explorer`; the investigator uses `queue_explorer`. Explorers read Git, repository documents, and Keel's public lane views. Their record excludes cancelled and declined work. It shows full owner-reviewed Mandates and recorded rulings for the three most recent works with approved material, and a goal and one line per node for earlier works. For precedent-following work, it shows only current nodes changed by approved, applied revisions, not the unreviewed Mandate. Project patterns the owner blessed or revoked also appear. Children cannot dispatch.
+
+The designer frames one question and rubric. Keel gives the same prompt to two candidates, or three if `arena_seat_3` is set. Keel uses the provider in `provider/modelId` as the family proxy. Candidates must use distinct providers, and the judge must use a different provider from the designer. If a stage fails, the decision names the seats to retry. A refusal on retry names only the seats whose models can still change. `retry` repeats only failed seats, with the same inputs and the models configured now, after checking their families. Successful seats and prior attempts stay in the record.
+
+The judge sees seat labels, not model names, and lists each candidate's unasked decisions. Judges and prototypes can put prose around their JSON. Keel takes the first fenced block that parses as JSON, or the first parseable object or array if no fence parses. The designer attributes each graft to its source and Mandate label. Every reported unasked decision of the base, a graft source, or a winning prototype must name one outcome: a labelled rider, a labelled node, or a reason for not taking it. An incomplete account cannot open a review. A challenger examines the synthesis the first time a base goes to review in each arena. The designer answers each objection and can revise the draft in the same turn. `acted_on` requires a changed draft.
+
+For an observable question, write the protocol before prototyping: one named node, a question, the decision rule, shared controls and variants along one axis. Keel asks each prototype to work in a separate temporary directory. These are working directories, not sandboxes. They remain for inspection. The designer compares the results against the rule and records inconclusive evidence when the results do not establish a winner.
+
+Dispatch lives in `src/dispatch/`. A tool or effect task owns its children and pins job order, child IDs and the batch deadline. Restart rejoins the original submissions. A settled answer is not requested again. After the deadline Keel preserves completed answers and treats unfinished seats as timed out. Time while the server is down counts. An in-flight provider request and interrupted tool side effects are not exactly-once. The limits depend on the provider and tools honouring Tau's abort signal. Keel stops a withdrawn dispatch stage and its children before reporting cancellation cleanup. A platform-faulted effect reports a failure to its lane. If the fault leaves no receipts, retry runs the whole stage again. A child that ignores abort can delay cancellation cleanup until restart. Children do not compact and may exhaust their context before the round limit.
+
+## Review a Mandate
+
+The designer reports what exists and labels gaps and contradictions without declaring them defects. The review shows the proposed rulings, the done predicate, each seam's callers, caller code before signatures, ownership and allowed dependencies, rules and their falsifying probes, anti-criteria, timed proofs, tradeoffs and alternatives. Each rider has a label, an origin and a proposed disposition: bind or leave open to agents.
+
+- **Review:** `approve` approves the Mandate as shown, including rider dispositions and nodes that cite references. The review puts the Mandate and riders first. It shows each source candidate's own unasked decisions beside the judge's list, with the text of each outcome's target and whether a rider binds or is open, then the objections and dispositions. The final evidence section includes graft sources, the judge's report, experiment results and every candidate in full. It does not bind. `rework` sends your numbered annotations back to the designer. Later rounds on the same base say which round the challenger examined. Annotate a rider the same way you annotate a seam or rule. Every annotation needs a reply (acted on, considered or dismissed, with a reason). `decline` ends the work without building and records annotations still owed as not pursued.
+- **Choose a direction:** `base:<seat>` makes the named candidate the next synthesis base without approving it. The challenger runs before the first review on that base. The next review names the new and replaced bases at the top, even if the Mandate is unchanged. `arena` starts a new arena seeded with the current review and your annotations. `arena_fresh` starts another arena without giving its candidates the earlier review. Earlier candidates, reports and rounds are kept.
+- **Another round:** the review opens with the labels that changed, were added, or were removed. Changed entries include their previous content, and removed entries show separately. Answers to older rounds cannot authorize a different draft. Every revision, answer and numbered reply remains in the record.
+- **Build:** approval makes the proposed binding riders binding nodes and delegates the open ones. Your approval annotations go to the first plan for a numbered reply, and you see the replies at hand-over. A reviewed Mandate with seams or rules requires Encode first: the scaffold, dependency boundaries and rule checks. Every later item depends on Encode. Briefs cite binding nodes, never delegated riders.
+
+## Findings and triage
+
+Tell the work's designer what you found. The designer can file it on your behalf, but the message by itself does not move work. A verifier note files a finding automatically and does not block the build. Each finding keeps its work goal, source revision, report, and cited Mandate labels when available. An unlikely edge case needs its failure mode, likelihood, and complexity cost. It holds nothing unless you answer `build` on a wrong-Mandate finding. An item worker or verifier that cannot continue can hold only its own item. When a finding goes to the plan, every blocked filer stays held until every item planned for it has merged, then starts a fresh attempt from the new build head.
+
+| Investigation result | What happens |
+| --- | --- |
+| Defect under the current Mandate | The coordinator adds discovered work without an owner decision. A project finding without an active work gets ordinary `build`, `defer` or `drop` triage. |
+| No action | The investigator may close an unlinked observation on a work that you did not file, that holds no filer, and whose investigation report names no binding nodes to change. The reason appears at hand-over, or as a note if the hand-over has already been written. |
+| Determined by an approved reference | `build` adds it to the active plan or seeds new work under the reference. There is no Mandate approval. `defer` or `drop` keeps the record without starting work. |
+| Precedent-setting work | `build` seeds Ground and Mandate review. `defer` or `drop` starts nothing. |
+| Wrong Mandate | In an active build, classification holds items with briefs that cite affected nodes, except for unlikely edge cases. `build` holds those nodes for every class and opens or joins a revision in draft or review. A finding added during review supersedes the old review with the full evidence. Approval closes that revision to new findings. They open the next revision after the approved plan applies. `drop` or `defer` releases the finding's holds without removing the obstacle for a blocked filer. After handoff, `build` starts follow-up design without holding landing. |
+| Unapproved pattern cited by a ruling | A worker uses `pattern: true` when `follows` names a project pattern. `bless` makes it a project reference. `revoke` seeds work to make the pattern fail structurally and migrate its callers. `defer` keeps the finding for later. |
+
+The investigator links evidence by naming an earlier finding with the same cause. If its decision is open, Keel supersedes that decision and shows every member's report, affected nodes, and any filer who could not continue. If the decision was answered or the finding closed, you get a new decision citing what happened before. No finding inherits an answer. A new filer linked to a defect already being fixed shares its hold without a decision. Keel refuses the link if the filer is part of the fix or the fix depends on it, directly or indirectly. The investigator reports that defect separately so it can get its own fix. A pattern ruling closes only its own decision. A later citation of a revoked pattern goes to rework. A counterexample filed by you or the sweep reopens triage for a blessed pattern; it stays blessed until you revoke it. Your latest blessing or revocation is the authority across works, regardless of the order in which the reports were filed.
+
+Ordinary deferred findings keep their disposition in the queue. Nothing reopens them on a timer. A later report can bring a finding back to triage.
+
+### Project sweep
+
+The sweep is off by default. Set `sweep_minutes` to a positive whole number. If configured before the first work, the sweep is armed on the first accepted Ground or queue seed. It then continues even when no work is active. Once Keel knows the directory, changing the setting replaces the timer and clearing it stops the timer and any running sweep. A tick pins the then-current trunk (or the base before trunk exists) and computes the compact index of owner-reviewed authority and recent landed samples from the work records. It does not acquire the landing slot.
+
+The sweep looks for un-runnable verification playbook instructions, repeated workarounds and type escapes, callers depending on module internals, and decisions that disagree with the code. Findings use the same investigator and triage as other project findings. Findings with no work cannot be closed as no action. The sweeper sees its earlier findings and dispositions and is instructed to skip dropped or deferred findings unless the evidence changed.
+
+After a tick settles, including a failure, the next tick sleeps durably for the configured interval. Restart rejoins the original dispatch rather than creating another tick. Missed wall-clock intervals do not produce a backlog.
+
+Limits: the sweeper and investigator rely on their instructions to read the pinned commit rather than the working tree. A rejected hand-over still counts as a landing for sweep history.
+
+## Live plan
+
+Items begin as goals and dependencies. The coordinator briefs ready items against the current build head, up to `max_workers`, and each item uses its own checkout. Only a merged dependency makes a dependent item ready. Review can proceed in parallel, but merges into the build branch are serialized.
+
+An unresolved Mandate node hold prevents full-set handoff, even if the affected item already merged. When you approve a mid-build Mandate revision, the coordinator can add, edit, reorder, or drop unstarted items. The revision review pairs each finding's number and headline with the nodes and reason that answer it. A revision can change but cannot remove a node cited by a started item. If the designer proposes no change, the review shows which bound nodes settle the findings and why; approval without notes releases their holds without another plan. Otherwise the revision and plan edits become active together. Unaffected items keep moving. A verified item is a record; correcting it takes a new item. A revision plan can add dependencies to a held filer, but cannot introduce dependencies, direct or indirect, on an item that will stay held. A held item resumes only after its dependencies merge and its last hold clears.
+
+When a transaction loads an active build and leaves it with no agent expected to act, no pending operation and no open decision about it, Keel asks you to `resume` or `cancel`. The holding decision lists each unfinished item, its holds and what it depends on. `resume` gives the coordinator that same picture and your direction to replan without releasing other holds. If the coordinator stalls after sending a plan Keel refused, the decision includes the refusal.
+
+## Principles
+
+Designers, coordinators, workers, verifiers and diagnosers can call `principle({name})` once they have an active binding. While the entry designer is unbound during Ground it sees no principle index. Once bound, the index lists names and descriptions, first Keel's and then the project's, in filename order. A ruling's `follows` names its reference; `principles` lists the principles it cites. Merely seeing a description, or someone else's pull, does not authorize a citation. Pulls, input deliveries and citations are recorded per conversation.
+
+Keep `.keel/principles/` and `.keel/playbooks/` as real directories inside the repository, not symlinks. Add one Markdown file per principle under `.keel/principles/`. Give it a one-line description and a body. Optional roles or matching paths deliver the full body automatically. A fence is a literal repository-relative file or directory path, one per line, without spaces or globs. Use `.` for the whole repository. For example, `src`, `src/ledger` and `./src/ledger/post.ts` all match `src/ledger/**`. Fences do not limit what an agent can pull by name. In principle `paths`, `./src/ledger/**` and `src/ledger/**` mean the same thing. A parent fence does not match a brace pattern spanning directories. Write `src/ledger/**` and `lib/ledger/**` as separate patterns instead of `{src/ledger,lib/ledger}/**`. For example:
+
+```markdown
+---
+description: Keep rounding at the ledger boundary.
+roles: [verifier]
+paths:
+  - "src/ledger/**"
+---
+
+Round only when posting a ledger entry. Compare the sum of the posted entries with the settled balance.
+```
+
+The frontmatter accepts a scalar description and inline or block lists of strings. A project name that matches a Keel name appears as `project/<name>`. A malformed project file or an unknown role name produces a diagnostic; its body is not delivered. Other files remain available.
+
+The worker's index, automatic bindings and explicit pulls all use the principles from its item's prepared base. Other bound roles read from their own checkouts. A verifier receives every project description from the checkout it reviews. Keel binds `model-the-domain` when the designer shapes or revises a Mandate. A failed claimed fix adds `attack-the-premise` to the worker's rework input. A diagnosis gets both `attack-the-premise` and `fix-root-causes`.
+
+A verifier can link a principle it pulled to a failing thread. The block returns to Build as usual; the separate proposal to sharpen the description or bind the principle waits for triage. The sweep uses the last 30 landed worker items, their recorded pulls and deliveries, their ruling citations and the project principles available at their prepared bases. The [sweeper input](src/prose/inputs/queue/sweep.md#principle-proposal-thresholds) states the binding and removal thresholds. These proposals go to you. The sweeper and investigator are instructed to inspect only; their shell access is not a read-only sandbox. The verifier reads `.keel/playbooks/verify.md` from the candidate commit. Keel does not load other project playbooks into the verifier's input.
+
+## What the owner decides
+
+- **Ambiguity:** choose the first or second reading, optionally annotating the choice, or decline the work. Keel returns the chosen reading to the designer before a Mandate can bind.
+- **Before landing:** ask the designer to cancel. Its standing `request_cancel` tool opens a confirmation; only answering `cancel` cancels. `continue` leaves the work alone. Keel does not stop the designer's conversation. After landing, accept or reject the hand-over instead.
+- **Holding finding:** `resume` with direction, or `cancel` the entire piece of work. The lane that stopped asks this for diagnosed non-convergence, moved refs, occupied paths, exhausted effects or a stalled agent. Stopping a running agent in the client goes here too. An investigator's stall is different: its `cancel` drops that finding, not the work. An item resume resets its survived-fix counts. A chat message is not a decision. Cancellation is recorded before agents are stopped. Keel waits for claimed operations that can still change a checkout and removes what it can prove disposable. One final cleanup note lists what it could not remove. Build and item branch refs survive. A landing already in flight can finish; Keel reports what actually happened.
+- **Hand-over:** `accept` closes the work. `reject` needs at least one annotation. Each annotation becomes an owner finding with the landed commit and hand-over evidence. The investigator reports on it before you choose `build` for new work, `defer` to keep it in the queue, or `drop` to close it. The commit, result against intent, rulings in order of cost if wrong, verifier notes, diagnosed non-convergence, your ambiguity readings and annotations, direction on findings and in triage, the coordinator's replies grouped by approval, the fields changed in each Mandate revision or which nodes settled its findings without changes and why, work findings and their dispositions at landing, and residual risk are in the decision basis. The bound Mandate appears before the rulings for work that followed precedent. For work whose Mandate you reviewed, the hand-over shows revisions without repeating the original Mandate. The landing slot has already been released. Rejecting does not revert trunk or prevent other work from landing.
+
+## Git and recovery
+
+Keel starts `keel/<work>/build` from its configured trunk (initializing a missing trunk from the base). A worker builds on `keel/<work>/item/<item>-<attempt>`. Worker, verifier and integration directories live beneath `<git-common-dir>/keel/<work>/`. Passing items merge one at a time against the current build, with the Mandate's proof commands and their timeouts. Conflicts and failed integration proofs go back as integration work, not verdicts. Verifier checkouts are removed on pass or supersession. Cleanup preserves worker data it cannot safely remove.
+
+After full-set verification, one work at a time takes trunk into the build and prepares a landing. If trunk advanced from the verified baseline, a verifier checks the exact prepared commit before Keel updates the ref. A changed result lands as one commit whose only parent is the previous trunk; an unchanged tree needs no empty commit. **Keel never updates the base or promotes trunk to `main`.** Promotion is the owner's decision outside Keel.
+
+The kernel reconciles lane declarations into durable decisions, one tagged turn at a time per agent, and repository plans. Stored records carry a version; a later version can supply a migration when the shape changes. `keel.answer`, `keel.deliver`, `keel.effect`, `keel.effect-result` and `keel.stop` run the continuations. Git operations use pinned plans and ownership evidence so a restart can recognize a completed write. See [repository guarantees and limits](src/repo/README.md), including proof replay and worktree retention.
+
+## Project options
+
+Set four lane models in `provider/modelId` form. The defaults and overrides below govern model selection; to run a precedent-setting arena, configure distinct providers as described in [Before the first run](#before-the-first-run). `arena_seat_3` both selects the third candidate's model and enables its seat.
+
+| Required lane model | Optional role and seat overrides |
+| --- | --- |
+| `design` | `designer`, `design_explorer`, `design_prototype`, `arena_seat_1`, `arena_seat_2`, `arena_seat_3`, `arena_judge`, `arena_challenger` |
+| `build` | `coordinator`, `worker`, `build_explorer` |
+| `verify` | `verifier`, `diagnoser` |
+| `queue` | `investigator`, `queue_explorer`, `sweeper` |
+
+`base` defaults to `main`; `trunk` defaults to `trunk`. Use distinct short branch names outside Keel's namespace. `trunk` cannot be `main`. `max_workers` is a positive integer (default `3`); it bounds concurrent items in a build. `dispatch_rounds` limits tool rounds per child (default `64`), and `dispatch_minutes` sets the shared deadline per batch (default `20`). Both are positive integers. `dispatch_minutes` and `sweep_minutes` each have a maximum of 35,791 minutes.
+
+`sweep_minutes` is optional; clear it to turn the sweep off. `sweeper` selects the inspecting model independently of `investigator`; it defaults to the `queue` lane model.
+
+## Project metrics
+
+Keel records metrics in Tau after each relevant commit. Replaying a committed transition adds no samples. A crash between commit and recording can lose a sample. Keel does not record cost yet.
+
+| Metric | What it tells you |
+| --- | --- |
+| `keel.work.started` | How many works start on each Ground route. It counts only the first accepted Ground. |
+| `keel.work.duration` | How many milliseconds elapse between Ground and closure, by outcome. Works without a start time have no sample. |
+| `keel.mandate.rounds` | How many answered rounds a Mandate review takes, including the approval or decline. |
+| `keel.revision.rounds` | How many answered rounds a live revision review takes, including the approval or decline. |
+| `keel.arena.seat` | How often a seat succeeds or fails, by stage and pinned model. A run without receipts adds no seat samples. |
+| `keel.item.attempts` | How many build or Encode attempts an item takes to merge. |
+| `keel.verdict` | How many `item`, `full`, and `landing` verdicts pass or fail. |
+| `keel.item.reviews` | How many verdicts an item receives through its passing verdict. |
+| `keel.integration` | How often integration returns `merged`, `combined`, `conflict`, or `checks_failed`. |
+| `keel.landing` | How often landing advances trunk or leaves it unchanged. |
+| `keel.hold` | How often Design, Build, or Verify opens a holding decision, by cause. |
+| `keel.finding` | How many findings the investigator classifies in each class. |
+| `keel.decision.wait` | How many milliseconds the owner takes to answer, by lane and choice. It groups `base:<seat>` choices under `base`. |
+
+## Known limitations
+
+- Ordinary deferrals have no scheduled revisit; changed or newly reported evidence can bring them back.
+- `no_action` checks the investigator's node list, not the filer's; a cited node can be missed if the investigator omits it.
+- Failed integration proofs return to the worker without a cap or owner decision: the diagnosis path only counts verifier-reported blocks, and the passing verdict has already retired its checkout before integration runs.
+- A held filer's fresh attempt starts at the new build head, not at its own in-progress commits; inspect its old branch to recover them.
+- One stalled investigation blocks later findings for the project until you answer its stall decision.
+- The silent-wait check only covers active builds loaded by the transaction. A wait after handoff is not detected, and a shared queue action can still uncover a wait in another work it did not load.
+- A brief can start citing a node after a revision proposes removing it; after approval that brief can cite a node that no longer exists.
+- The Mandate excerpts in a triage decision reflect classification time and can be stale when you answer.
+- Unasked-decision accounting checks what the models report; omissions not reported by any model can still reach a review.
+- Explorer and sweep histories have no overall cap; their context grows as more work and findings accumulate.
+- A Git effect makes three attempts with about 300 ms total backoff and has no Git-command timeout; a slow obstruction can exhaust retries or hang the effect. See [repository guarantees and limits](src/repo/README.md) for Git behavior and recovery limits.
+- If you stop an agent between runs while it is idle, that stop does not itself open a holding decision.
+- Setting identical `trunk` and `base` names is refused, but Tau reports it as `storage_failed` rather than `bad_options`; the message names both options.
+- A fence is checked for syntax, not existence; a placeholder such as `TBD` can be accepted as a path.
+- A queue-seeded work has its own designer conversation. Keel does not provide a direct link to that conversation from the triage answer.
+- Wrong-Mandate findings currently ask for triage before revision review; whether both owner decisions are needed remains open.
+- Investigator `no_action` closure is provisional policy pending owner confirmation; qualifying observations may close before you see them.

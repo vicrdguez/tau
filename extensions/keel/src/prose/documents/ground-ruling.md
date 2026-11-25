@@ -1,0 +1,3 @@
+Observation: {{observation}}
+
+{{label}}: {{ruling}}

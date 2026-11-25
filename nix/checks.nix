@@ -10,6 +10,7 @@
 let
   inherit (pkgs) lib;
   verifiedExtensions = [
+    "keel"
     "w1"
     "w2"
     "webkit"

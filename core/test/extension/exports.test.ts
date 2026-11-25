@@ -10,15 +10,18 @@ import * as nodeEnv from "@earendil-works/pi-durable/env/node";
 import * as sqlite from "@earendil-works/pi-durable/storage/sqlite/node";
 import * as durableTools from "@earendil-works/pi-durable/tools";
 import * as piSchema from "@earendil-works/pi-schema";
+import * as piTelemetry from "@earendil-works/pi-telemetry";
 import * as root from "tau";
 import * as chord from "tau/chord";
 import * as durable from "tau/durable";
 import * as schema from "tau/schema";
 import * as server from "tau/server";
+import * as telemetry from "tau/telemetry";
 import * as testing from "tau/testing";
 import ts from "typescript";
 import * as helpers from "../../src/extension/helpers.js";
 import * as admin from "../../src/host/admin.js";
+import * as catalogue from "../../src/host/catalogue.js";
 import * as host from "../../src/host/index.js";
 import * as loader from "../../src/host/loader.js";
 import * as decisions from "../../src/store/decisions.js";
@@ -34,11 +37,12 @@ const entries = {
 	"./durable": durable,
 	"./schema": schema,
 	"./chord": chord,
+	"./telemetry": telemetry,
 	"./testing": testing,
 	"./server": server,
 };
 
-test("tau exposes exactly six package entries", () => {
+test("tau exposes exactly seven package entries", () => {
 	assert.deepEqual(
 		Object.keys(manifest.exports).sort(),
 		Object.keys(entries).sort(),
@@ -156,9 +160,18 @@ test("README tables match every emitted value, type, and origin exactly once", (
 	}
 });
 
+test("tau/durable exports the codemode extension installed by the host", () => {
+	const installed = catalogue.builtInExtensions.find(
+		(ext) => ext.name === "codemode",
+	);
+	assert.ok(installed);
+	assert.equal(durable.Codemode, installed);
+});
+
 test("extension re-exports preserve Tau and pi object identity", () => {
 	const origins: Record<string, Record<string, unknown>> = {
 		"./helpers.js": helpers,
+		"../host/catalogue.js": catalogue,
 		"../store/decisions.js": decisions,
 		"../store/events.js": events,
 		"../store/testing.js": storeTesting,
@@ -173,6 +186,7 @@ test("extension re-exports preserve Tau and pi object identity", () => {
 		"@earendil-works/pi-durable/storage/sqlite/node": sqlite,
 		"@earendil-works/pi-durable/tools": durableTools,
 		"@earendil-works/pi-schema": piSchema,
+		"@earendil-works/pi-telemetry": piTelemetry,
 	};
 	for (const [entry, values] of Object.entries(entries)) {
 		for (const { name, kind, origin } of rows(entry)) {

@@ -5,10 +5,11 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ExtensionModule } from "./index.js";
 import type { Options } from "./options.js";
 
-export const builtInExtensions: readonly Extension[] = [
-	CodingTools,
-	createCodemodeExtension({ sandbox: new CodemodeSandbox() }),
-];
+export const Codemode = createCodemodeExtension({
+	sandbox: new CodemodeSandbox(),
+});
+
+export const builtInExtensions: readonly Extension[] = [CodingTools, Codemode];
 
 type Loaded = {
 	readonly module: ExtensionModule;

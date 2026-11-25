@@ -58,7 +58,7 @@ nix run .#tau -- device list
 
 Extensions are optional and are not installed by `nix run`. An empty extension directory starts an empty server. Use the existing extension installation workflow when needed. The CLI prints usage and exits 2 for `--help`.
 
-On Apple Silicon macOS, `nix run .#install-launchagent` puts the already-built `tau` package in a dedicated `tau-launchagent` Nix profile. The LaunchAgent points to that profile. Rerun the command after pulling updates to switch the profile and restart the service. The command does not build anything after it starts and does not write to the checkout.
+On Apple Silicon macOS, `nix run .#install-launchagent` puts the already-built `tau` package in a dedicated `tau-launchagent` Nix profile. The LaunchAgent points to that profile. Rerun the command after pulling updates to switch the profile and restart the service. Pass `-- --allow-host NAME` to add a hostname to `~/.tau/config.json` before the service restarts. Repeat `--allow-host NAME` to add more than one hostname. Without the flag, the installer leaves the config file alone. The command does not build anything after it starts and does not write to the checkout.
 
 ## Build and run the Linux image
 

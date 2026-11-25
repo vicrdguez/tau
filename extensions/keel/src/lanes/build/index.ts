@@ -1,0 +1,909 @@
+import {
+	directions,
+	holdingAsk,
+	holdingBasis,
+	holdingScope,
+	holdingSubject,
+	resumption,
+} from "../../holding.ts";
+import { effectKey } from "../../kernel/ids.ts";
+import {
+	type Accepted,
+	defineLane,
+	type EffectDecl,
+	type KernelEvent,
+	type Lane,
+	type Measure,
+	type Message,
+	type Reduction,
+	type StaticFacts,
+	type World,
+} from "../../kernel/lane.ts";
+import { parseFences } from "../../principles/fences.ts";
+import {
+	layout,
+	type PublishResult,
+	type RepoInfo,
+	type RepoResult,
+	type Sha,
+} from "../../repo/index.ts";
+import { mandateLabels, type Reply } from "../design/public.ts";
+import { cancelWork, closeFindings, fileIntake } from "../queue/public.ts";
+import { holdingReport, type Publication } from "../verify/public.ts";
+import { agents, ownerDirection, renderReport } from "./agents.ts";
+import { cancel, cleanupEffects, settleCleanup } from "./cancel.ts";
+import {
+	addDirection,
+	addQueueHold,
+	applyRevision,
+	releaseQueueHold,
+	replan,
+	revisionPlanHold,
+	waitingPicture,
+} from "./live-plan.ts";
+import type { BuildUpdate, Ruling } from "./public.ts";
+import {
+	affects,
+	type Brief,
+	type Build,
+	buildDoc,
+	buildView,
+	depsReady,
+	type Goal,
+	held,
+	type Item,
+	newItem,
+	parked,
+	queueHeld,
+	recordApproval,
+	repoHeld,
+	unplannedFinding,
+	validatePlan,
+	workerKey,
+} from "./state.ts";
+
+export { buildTools } from "./tools.ts";
+
+type Event =
+	| BuildUpdate
+	| { kind: "plan"; items: Goal[]; replies?: Reply[] }
+	| ({ kind: "brief"; item: string; fences: string } & Omit<Brief, "fences">)
+	| { kind: "handoff"; summary: string; risk: string }
+	| {
+			kind: "ruling";
+			agent: string;
+			ruling: Ruling;
+			pattern: boolean;
+			sha: Sha | null;
+	  }
+	| {
+			kind: "publish";
+			agent: string;
+			summary: string;
+			addresses: string[];
+			facts: PublishResult;
+	  }
+	| { kind: "cancel" };
+
+function coordinator(
+	s: Build,
+	tool: Build["coordinator"]["tool"],
+	item: string | null = null,
+) {
+	const c = s.coordinator;
+	c.direction = tool ? c.pendingDirection : "";
+	if (tool) c.pendingDirection = "";
+	Object.assign(c, { tool, item, seq: ++s.seq });
+}
+function schedule(s: Build, w: World) {
+	if (s.phase !== "active") return;
+	const c = s.coordinator;
+	let slots =
+		w.options.max_workers -
+		s.items.filter(
+			(i) =>
+				i.stage === "cleaning" ||
+				(i.stage !== "planned" && i.stage !== "merged" && !i.parked),
+		).length -
+		Number(c.tool === "brief_item");
+	for (const i of s.items) {
+		if (slots <= 0) break;
+		if (
+			!i.parked ||
+			i.stage === "cleaning" ||
+			i.stage === "merged" ||
+			held(s, i.id) ||
+			!depsReady(s, i)
+		)
+			continue;
+		i.parked = false;
+		if (i.refreshAfterFix) {
+			i.refreshAfterFix = false;
+			prepare(s, i, w);
+		}
+		i.seq = ++s.seq;
+		slots--;
+	}
+	if (c.tool || held(s, null)) return;
+	if (s.revision || unplannedFinding(s)) {
+		coordinator(s, "publish_plan");
+		c.revising = !!s.revision;
+		c.finding = !s.revision;
+		return;
+	}
+	if (s.items.every((i) => i.stage === "merged")) {
+		if (!s.queueHolds.some((h) => h.nodes.length))
+			coordinator(s, "handoff_build");
+		return;
+	}
+	if (slots <= 0) return;
+	const next = s.items.find(
+		(i) => i.stage === "planned" && !held(s, i.id) && depsReady(s, i),
+	);
+	if (next) coordinator(s, "brief_item", next.id);
+}
+function yieldCoordinator(s: Build) {
+	const c = s.coordinator;
+	if (c.tool !== "brief_item" && c.tool !== "handoff_build") return;
+	c.pendingDirection = c.direction;
+	coordinator(s, null);
+}
+function discover(s: Build, w: World) {
+	s.phase = "discover";
+	s.setupSeq = ++s.seq;
+	s.setupRetry = 0;
+	s.branches = { base: w.options.base, trunk: w.options.trunk };
+}
+function prepare(s: Build, i: Item, w: World) {
+	const work = String(w.work);
+	if (i.worker) s.abandoned.push(i.worker);
+	const attempt = ++i.attempt;
+	i.stage = "preparing";
+	i.projectPrinciples = [];
+	i.retry = 0;
+	i.worker = {
+		kind: "worktree",
+		key: `worker:${work}:${i.id}:${attempt}`,
+		path: layout.worktree(s.repo!, work, `worker-${i.id}-${attempt}`),
+		branch: layout.itemBranch(work, i.id, attempt),
+		from: layout.buildBranch(work),
+		base: s.head!,
+	};
+}
+function disposeReplacedAttempts(s: Build, item: Item, w: World) {
+	const prefix = `worker:${w.work}:${item.id}:`;
+	s.abandoned = s.abandoned.filter((worker) => {
+		if (!worker.key.startsWith(prefix)) return true;
+		s.cleanup.push({
+			worker,
+			mergedHead: null,
+			wait: null,
+			key: `replace/remove/${worker.key}`,
+		});
+		return false;
+	});
+}
+// An owner retry gets a new kernel delivery. The git plan still has its original key:
+// a CAS or branch creation may already have succeeded before the runner lost its reply.
+const delivery = (plan: string, retry: number) =>
+	effectKey(retry ? `${plan}/retry/${retry}` : plan);
+function plans(
+	s: Build,
+	w: StaticFacts,
+	settling = false,
+): { item: string | null; effect: EffectDecl }[] {
+	const work = String(w.work);
+	if ((s.phase === "discover" || s.phase === "start") && !repoHeld(s, null)) {
+		const key = `${s.refreshTrunk ? "refresh" : s.phase}:${work}:${s.setupSeq}`;
+		const effect: EffectDecl =
+			s.phase === "discover" || s.refreshTrunk
+				? {
+						key: delivery(key, s.setupRetry),
+						spec: { kind: "read_repo", ...s.branches },
+					}
+				: {
+						key: delivery(key, s.setupRetry),
+						spec: {
+							repo: s.repo!,
+							op: {
+								kind: "start_build",
+								key,
+								branch: layout.buildBranch(work),
+							},
+						},
+					};
+		return [{ item: null, effect }];
+	}
+	if (s.phase !== "active") return [];
+	return s.items.flatMap((i) => {
+		if (i.stage !== "preparing" && i.stage !== "cleaning") return [];
+		if (settling || i.stage === "cleaning" ? repoHeld(s, i.id) : parked(s, i))
+			return [];
+		const worker = i.worker!;
+		const op =
+			i.stage === "preparing"
+				? worker
+				: {
+						kind: "remove",
+						key: `remove:${worker.key}`,
+						merged: true,
+						mergedHead: i.mergedHead!,
+						target: worker,
+					};
+		return [
+			{
+				item: i.id,
+				effect: { key: delivery(op.key, i.retry), spec: { repo: s.repo!, op } },
+			},
+		];
+	});
+}
+function ourAdvance(s: Build, i: Item, actual: Sha | null) {
+	return actual !== null && actual === s.head && i.worker!.base !== actual;
+}
+function exposeHold(s: Build, w: World, h: Build["holds"][number]) {
+	const { item, obstruction, cause, evidence } = h;
+	const stage = s.items.find((i) => i.id === item)?.stage;
+	const resume =
+		s.phase === "discover"
+			? resumption.discovery
+			: stage === "preparing" && obstruction === "moved"
+				? resumption.moved
+				: stage === "preparing" && obstruction === "occupied"
+					? resumption.occupied
+					: s.phase === "start" || stage === "preparing" || stage === "cleaning"
+						? resumption
+								.pinned({
+									operation:
+										s.phase === "start"
+											? "start_build"
+											: stage === "preparing"
+												? "worktree"
+												: "remove",
+								})
+								.trim()
+						: item
+							? resumption.worker
+							: obstruction === "waiting"
+								? resumption.replan
+								: resumption.coordinator;
+	h.basis = holdingBasis({
+		goal: s.mandate!.intent,
+		scope: holdingScope("build", item),
+		evidence,
+		resume,
+	});
+	return holdingReport(w.work!, {
+		lane: "build",
+		cause,
+		item,
+		evidence,
+		direction: null,
+	});
+}
+function holdMeasure(
+	cause: Extract<Measure, { name: "keel.hold" }>["attributes"]["cause"],
+): Measure {
+	return { name: "keel.hold", value: 1, attributes: { lane: "build", cause } };
+}
+function hold(
+	s: Build,
+	w: World,
+	item: string | null,
+	obstruction: Parameters<typeof holdMeasure>[0] | "unattributed",
+	evidence: string,
+	actual: Sha | null = null,
+): Accepted<Build> {
+	const h = {
+		cause: `build/${++s.seq}`,
+		item,
+		obstruction,
+		evidence,
+		actual,
+		basis: null,
+	};
+	s.holds.push(h);
+	return obstruction === "unattributed"
+		? { state: s }
+		: {
+				state: s,
+				send: [exposeHold(s, w, h)],
+				measures: [holdMeasure(obstruction)],
+			};
+}
+/** A merge can have written Git before Verify records its result. */
+function settleMovedPreparations(s: Build, w: World) {
+	const send = s.holds.flatMap((h) => {
+		if (h.obstruction !== "unattributed") return [];
+		const i = s.items.find((i) => i.id === h.item)!;
+		if (ourAdvance(s, i, h.actual)) {
+			s.holds = s.holds.filter((other) => other !== h);
+			prepare(s, i, w);
+			return [];
+		}
+		if (s.items.some((i) => i.stage === "published")) return [];
+		h.obstruction = "moved";
+		return [exposeHold(s, w, h)];
+	});
+	return { send, measures: send.map(() => holdMeasure("moved")) };
+}
+function onFact(s: Build, e: KernelEvent, w: World): Accepted<Build> {
+	const state = s;
+	if (s.phase === "cancelled") return settleCleanup(s, e, w);
+	if (s.phase === "closed") return { state };
+	switch (e.kind) {
+		case "effect_done":
+		case "effect_failed": {
+			if (s.cleanup.some((j) => j.key === e.key)) return settleCleanup(s, e, w);
+			const planned = plans(s, w, true).find((p) => p.effect.key === e.key);
+			if (!planned) return { state };
+			const id = planned.item;
+			if (e.kind === "effect_failed")
+				return hold(s, w, id, "failed", `${e.key}: ${e.error}`);
+			const result = e.result as RepoResult | { kind: "repo"; repo: RepoInfo };
+			if (
+				s.phase === "start" &&
+				result.kind === "moved" &&
+				result.keelMoved &&
+				result.actual
+			) {
+				s.refreshTrunk = result.actual;
+				s.setupRetry++;
+				return { state };
+			}
+			if (s.phase === "start" && s.refreshTrunk && result.kind === "repo") {
+				// Only the move repo attributed may replace our immutable start plan.
+				if (result.repo.trunkHead === s.refreshTrunk) {
+					s.repo = result.repo;
+					s.setupSeq = ++s.seq;
+					s.setupRetry = 0;
+				}
+				s.refreshTrunk = null;
+				return { state };
+			}
+			const i = s.items.find((i) => i.id === id);
+			if (
+				i?.stage === "preparing" &&
+				result.kind === "moved" &&
+				ourAdvance(s, i, result.actual)
+			) {
+				prepare(s, i, w);
+				break;
+			}
+			if (result.kind === "moved" || result.kind === "occupied")
+				return hold(
+					s,
+					w,
+					id,
+					result.kind === "moved" &&
+						result.actual !== null &&
+						i?.stage === "preparing" &&
+						s.items.some((other) => other.stage === "published")
+						? "unattributed"
+						: result.kind,
+					`${e.key}: ${JSON.stringify(result)}`,
+					result.kind === "moved" ? result.actual : null,
+				);
+			if (id === null && s.phase === "discover" && result.kind === "repo") {
+				s.repo = result.repo;
+				s.phase = "start";
+				s.setupSeq = ++s.seq;
+				s.setupRetry = 0;
+				return { state };
+			}
+			if (id === null && s.phase === "start" && result.kind === "started") {
+				s.base = s.head = result.base;
+				s.phase = "active";
+				coordinator(s, "publish_plan");
+				return { state };
+			}
+			if (i?.stage === "preparing" && result.kind === "worktree") {
+				disposeReplacedAttempts(s, i, w);
+				i.projectPrinciples = [...result.principles];
+				i.stage = "building";
+				i.seq = ++s.seq;
+				break;
+			}
+			if (
+				i?.stage === "cleaning" &&
+				(result.kind === "removed" || result.kind === "kept")
+			) {
+				i.stage = "merged";
+				if (result.kind === "removed") i.worker = null;
+				schedule(s, w);
+				return {
+					state,
+					notes:
+						result.kind === "kept"
+							? [
+									{
+										agent: null,
+										text: `Kept ${i.worker!.path}: ${result.reason}: ${result.files.join(", ")}`,
+									},
+								]
+							: [],
+				};
+			}
+			throw Error(`Unexpected Build result ${result.kind} for ${e.key}`);
+		}
+		case "agent_stalled": {
+			const agent = agents(s).find(
+				(a) => a.key === e.agent && a.expect?.token === e.token,
+			);
+			if (!agent) return { state };
+			const id =
+				agent.role === "coordinator"
+					? null
+					: s.items.find((i) => workerKey(i) === agent.key)!.id;
+			const stalled = `${agent.key} ${e.cause}: ${e.lastWords}${!id && s.coordinator.tool === "publish_plan" && e.refusal ? `\nKeel refused the plan: ${e.refusal}` : ""}`;
+			return hold(s, w, id, "stall", id ? stalled : waitingPicture(s, stalled));
+		}
+
+		case "answered": {
+			const h = s.holds.find(
+				(h) =>
+					h.basis !== null &&
+					holdingSubject(w.work!, "build", h.cause) === e.subject,
+			);
+			if (!h) return { state };
+			if (e.choice === "cancel") return { state, send: [cancelWork(w.work!)] };
+			if (e.choice !== "resume") return { state };
+			const text = directions(e);
+			const i = s.items.find((item) => item.id === h.item);
+			s.holds = s.holds.filter((other) => other !== h);
+			const direction = ownerDirection({
+				direction: text,
+				evidence: h.evidence,
+			});
+			if (i?.stage === "building" || i?.stage === "preparing") {
+				if (i.stage === "building" && i.input === "brief") i.input = "resume";
+				addDirection(i, direction);
+			} else if (!i && s.coordinator.tool) {
+				s.coordinator.direction = direction;
+			} else {
+				// Setup and cleanup have no live worker. Deliver on the next new coordinator turn.
+				const c = s.coordinator;
+				c.pendingDirection = [c.pendingDirection, direction]
+					.filter(Boolean)
+					.join("\n");
+				if (h.obstruction === "waiting") {
+					c.replanning = true;
+					coordinator(s, "publish_plan");
+				}
+			}
+			if (!i) {
+				s.coordinator.seq = ++s.seq;
+				if (s.phase === "discover") discover(s, w);
+				else if (s.phase === "start") s.setupRetry++;
+			} else if (!repoHeld(s, i.id)) {
+				if (
+					i.stage === "preparing" &&
+					(h.obstruction === "occupied" ||
+						(h.obstruction === "moved" && ourAdvance(s, i, h.actual)))
+				)
+					prepare(s, i, w);
+				else if (i.stage === "preparing" || i.stage === "cleaning") i.retry++;
+				else i.seq = ++s.seq;
+			}
+			schedule(s, w);
+			return {
+				state,
+				send: [
+					holdingReport(w.work!, {
+						lane: "build",
+						cause: h.cause,
+						item: h.item,
+						evidence: h.evidence,
+						direction: text,
+					}),
+				],
+			};
+		}
+	}
+	schedule(s, w);
+	return { state };
+}
+function reduce(s: Build, e: Event, w: World): Reduction<Build> {
+	const state = s;
+	if (
+		e.kind === "plan_finding" &&
+		(s.phase === "idle" ||
+			s.phase === "handed_off" ||
+			s.phase === "closed" ||
+			s.phase === "cancelled")
+	) {
+		return {
+			state,
+			send: [
+				{
+					lane: "design",
+					work: "new",
+					event: {
+						kind: "queue_seed",
+						route: "follow",
+						text: e.text,
+						reference: e.reference,
+					},
+				},
+			],
+		};
+	}
+	if (s.phase === "cancelled" || s.phase === "closed") return { state };
+	if (e.kind === "cancel") return cancel(s, w, plans(s, w, true));
+	if (e.kind === "closed") {
+		s.phase = "closed";
+		return { state };
+	}
+	function verify(event: Publication): Reduction<Build> {
+		return { state, send: [{ lane: "verify", work: w.work, event }] };
+	}
+	function publish(i: Item, changedPolicyFiles: string[]) {
+		const p = i.publication!;
+		i.stage = "published";
+		i.verified = false;
+		i.direction = "";
+		return verify({
+			kind: "published",
+			item: i.id,
+			paths: i.brief!.fences,
+			nodes: i.brief!.nodes,
+			sha: p.sha,
+			base: p.base,
+			changedPolicyFiles,
+			addresses: p.addresses,
+			repo: s.repo!,
+			head: s.head!,
+			mandate: s.mandate!,
+			brief: renderReport(s, i, p.summary),
+			rulings: i.rulings,
+		});
+	}
+	switch (e.kind) {
+		case "bound":
+			if (s.phase !== "idle")
+				return { reject: "The Mandate is already bound." };
+			s.mandate = e.mandate;
+			discover(s, w);
+			return { state };
+		case "queue_hold": {
+			const send = addQueueHold(s, e, w);
+			if (
+				(s.coordinator.tool === "handoff_build" && e.nodes.length) ||
+				(s.coordinator.tool === "brief_item" && held(s, s.coordinator.item))
+			)
+				yieldCoordinator(s);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "queue_release": {
+			const send = releaseQueueHold(s, e.cause, e.direction, w);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "plan_finding": {
+			const hold = s.queueHolds.find((h) => h.cause === e.cause);
+			if (hold) hold.evidence = e.text;
+			s.findings.push({ ...e, cause: e.cause ?? null, items: [] });
+			yieldCoordinator(s);
+			break;
+		}
+		case "propose_revision": {
+			if (s.revision)
+				return { reject: "A Mandate revision is already being planned." };
+			s.revision = { ...e, text: e.text ?? "" };
+			const send = s.items.some((i) => affects(i, e.nodes) && !queueHeld(s, i))
+				? addQueueHold(
+						s,
+						{
+							kind: "queue_hold",
+							cause: revisionPlanHold,
+							item: null,
+							nodes: e.nodes,
+						},
+						w,
+					)
+				: [];
+			yieldCoordinator(s);
+			schedule(s, w);
+			return { state, send };
+		}
+		case "plan": {
+			const c = s.coordinator;
+			if (c.tool !== "publish_plan" || held(s, null))
+				return { reject: "No plan is due." };
+			const replies = e.replies ?? [];
+			if (c.revising) {
+				const activation = applyRevision(s, e.items, replies, w);
+				if ("reject" in activation) return activation;
+				c.revising = false;
+				coordinator(s, null);
+				schedule(s, w);
+				return activation;
+			}
+			if (c.replanning) {
+				const reject = replan(s, e.items, replies);
+				if (reject) return { reject };
+				c.replanning = false;
+				coordinator(s, null);
+				break;
+			}
+			const reject = validatePlan(s, e.items, replies);
+			if (reject) return { reject };
+			if (!s.items.length)
+				recordApproval(s, null, s.mandate!.approvalNotes, replies);
+			s.items.push(...e.items.map(newItem));
+			const finding = c.finding ? unplannedFinding(s)! : null;
+			if (finding?.cause) finding.items = e.items.map((i) => i.id);
+			else if (finding) s.findings = s.findings.filter((f) => f !== finding);
+			c.finding = false;
+			coordinator(s, null);
+			break;
+		}
+		case "brief": {
+			const i = s.items.find((i) => i.id === e.item);
+			if (
+				held(s, null) ||
+				s.coordinator.tool !== "brief_item" ||
+				s.coordinator.item !== e.item ||
+				i?.stage !== "planned" ||
+				held(s, i.id)
+			)
+				return { reject: "Brief only the requested ready item." };
+			if (
+				!e.nodes.length ||
+				e.nodes.some((n) => !mandateLabels(s.mandate!).includes(n))
+			)
+				return { reject: "Cite labels from the bound Mandate." };
+			if (![e.goal, e.evidence].every((v) => v.trim()))
+				return { reject: "State the goal and evidence." };
+			const fences = parseFences(e.fences);
+			if ("reject" in fences) return fences;
+			i.brief = {
+				goal: e.goal,
+				evidence: e.evidence,
+				fences: fences.paths,
+				nodes: e.nodes,
+			};
+			coordinator(s, null);
+			if (held(s, i.id)) {
+				i.awaitingNodes = e.nodes;
+				i.brief = null;
+				break;
+			}
+			i.awaitingNodes = [];
+			prepare(s, i, w);
+			break;
+		}
+		case "ruling":
+		case "publish": {
+			const i = s.items.find((i) => workerKey(i) === e.agent);
+			if (i?.stage !== "building" || parked(s, i))
+				return { reject: "No active worker item." };
+			if (e.kind === "ruling") {
+				const pattern = e.ruling.follows.trim();
+				if (e.pattern && !pattern)
+					return { reject: "Name the pattern in follows." };
+				i.rulings.push(e.ruling);
+				if (!e.pattern) return { state };
+				return {
+					state,
+					send: [
+						fileIntake({
+							work: w.work,
+							source: "worker",
+							item: i.id,
+							sha: e.sha,
+							text: e.ruling.what,
+							report: `Reason: ${e.ruling.why}\nCost if wrong: ${e.ruling.cost}`,
+							nodes: i.brief!.nodes,
+							pattern,
+							edgeCase: null,
+							blocking: false,
+						}),
+					],
+				};
+			}
+			const f = e.facts;
+			if (f.kind === "dirty")
+				return {
+					reject: `Commit or clean these paths before publishing: ${f.files.join(", ")}`,
+				};
+			if (f.kind === "not_descendant")
+				return {
+					reject: "The worker commit must descend from its pinned base.",
+				};
+			if (f.kind === "occupied" || f.kind === "moved")
+				return hold(s, w, i.id, f.kind, JSON.stringify(f));
+			if (
+				new Set(e.addresses).size !== e.addresses.length ||
+				e.addresses.some(
+					(id) =>
+						!i.threads.includes(id) &&
+						!s.coordinator.reason?.threads.includes(id),
+				)
+			)
+				return {
+					reject: "Name only distinct thread IDs returned to this worker.",
+				};
+			i.publication = {
+				sha: f.sha,
+				base: f.base,
+				summary: e.summary,
+				addresses: e.addresses,
+			};
+			return publish(i, [...f.changedPolicyFiles]);
+		}
+		case "integration":
+		case "rework": {
+			if (e.item === "full" && s.phase === "handed_off") {
+				s.phase = "active";
+				s.head = e.head ?? s.head;
+				s.coordinator.pendingDirection = e.direction ?? "";
+				s.coordinator.reason = {
+					inheritedTrunk: e.inheritedTrunk ?? null,
+					kind: e.kind,
+					evidence: e.evidence,
+					threads: e.threads,
+				};
+				coordinator(s, "publish_plan");
+				return { state };
+			}
+			const i = s.items.find((i) => i.id === e.item);
+			if (i?.stage !== "published")
+				return { reject: "Only a published item can be returned." };
+			addDirection(i, e.direction ?? "");
+			i.input =
+				e.reason === "mandate_revision"
+					? "superseded"
+					: e.reason === "defect_fixed"
+						? "resume"
+						: e.kind;
+			if (e.reason === "defect_fixed") i.parked = i.refreshAfterFix = true;
+			i.stage = "building";
+			i.verified = false;
+			i.evidence = e.evidence;
+			i.threads = e.threads;
+			i.seq = ++s.seq;
+			const moved = settleMovedPreparations(s, w);
+			schedule(s, w);
+			return { state, ...moved };
+		}
+		case "item_verified": {
+			const i = s.items.find((i) => i.id === e.item);
+			if (i?.stage === "published") i.verified = true;
+			return { state };
+		}
+		case "merged": {
+			const i = s.items.find((i) => i.id === e.item);
+			if (i?.stage !== "published")
+				return { reject: "Only a published item can be merged." };
+			s.head = i.mergedHead = e.head;
+			i.stage = "cleaning";
+			i.retry = 0;
+			const send: Message[] = [];
+			for (const f of s.findings) {
+				if (
+					!f.cause ||
+					!f.items.includes(i.id) ||
+					f.items.some(
+						(id) =>
+							!s.items.some(
+								(item) =>
+									item.id === id &&
+									(item.stage === "merged" || item.stage === "cleaning"),
+							),
+					)
+				)
+					continue;
+				const hold = s.queueHolds.find((h) => h.cause === f.cause);
+				if (hold) {
+					hold.evidence ||= f.text;
+					for (const item of s.items.filter((item) =>
+						hold.items.includes(item.id),
+					)) {
+						if (item.stage === "published")
+							send.push({
+								lane: "verify",
+								work: w.work,
+								event: {
+									kind: "defect_fixed",
+									item: item.id,
+									evidence: hold.evidence,
+								},
+							});
+						else if (item.stage === "building") item.refreshAfterFix = true;
+					}
+					send.push(
+						...releaseQueueHold(
+							s,
+							f.cause,
+							"The planned fix merged. Start from the new build head.",
+							w,
+						),
+					);
+				}
+				send.push(
+					closeFindings(
+						w.work!,
+						[f.cause],
+						`${f.reference === "Current Mandate" ? "defect fixed" : "planned fix applied"} (${f.items.join(", ")} merged)`,
+					),
+				);
+				s.findings = s.findings.filter((other) => other !== f);
+			}
+			const moved = settleMovedPreparations(s, w);
+			send.push(...moved.send);
+			schedule(s, w);
+			return {
+				state,
+				send,
+				measures: [
+					{
+						name: "keel.item.attempts",
+						value: i.attempt,
+						attributes: { kind: i.kind },
+					},
+					...moved.measures,
+				],
+			};
+		}
+		case "handoff":
+			if (
+				s.phase !== "active" ||
+				s.coordinator.tool !== "handoff_build" ||
+				held(s, null)
+			)
+				return { reject: "Handoff waits for all items to merge." };
+			coordinator(s, null);
+			s.phase = "handed_off";
+			return verify({
+				kind: "handoff",
+				repo: s.repo!,
+				base: s.base!,
+				head: s.head!,
+				mandate: s.mandate!,
+				rulings: s.items.flatMap((i) => i.rulings),
+				approvals: s.approvals,
+				summary: e.summary,
+				risk: e.risk,
+			});
+		default:
+			return { state };
+	}
+	schedule(s, w);
+	return { state };
+}
+const build: Lane<Build> = {
+	name: "build",
+	state: buildDoc,
+	reduce: (s, e, w) => reduce(structuredClone(s), e as Event, w),
+	onFact: (s, e, w) => onFact(structuredClone(s), e, w),
+	onIdle: (s, w) =>
+		s.phase === "active"
+			? hold(
+					structuredClone(s),
+					w,
+					null,
+					"waiting",
+					waitingPicture(
+						s,
+						"No agent, operation or decision can move this build.",
+					),
+				)
+			: undefined,
+	agents,
+	view: buildView,
+	asks: (s, w) =>
+		s.phase === "closed" || s.phase === "cancelled"
+			? []
+			: s.holds.flatMap((h) =>
+					h.basis === null
+						? []
+						: [holdingAsk(w.work!, "build", h.cause, h.basis)],
+				),
+	effects: (s, w) =>
+		s.phase === "cancelled"
+			? cleanupEffects(s)
+			: [...plans(s, w).map((p) => p.effect), ...cleanupEffects(s)],
+};
+export const buildLane = defineLane(build);

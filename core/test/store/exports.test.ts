@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("the core exposes exactly the six tau entries", () => {
+test("the core exposes exactly the seven tau entries", () => {
 	const manifest = JSON.parse(
 		readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
 	);
@@ -13,6 +13,7 @@ test("the core exposes exactly the six tau entries", () => {
 		"./durable",
 		"./schema",
 		"./server",
+		"./telemetry",
 		"./testing",
 	]);
 });
