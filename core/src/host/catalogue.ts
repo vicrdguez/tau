@@ -60,11 +60,11 @@ export class Catalogue {
 	}
 }
 
-export function reconcileProviders(
+export async function reconcileProviders(
 	models: MutableModels,
 	builtInProviders: ReadonlySet<string>,
 	catalogue: Catalogue,
-): void {
+): Promise<void> {
 	const exported = new Map<string, Provider>();
 	for (const [, { module }] of catalogue.entries())
 		for (const provider of module.providers ?? [])
@@ -73,4 +73,9 @@ export function reconcileProviders(
 		if (!builtInProviders.has(id) && !exported.has(id))
 			models.deleteProvider(id);
 	for (const provider of exported.values()) models.setProvider(provider);
+	if (exported.size > 0)
+		await models.refresh({
+			allowNetwork: false,
+			providers: [...exported.keys()],
+		});
 }

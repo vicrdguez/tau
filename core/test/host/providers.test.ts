@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
+	createModels,
 	fauxAssistantMessage,
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai";
+import { createProvider } from "@earendil-works/pi-ai/models";
 import {
 	defineExtension,
 	defineTask,
@@ -13,9 +16,10 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { obj } from "@earendil-works/pi-schema";
 import type { Provider } from "tau";
+import { fileModelsStore } from "../../src/command/models-store.js";
 import type { ExtensionScan } from "../../src/host/index.js";
 import { flow, notes, search, WEEK } from "./extensions.js";
-import { faux, type Running, start } from "./helpers.js";
+import { faux, newHome, type Running, start } from "./helpers.js";
 
 function provider(id: string, model: string, ...replies: string[]): Provider {
 	const handle = fauxProvider({ provider: id, models: [{ id: model }] });
@@ -101,6 +105,54 @@ test("a provider supplies models to projects that did not select its extension",
 	]);
 	await bind(s);
 	await ask(s, await create(s, "custom/chat"), "first", "From the extension.");
+});
+
+test("an extension's saved models restore offline on restart and reload", async (t) => {
+	const home = await newHome();
+	const cache = join(home, "models.json");
+	const handle = fauxProvider({
+		provider: "custom",
+		models: [{ id: "saved" }],
+	});
+	const models = () => ({
+		faux: handle,
+		models: createModels({ modelsStore: fileModelsStore(cache) }),
+	});
+	let requests = 0;
+	const source = () => ({
+		modules: {
+			notes: {
+				...notes,
+				providers: [
+					createProvider({
+						id: "custom",
+						auth: handle.provider.auth,
+						api: handle.provider,
+						models: [],
+						fetchModels: async () => {
+							requests++;
+							return [handle.getModel()];
+						},
+					}),
+				],
+			},
+		},
+		failures: [],
+	});
+	const s = await start({ home, models: models(), source });
+	t.after(() => s.close());
+	assert.deepEqual(await listed(s, "models"), []);
+	const refreshed = await s.call("models", { refresh: true });
+	assert.equal(refreshed.status, 200);
+	assert.deepEqual(await listed(s, "models"), ["custom/saved"]);
+	assert.equal(requests, 1);
+
+	const restarted = await s.restart({ models: models() });
+	t.after(() => restarted.close());
+	assert.deepEqual(await listed(restarted, "models"), ["custom/saved"]);
+	assert.equal((await reload(restarted)).status, "applied");
+	assert.deepEqual(await listed(restarted, "models"), ["custom/saved"]);
+	assert.equal(requests, 1);
 });
 
 test("a model-format option accepts an extension's model", async (t) => {

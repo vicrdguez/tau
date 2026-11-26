@@ -120,7 +120,7 @@ export async function reload(
 	let installed: Map<string, string[]>;
 	let reached: ReloadReport["reached"];
 	try {
-		reconcileProviders(options.models, builtInProviders, catalogue);
+		await reconcileProviders(options.models, builtInProviders, catalogue);
 		installed = projects.publish(catalogue, found, (project, extension) => {
 			reached = { project, extension };
 		});

@@ -95,7 +95,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
 	let admin: NetServer | undefined;
 	try {
 		const devices = await Devices.load(options.home, options.now ?? Date.now);
-		reconcileProviders(models, builtInProviders, catalogue);
+		await reconcileProviders(models, builtInProviders, catalogue);
 		await projects.start();
 		for (const task of await inspectTasks(projects))
 			process.stderr.write(`tau: ${taskLine(task)}\n`);
