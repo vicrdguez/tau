@@ -37,6 +37,8 @@ export type QueryFn = (args: {
 }) => Query;
 export type RunDeps = { query?: QueryFn; env?: NodeJS.ProcessEnv };
 const grace = 5000;
+const workdirGuidance =
+	"The working directory in your environment information belongs to the model runtime, not to this project. Tools run in the project's working directory, so use paths relative to it.";
 function childEnv(
 	source: NodeJS.ProcessEnv,
 	maxTokens?: number,
@@ -218,7 +220,9 @@ async function oneTurn(
 		prompt: input(),
 		options: {
 			...options,
-			systemPrompt: request.systemPrompt,
+			systemPrompt: request.systemPrompt
+				? `${request.systemPrompt}\n\n${workdirGuidance}`
+				: workdirGuidance,
 			settingSources: [],
 			settings: { includeGitInstructions: false },
 			tools: [],

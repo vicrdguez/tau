@@ -82,6 +82,24 @@ test("authenticated text turn reports final usage and cleans up before publicati
 	assert.equal(r.options.strictMcpConfig, true);
 	assert.deepEqual(r.options.thinking, { type: "disabled" });
 });
+for (const [name, systemPrompt, prefix] of [
+	["nonempty", "Project instructions.", "Project instructions.\n\n"],
+	["empty", "", ""],
+] as const)
+	test(`adds project-relative path guidance when the Tau prompt is ${name}`, async (t) => {
+		const f = fakeClaudeCode(t, { frames: fixture("text") });
+		const m = await f.models.completeSimple(f.model, {
+			messages: [
+				{ role: "system", content: systemPrompt, timestamp: 0 },
+				...context.messages,
+			],
+		});
+		assert.equal(m.stopReason, "stop", m.errorMessage);
+		assert.equal(
+			f.requests[0]?.options.systemPrompt,
+			`${prefix}The working directory in your environment information belongs to the model runtime, not to this project. Tools run in the project's working directory, so use paths relative to it.`,
+		);
+	});
 for (const account of [
 	{ apiProvider: "firstParty" as const },
 	{ apiProvider: "bedrock" as const, subscriptionType: "Max" },
