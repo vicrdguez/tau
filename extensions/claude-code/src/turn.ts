@@ -73,9 +73,9 @@ const fail = (state: State, errorMessage: string): Step => ({
 	events: [],
 	decision: "error",
 });
-export function failureText(text: string): string {
+export function failureText(text: string, fallback = text): string {
 	if (
-		/authenticat|invalid api key|not logged in|login required|oauth_org|cloud_credential|account_on_hold|verification_required|please run .*login/i.test(
+		/authenticat|invalid api[ _]key|not logged in|not signed in|login required|\b40[13]\b|oauth_org|cloud_credential|account_on_hold|verification_required|please run .*login/i.test(
 			text,
 		)
 	)
@@ -88,7 +88,7 @@ export function failureText(text: string): string {
 		return "Claude Code: prompt is too long";
 	if (/\b5\d\d\b|server_error/i.test(text))
 		return "Claude Code server error: " + text;
-	return text;
+	return fallback;
 }
 type Counts = {
 	input_tokens?: number | null;
@@ -155,7 +155,15 @@ function block(s: State, e: BlockFrame): Step {
 			old.some((c) => c.type === "toolCall" && c.id === b.id)
 		)
 			return fail(s, "Unknown tool or duplicate Claude Code call: " + b.name);
-		const partial = update({ type: "toolCall", id: b.id, name, arguments: {} });
+		const args = b.input;
+		if (!args || typeof args !== "object" || Array.isArray(args))
+			return fail(s, "Expected a JSON object for " + name);
+		const partial = update({
+			type: "toolCall",
+			id: b.id,
+			name,
+			arguments: args as ToolCall["arguments"],
+		});
 		return next(
 			{ ...s, message: partial, open: index, json: "" },
 			{ type: "toolcall_start", contentIndex: index, partial },
@@ -221,7 +229,7 @@ function block(s: State, e: BlockFrame): Step {
 			partial: s.message,
 		});
 	try {
-		const args = JSON.parse(s.json || "{}");
+		const args = s.json ? JSON.parse(s.json) : b.arguments;
 		if (!args || typeof args !== "object" || Array.isArray(args))
 			return fail(s, "Expected a JSON object for " + b.name);
 		const toolCall: ToolCall = { ...b, arguments: args },

@@ -61,7 +61,7 @@ for (const kind of [
 				1,
 			);
 		let state = initial(),
-			decision;
+			decision: ReturnType<typeof step>["decision"] | undefined;
 		for (const m of messages) {
 			const next = step(state, m);
 			state = next.state;

@@ -7,7 +7,6 @@ import {
 	getCurrentSystemPrompt,
 	getCurrentTools,
 	type ImageContent,
-	type Message,
 	type TextContent,
 	type Tool,
 	type TranscriptContext,
