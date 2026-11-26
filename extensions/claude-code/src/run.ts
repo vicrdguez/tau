@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -36,6 +36,15 @@ export type QueryFn = (args: {
 	options: Options;
 }) => Query;
 export type RunDeps = { query?: QueryFn; env?: NodeJS.ProcessEnv };
+const { claudeCodeVersion }: { claudeCodeVersion: string } = JSON.parse(
+	readFileSync(
+		new URL(
+			"./package.json",
+			import.meta.resolve("@anthropic-ai/claude-agent-sdk"),
+		),
+		"utf8",
+	),
+);
 const grace = 5000;
 const workdirGuidance =
 	"The working directory in your environment information belongs to the model runtime, not to this project. Tools run in the project's working directory, so use paths relative to it.";
@@ -89,7 +98,7 @@ function prepareSession(
 		cwd,
 		claudeDir,
 		model,
-		version: "2.1.321",
+		version: claudeCodeVersion,
 	});
 	const dispose = () => deleteSession(session.sessionId, cwd, claudeDir);
 	try {
