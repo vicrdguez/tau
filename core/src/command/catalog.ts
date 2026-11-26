@@ -28,8 +28,8 @@ import {
 	formatUserAgent,
 	getModelType,
 	isModelType,
-	type Models,
 	type ModelsStoreEntry,
+	type MutableModels,
 	type Provider,
 } from "@earendil-works/pi-ai";
 import {
@@ -178,7 +178,7 @@ export function catalogProvider(
 export async function loadModels(
 	home: string,
 	credentials: CredentialStore,
-): Promise<Models> {
+): Promise<MutableModels> {
 	const models = createModels({
 		credentials,
 		modelsStore: fileModelsStore(path.join(home, "models.json")),
