@@ -20,6 +20,12 @@ Inference uses the CLI bundled with the extension. You do not need `claude` on t
 | Unknown tool, malformed arguments or incomplete batch | Tau executes none of the calls in that message. |
 | Caller stops the run | The provider returns an aborted turn after cleanup. |
 
+## Working directory and Linux support
+
+Claude Code reports its runtime directory, not the conversation's working directory. The provider tells the model to use project-relative paths for tools. In one live trial per prompt, the model used the runtime path without the guidance and a relative path with it. A full fix requires the provider to receive the conversation's working directory. `pi-durable` does not pass that directory today.
+
+This change did not run the SDK's prebuilt Linux binary. On NixOS or in Tau's Linux image, the SDK may need a compatible executable.
+
 ## Temporary transcripts
 
 Tau keeps the durable conversation. Each inference gets a fresh Claude Code session ID. The child runs from `<config>/tau-work`, not from the user's project. `<config>` is `CLAUDE_CONFIG_DIR` or `~/.claude`. Claude stores the session under `<config>/projects/<encoded-work-directory>/<uuid>.jsonl`. Session files contain conversation and tool data. The provider deletes each session and its companion directory after the child exits.

@@ -21,6 +21,8 @@ The schema on MCP's tools list is Tau's own JSON Schema. A Zod conversion would 
 
 In probe Q6, initialization and account information arrived before the input iterator yielded. A separate CLI init frame arrived after the prompt. The provider checks the account before releasing the iterator. It gives the child an environment allowlist at the actual spawn boundary. It passes an explicit system prompt, disables settings sources and builtin tools, and disables Claude Code compaction.
 
+Claude Code reports its runtime directory as the primary working directory. Tau runs tools in the conversation's working directory. The provider appends an instruction to use project-relative paths. In one live trial per prompt, Sonnet 4.6 used the absolute runtime path without the instruction and a relative path with it. A full fix requires the provider to receive the conversation's working directory. `pi-durable` does not pass that directory today.
+
 In Q7 the first MCP call arrived after the first tool block stopped but before the second tool block stopped. Handler entry cannot authorize a batch. The provider waits for `message_stop` with `tool_use`, verifies each offered name, ID, completed block and JSON object, then interrupts the query. It drains the interruption result before closing. A normal text answer requires both a completed message and a successful SDK result.
 
 The provider observes the subprocess close event. If the child does not exit within five seconds of close, it sends SIGKILL. Only then does it remove the session and publish the terminal event. A caller abort during teardown discards captured calls.
@@ -29,7 +31,9 @@ Usage deltas replace the corresponding start counts. Retrying a subscription lim
 
 ## Evidence and versioning
 
-The SDK pin is `0.3.321`. It bundles CLI `2.1.321`. The lock retains all platform packages. Nix passes only the current system's binary record to its npm importer. A Darwin dry run before filtering requested eight binary archives. The filtered graph requested one.
+The SDK pin is `0.3.321`. It bundles CLI `2.1.321`. The lock retains all platform packages. Nix passes only the current system's binary record to its npm importer. A Darwin dry run before filtering requested eight binary archives. The filtered graph requested one. Session records use `claudeCodeVersion` from the SDK manifest.
+
+This change did not run the SDK's prebuilt Linux binary. On NixOS or in Tau's Linux image, the SDK may need a compatible executable.
 
 The quota-free fixtures project Q3's text and Q7's parallel calls from the 2.1.311 probe logs into SDK stream events. They retain arguments, block order, stop reasons and token counts. The server name and thinking signature are test values. Delta chunk boundaries are reconstructed, not a wire recording.
 
