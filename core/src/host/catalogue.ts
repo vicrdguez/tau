@@ -12,23 +12,21 @@ export const Codemode = createCodemodeExtension({
 
 export const builtInExtensions: readonly Extension[] = [CodingTools, Codemode];
 
-type Loaded = {
+export type Loaded = {
 	readonly module: ExtensionModule;
 	readonly options: Options | undefined;
+	readonly providers: readonly Provider[];
 };
 
 export class Catalogue {
 	readonly #entries: Readonly<Record<string, Loaded>>;
 
-	constructor(
-		modules: Readonly<Record<string, ExtensionModule>>,
-		options: ReadonlyMap<string, Options>,
-	) {
+	constructor(entries: Readonly<Record<string, Loaded>>) {
 		this.#entries = Object.freeze(
 			Object.fromEntries(
-				Object.entries(modules).map(([name, module]) => [
+				Object.entries(entries).map(([name, loaded]) => [
 					name,
-					Object.freeze({ module, options: options.get(name) }),
+					Object.freeze(loaded),
 				]),
 			),
 		);
@@ -66,9 +64,8 @@ export async function reconcileProviders(
 	catalogue: Catalogue,
 ): Promise<void> {
 	const exported = new Map<string, Provider>();
-	for (const [, { module }] of catalogue.entries())
-		for (const provider of module.providers ?? [])
-			exported.set(provider.id, provider);
+	for (const [, { providers }] of catalogue.entries())
+		for (const provider of providers) exported.set(provider.id, provider);
 	for (const { id } of models.getProviders())
 		if (!builtInProviders.has(id) && !exported.has(id))
 			models.deleteProvider(id);

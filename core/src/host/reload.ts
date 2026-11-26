@@ -7,7 +7,7 @@ import {
 	str,
 	union,
 } from "@earendil-works/pi-schema";
-import { Catalogue, reconcileProviders } from "./catalogue.js";
+import { reconcileProviders } from "./catalogue.js";
 import {
 	type ExtensionFailure,
 	type ExtensionScan,
@@ -58,17 +58,17 @@ export async function reload(
 		),
 		...scan.modules,
 	};
-	const loaded = await loadExtensions(
+	const { catalogue, failures: loadFailures } = await loadExtensions(
 		() => ({ modules: proposed, failures: scan.failures }),
 		options.models,
 		builtInProviders,
 	);
-	failures.push(...loaded.failures);
+	failures.push(...loadFailures);
 	for (const [name, before] of current.entries()) {
-		const after = loaded.modules[name];
+		const after = catalogue.get(name);
 		if (after === undefined) continue;
 		const tasks = new Map(
-			(after.extension.tasks ?? []).map((task) => [
+			(after.module.extension.tasks ?? []).map((task) => [
 				task.definition.name,
 				task.definition,
 			]),
@@ -115,7 +115,6 @@ export async function reload(
 			skipped,
 			failures: describe(),
 		};
-	const catalogue = new Catalogue(loaded.modules, loaded.options);
 	const found = new Set(Object.keys(scan.modules));
 	let installed: Map<string, string[]>;
 	let reached: ReloadReport["reached"];

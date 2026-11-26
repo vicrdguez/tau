@@ -6,6 +6,7 @@ import {
 	fauxAssistantMessage,
 	fauxProvider,
 	fauxToolCall,
+	type Models,
 } from "@earendil-works/pi-ai";
 import { createProvider } from "@earendil-works/pi-ai/models";
 import {
@@ -90,7 +91,7 @@ test("a provider supplies models to projects that did not select its extension",
 			modules: {
 				notes: {
 					...notes,
-					providers: [provider("custom", "chat", "From the extension.")],
+					providers: () => [provider("custom", "chat", "From the extension.")],
 				},
 			},
 			failures: [],
@@ -123,7 +124,7 @@ test("an extension's saved models restore offline on restart and reload", async 
 		modules: {
 			notes: {
 				...notes,
-				providers: [
+				providers: () => [
 					createProvider({
 						id: "custom",
 						auth: handle.provider.auth,
@@ -155,12 +156,87 @@ test("an extension's saved models restore offline on restart and reload", async 
 	assert.equal(requests, 1);
 });
 
+test("a provider sees new catalog models after HTTP refresh without reloading", async (t) => {
+	const models = faux();
+	const upstream = models.faux.provider;
+	models.models.setProvider(
+		createProvider({
+			id: upstream.id,
+			auth: upstream.auth,
+			api: upstream,
+			models: [],
+			fetchModels: async ({ force }) =>
+				force ? [{ ...models.faux.getModel(), id: "future-chat" }] : [],
+		}),
+	);
+	let factoryCalls = 0;
+	const s = await start({
+		models,
+		source: () => ({
+			modules: {
+				notes: {
+					...notes,
+					providers: (catalog: Pick<Models, "getModels">) => {
+						factoryCalls++;
+						assert.equal("setProvider" in catalog, false);
+						return [
+							{
+								...provider("mirror", "unused"),
+								getModels: () =>
+									catalog.getModels("faux").map((model) => ({
+										...model,
+										provider: "mirror",
+									})),
+							},
+						];
+					},
+				},
+			},
+			failures: [],
+		}),
+	});
+	t.after(() => s.close());
+	assert.deepEqual(await listed(s, "models"), []);
+	assert.equal((await s.call("models", { refresh: true })).status, 200);
+	assert.deepEqual(await listed(s, "models"), [
+		"faux/future-chat",
+		"mirror/future-chat",
+	]);
+	assert.equal(factoryCalls, 1);
+});
+
+test("a throwing factory and a non-function export fail at providers without blocking startup", async (t) => {
+	const stderr = t.mock.method(process.stderr, "write", () => true);
+	const s = await start({
+		source: () => ({
+			modules: {
+				flow: {
+					...flow,
+					providers: () => {
+						throw new Error("Factory failed.");
+					},
+				},
+				notes: { ...notes, providers: [provider("custom", "chat")] },
+				search,
+			},
+			failures: [],
+		}),
+	});
+	t.after(() => s.close());
+	assert.deepEqual(await listed(s, "extensions"), ["search"]);
+	const diagnostics = stderr.mock.calls
+		.map((call) => call.arguments[0])
+		.join("");
+	assert.match(diagnostics, /extension flow \[providers\]: Factory failed\./);
+	assert.match(diagnostics, /extension notes \[providers\]/);
+});
+
 test("a model-format option accepts an extension's model", async (t) => {
 	const s = await start({
 		source: () => ({
 			modules: {
 				flow,
-				notes: { ...notes, providers: [provider("custom", "chat")] },
+				notes: { ...notes, providers: () => [provider("custom", "chat")] },
 			},
 			failures: [],
 		}),
@@ -184,7 +260,7 @@ test("a built-in provider id rejects the extension without replacing the built-i
 			modules: {
 				notes: {
 					...notes,
-					providers: [provider("faux", "a", "Wrong provider.")],
+					providers: () => [provider("faux", "a", "Wrong provider.")],
 				},
 				search,
 			},
@@ -209,12 +285,12 @@ test("the first extension by name owns a shared provider id", async (t) => {
 			modules: {
 				search: {
 					...search,
-					providers: [
+					providers: () => [
 						provider("discarded", "chat"),
 						provider("shared", "second"),
 					],
 				},
-				notes: { ...notes, providers: [provider("shared", "first")] },
+				notes: { ...notes, providers: () => [provider("shared", "first")] },
 			},
 			failures: [],
 		}),
@@ -236,7 +312,8 @@ test("the first extension by name owns a shared provider id", async (t) => {
 const valid = provider("custom", "chat");
 const { streamSimple: _streamSimple, ...noStreamSimple } = valid;
 for (const [name, providers] of [
-	["a non-array export", valid],
+	["a non-array result", valid],
+	["an undefined result", undefined],
 	["a non-object provider", [null]],
 	["no auth object", [{ ...valid, auth: null }]],
 	["no getModels", [{ ...valid, getModels: null }]],
@@ -250,7 +327,10 @@ for (const [name, providers] of [
 		let scan: ExtensionScan = { modules: {}, failures: [] };
 		const s = await start({ source: () => scan });
 		t.after(() => s.close());
-		scan = { modules: { notes: { ...notes, providers } }, failures: [] };
+		scan = {
+			modules: { notes: { ...notes, providers: () => providers } },
+			failures: [],
+		};
 		const report = await reload(s);
 		assert.equal(report.status, "refused");
 		assert.deepEqual(
@@ -265,7 +345,7 @@ test("reload replaces the provider for an existing conversation, then removes it
 		modules: {
 			notes: {
 				...notes,
-				providers: [provider("custom", "chat", "Original reply.")],
+				providers: () => [provider("custom", "chat", "Original reply.")],
 			},
 		},
 		failures: [],
@@ -280,7 +360,7 @@ test("reload replaces the provider for an existing conversation, then removes it
 		modules: {
 			notes: {
 				...notes,
-				providers: [provider("custom", "chat", "Replacement reply.")],
+				providers: () => [provider("custom", "chat", "Replacement reply.")],
 			},
 		},
 		failures: [],
@@ -299,7 +379,7 @@ test("a compatibility refusal keeps the previous provider serving", async (t) =>
 			flow,
 			notes: {
 				...notes,
-				providers: [provider("custom", "chat", "Still the original.")],
+				providers: () => [provider("custom", "chat", "Still the original.")],
 			},
 		},
 		failures: [],
@@ -312,7 +392,7 @@ test("a compatibility refusal keeps the previous provider serving", async (t) =>
 	scan = {
 		modules: {
 			flow: { extension: defineExtension({ name: "flow" }) },
-			notes: { ...notes, providers: [provider("custom", "new-chat")] },
+			notes: { ...notes, providers: () => [provider("custom", "new-chat")] },
 		},
 		failures: [],
 	};
@@ -334,14 +414,18 @@ test("a compatibility refusal keeps the previous provider serving", async (t) =>
 
 test("reload refuses a new extension that claims a kept extension's provider", async (t) => {
 	let scan: ExtensionScan = {
-		modules: { notes: { ...notes, providers: [provider("shared", "kept")] } },
+		modules: {
+			notes: { ...notes, providers: () => [provider("shared", "kept")] },
+		},
 		failures: [],
 	};
 	const s = await start({ source: () => scan });
 	t.after(() => s.close());
 
 	scan = {
-		modules: { search: { ...search, providers: [provider("shared", "new")] } },
+		modules: {
+			search: { ...search, providers: () => [provider("shared", "new")] },
+		},
 		failures: [],
 	};
 	const report = await reload(s);
@@ -449,7 +533,7 @@ test("a due task can stream from an extension provider on restart", async (t) =>
 			modules: {
 				resume: {
 					extension,
-					providers: [
+					providers: () => [
 						provider("custom", "chat", "Reply from the resumed task."),
 					],
 				},

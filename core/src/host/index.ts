@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { Server as NetServer } from "node:net";
 import type {
 	Api,
+	Models,
 	MutableModels,
 	Provider as PiProvider,
 } from "@earendil-works/pi-ai";
@@ -17,7 +18,7 @@ import type {
 import type { JsonSchema } from "@earendil-works/pi-schema";
 import type { TelemetrySchemaDefinition } from "@earendil-works/pi-telemetry";
 import { adminSocket, listenAdmin, refuseRunning } from "./admin.js";
-import { Catalogue, reconcileProviders } from "./catalogue.js";
+import { reconcileProviders } from "./catalogue.js";
 import { Devices } from "./devices.js";
 import { type ExtensionSource, loadExtensions } from "./extensions.js";
 import { handler } from "./http.js";
@@ -41,12 +42,15 @@ export { taskLine } from "./task-reports.js";
 
 export type Provider<TApi extends Api = Api> = PiProvider<TApi>;
 
+/** Read-only view of the server's chat catalog, current at each call. */
+export type ModelCatalog = Pick<Models, "getModels">;
+
 // docs/host.md, "Options".
 export type ExtensionModule = {
 	readonly extension: Extension;
 	readonly telemetry?: TelemetrySchemaDefinition;
 	readonly entry?: AgentChange | ((tx: Tx) => Promise<AgentChange>);
-	readonly providers?: readonly Provider[];
+	readonly providers?: (catalog: ModelCatalog) => readonly Provider[];
 	readonly options?: {
 		readonly schema: JsonSchema;
 		get(tx: Tx): Promise<JsonObject>;
@@ -85,11 +89,14 @@ export type Server = {
 export async function startServer(options: ServerOptions): Promise<Server> {
 	const { models } = options;
 	const builtInProviders = new Set(models.getProviders().map((p) => p.id));
-	const loaded = await loadExtensions(options.source, models, builtInProviders);
+	const { catalogue } = await loadExtensions(
+		options.source,
+		models,
+		builtInProviders,
+	);
 	await mkdir(options.home, { recursive: true, mode: 0o700 });
 	await chmod(options.home, 0o700);
 	const socket = adminSocket(options.home);
-	const catalogue = new Catalogue(loaded.modules, loaded.options);
 	const projects = new Projects(options, catalogue);
 	const structural = new StructuralQueue();
 	let admin: NetServer | undefined;

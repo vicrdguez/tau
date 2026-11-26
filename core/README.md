@@ -15,6 +15,7 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `DeviceId` | type | `../store/types.js` |
 | `ExtensionModule` | type | `../host/index.js` |
 | `EventData` | type | `../store/types.js` |
+| `ModelCatalog` | type | `../host/index.js` |
 | `Provider` | type | `../host/index.js` |
 | `RequestDraft` | type | `../store/decisions.js` |
 | `RoleSettings` | type | `./helpers.js` |

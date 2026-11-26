@@ -1,6 +1,6 @@
 import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry } from "@earendil-works/pi-durable";
-import { builtInExtensions } from "./catalogue.js";
+import { builtInExtensions, Catalogue, type Loaded } from "./catalogue.js";
 import type { ExtensionModule } from "./index.js";
 import { Options } from "./options.js";
 import { PROJECT } from "./projects.js";
@@ -78,7 +78,6 @@ function checkProviders(
 	owners: ReadonlyMap<string, string | null>,
 ): ReadonlySet<string> {
 	const ids = new Set<string>();
-	if (value === undefined) return ids;
 	if (!Array.isArray(value)) throw new Error("Providers must be an array");
 	for (const [index, provider] of value.entries()) {
 		if (
@@ -114,8 +113,7 @@ export async function loadExtensions(
 ) {
 	const found = await source();
 	const failures = [...found.failures];
-	const modules: Record<string, ExtensionModule> = Object.create(null);
-	const options = new Map<string, Options>();
+	const entries: Record<string, Loaded> = Object.create(null);
 	const current = () => models;
 	const registry = createRegistry();
 	for (const extension of builtInExtensions) registry.install(extension);
@@ -129,7 +127,14 @@ export async function loadExtensions(
 		try {
 			const module = check(name, value);
 			stage = "providers";
-			const providerIds = checkProviders(module.providers, providerOwners);
+			const factory = module.providers;
+			if (factory !== undefined && typeof factory !== "function")
+				throw new Error("The providers export must be a function");
+			const providers =
+				factory === undefined
+					? []
+					: factory({ getModels: (provider) => models.getModels(provider) });
+			const providerIds = checkProviders(providers, providerOwners);
 			stage = "options";
 			const contract =
 				module.options === undefined
@@ -147,8 +152,7 @@ export async function loadExtensions(
 			registry.install(module.extension);
 			for (const task of tasks) taskOwners.set(task, name);
 			for (const id of providerIds) providerOwners.set(id, name);
-			modules[name] = module;
-			if (contract !== undefined) options.set(name, contract);
+			entries[name] = { module, options: contract, providers };
 		} catch (error) {
 			failures.push({ name, stage, error });
 		}
@@ -162,5 +166,5 @@ export async function loadExtensions(
 			`tau: extension ${failure.name}${failure.path === undefined ? "" : ` ${failure.path}`} [${failure.stage}]: ${message.split(/[\r\n]/, 1)[0]}\n`,
 		);
 	}
-	return { modules, options, failures };
+	return { catalogue: new Catalogue(entries), failures };
 }
