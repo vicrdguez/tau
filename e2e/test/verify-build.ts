@@ -22,10 +22,11 @@ const [command, ...outputs] = process.argv.slice(2);
 assert.ok(command, "Pass the installed tau executable.");
 assert.equal(
 	outputs.length,
-	4,
-	"Pass the keel, w1, w2 and webkit source outputs.",
+	5,
+	"Pass the claude-code, keel, w1, w2 and webkit source outputs.",
 );
-const [keelSource, w1Source, w2Source, webkitSource] = outputs as [
+const [, keelSource, w1Source, w2Source, webkitSource] = outputs as [
+	string,
 	string,
 	string,
 	string,
@@ -161,7 +162,7 @@ async function check(
 			return;
 		}
 		process.stdout.write("empty extensions []\n");
-		for (const [i, name] of ["keel", "w1", "w2", "webkit"].entries()) {
+		for (const [i, name] of ["claude-code", "keel", "w1", "w2", "webkit"].entries()) {
 			const output = outputs[i]!;
 			await access(join(output, "index.ts"));
 			for await (const file of glob("**/*.{js,mjs,cjs}", {
@@ -175,11 +176,12 @@ async function check(
 		assert.equal(
 			added.stdout.split("\n").filter((line) => line.startsWith("added "))
 				.length,
-			4,
+			5,
 			added.stdout,
 		);
 		process.stdout.write(added.stdout);
-		const { items } = await post(url, "extensions", {}, token);
+		const { items: [claudeCode, ...items] } = await post(url, "extensions", {}, token);
+		assert.equal(claudeCode.name, "claude-code");
 		{
 			assert.deepEqual(
 				items.map((item: any) => [item.name, item.workflow]),
@@ -285,7 +287,7 @@ async function check(
 		assert.match(replaced.stdout, /^replaced w2; projects: p$/m);
 		process.stdout.write(replaced.stdout);
 		const models = await post(url, "models", {}, token);
-		assert.ok(Array.isArray(models.items));
+		assert.ok(models.items.some((item: { model: string }) => item.model.startsWith("claude-code/")));
 		const listed = await run(command!, ["device", "list"], { env });
 		assert.match(listed.stdout, new RegExp(device));
 		process.stdout.write("models HTTP 200; paired device listed\n");
@@ -325,7 +327,7 @@ try {
 		if (!/\.(?:js|json)$/.test(file)) continue;
 		assert.doesNotMatch(
 			await readFile(resolve(command, "../..", file), "utf8"),
-			/tau-wf-keel|tau-w1|tau-w2|tau-webkit/,
+			/tau-claude-code|tau-wf-keel|tau-w1|tau-w2|tau-webkit/,
 			file,
 		);
 	}

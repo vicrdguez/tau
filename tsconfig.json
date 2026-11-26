@@ -5,6 +5,9 @@
 			"path": "core"
 		},
 		{
+			"path": "extensions/claude-code"
+		},
+		{
 			"path": "extensions/w1"
 		},
 		{
