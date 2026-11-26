@@ -41,7 +41,20 @@ Mark a secret string with `format: "secret"`. The host returns `true` for a set 
 
 ## Add a model provider
 
-Export `providers` as an array of pi-ai provider objects. Import the `Provider` type from `tau`. Clients can select a model as `providerId/modelId` without adding the extension to the project. To remove a provider on reload, remove it from the module's export. See the [host reference](host.md#options) for provider ID rules.
+Export a `providers` function that returns an array of provider objects. Import `ModelCatalog` and `Provider` from `tau`. Import [pi-ai streaming helpers and types](../core/README.md#tauai) from `tau/ai`.
+
+```ts
+import type { ModelCatalog, Provider } from "tau";
+import { createProxyProvider } from "./proxy-provider.ts";
+
+export const providers = (catalog: ModelCatalog): readonly Provider[] => [
+	createProxyProvider(() => catalog.getModels("anthropic")),
+];
+```
+
+In this example, `createProxyProvider` is part of your extension. Its `getModels` calls the supplied function and sets each returned model's `provider` field to the proxy's ID. Read the catalog inside `getModels` so the provider sees changes after a refresh.
+
+Clients can select a model as `providerId/modelId` without adding the extension to the project. To remove a provider on reload, omit it from the returned array. See the [host reference](host.md#options) for provider ID rules.
 
 ## Agent selection
 
