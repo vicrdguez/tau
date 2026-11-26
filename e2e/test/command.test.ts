@@ -148,7 +148,7 @@ test("tau restores its own offline catalog and runs a conversation with a restor
 			},
 		});
 	const id = "example/future-chat";
-	await writeFile(path.join(tauHome, "models-store.json"), store(id));
+	await writeFile(path.join(tauHome, "models.json"), store(id));
 	await writeFile(
 		path.join(env.PI_CODING_AGENT_DIR, "models-store.json"),
 		store("example/pi-cache"),

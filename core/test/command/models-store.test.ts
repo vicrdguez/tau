@@ -38,7 +38,7 @@ const anthropic = { models: [], checkedAt: 300 } satisfies ModelsStoreEntry;
 async function cacheFile(t: TestContext) {
 	const directory = await mkdtemp(path.join(tmpdir(), "tau-models-"));
 	t.after(() => rm(directory, { recursive: true, force: true }));
-	return path.join(directory, "models-store.json");
+	return path.join(directory, "models.json");
 }
 
 test("reading or deleting from a missing cache does not create it", async (t) => {

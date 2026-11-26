@@ -181,7 +181,7 @@ export async function loadModels(
 ): Promise<Models> {
 	const models = createModels({
 		credentials,
-		modelsStore: fileModelsStore(path.join(home, "models-store.json")),
+		modelsStore: fileModelsStore(path.join(home, "models.json")),
 	});
 	const generatedAt = getBuiltinModelDataGeneratedAt();
 	for (const provider of builtinProviders())

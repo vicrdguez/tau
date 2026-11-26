@@ -19,7 +19,7 @@ A `nix build` also provides `result/bin/tau`, which can replace `nix run .#tau -
 
 Provider login uses pi's `/login` on the server machine as the server's OS user, or a provider API key variable in the server's environment. Tau reads `${PI_CODING_AGENT_DIR:-~/.pi/agent}/auth.json`, creates it if absent, and writes refreshed credentials there. Client calls cannot set a login.
 
-To check for new models, send `POST /v1/models` with `{"refresh":true}` from a paired client. Tau checks the `pi.dev` catalog for configured providers and saves updates in `~/.tau/models-store.json`. Tau does not read Pi's model files or require the Pi CLI. OpenRouter personalizes its list for the configured credential. Radius uses its own discovery endpoint. An ordinary `models` call uses the bundled catalog and the last saved update, even after an offline restart. New models that require an unsupported provider or API still need a Tau update.
+To check for new models, send `POST /v1/models` with `{"refresh":true}` from a paired client. Tau checks the `pi.dev` catalog for configured providers and saves updates in `~/.tau/models.json`. Tau does not read Pi's model files or require the Pi CLI. OpenRouter personalizes its list for the configured credential. Radius uses its own discovery endpoint. An ordinary `models` call uses the bundled catalog and the last saved update, even after an offline restart. New models that require an unsupported provider or API still need a Tau update.
 
 ### Allow clients through a proxy
 
