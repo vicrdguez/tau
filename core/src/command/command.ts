@@ -82,19 +82,21 @@ async function serve(
 	home: string,
 	config: { port: number; allowedHosts: string[] },
 ): Promise<number> {
-	const { builtinModels } = await import("@earendil-works/pi-ai/providers/all");
+	const { loadModels } = await import("./catalog.js");
 	const { NodeExecutionEnv } = await import(
 		"@earendil-works/pi-durable/env/node"
 	);
 	const { piLogins } = await import("./credentials.js");
 	const agentDir =
 		process.env.PI_CODING_AGENT_DIR ?? path.join(homedir(), ".pi", "agent");
+	const models = await loadModels(
+		home,
+		piLogins(path.join(agentDir, "auth.json")),
+	);
 	const server = await startServer({
 		home,
 		source: fromDirectory(path.join(home, "extensions")),
-		models: builtinModels({
-			credentials: piLogins(path.join(agentDir, "auth.json")),
-		}),
+		models,
 		env: (target) => new NodeExecutionEnv({ cwd: target.cwd ?? process.cwd() }),
 		...config,
 	});
