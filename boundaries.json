@@ -9,7 +9,7 @@
 	},
 	"tau-claude-code": {
 		"extension": true,
-		"tau": [".", "./durable", "./schema", "./chord", "./telemetry"],
+		"tau": [".", "./ai", "./durable", "./schema", "./chord", "./telemetry"],
 		"testOnly": {
 			"tau": ["./testing"]
 		}

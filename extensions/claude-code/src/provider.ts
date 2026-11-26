@@ -1,11 +1,6 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import type {
-	Model,
-	ModelCatalog,
-	Provider,
-	SimpleStreamOptions,
-	TranscriptContext,
-} from "tau";
+import type { ModelCatalog, Provider } from "tau";
+import type { Model, SimpleStreamOptions, TranscriptContext } from "tau/ai";
 import { type RunDeps, run } from "./run.ts";
 
 function thinking(

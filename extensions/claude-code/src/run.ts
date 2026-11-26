@@ -21,7 +21,7 @@ import {
 	type SimpleStreamOptions,
 	type Tool,
 	type TranscriptContext,
-} from "tau";
+} from "tau/ai";
 import { type Compiled, compile } from "./transcript.ts";
 import { failureText, initialTurn, step } from "./turn.ts";
 

@@ -10,7 +10,7 @@ import {
 	type TextContent,
 	type Tool,
 	type TranscriptContext,
-} from "tau";
+} from "tau/ai";
 
 const continuation =
 	"[Your session was interrupted and resumed. What precedes this ends with the tool result you were waiting for. Continue the task from there.]";

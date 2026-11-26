@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Message, ToolResultMessage } from "tau";
+import type { Message, ToolResultMessage } from "tau/ai";
 import { fauxAssistantMessage, fauxToolCall } from "tau/testing";
 import { compile } from "../src/transcript.ts";
 

@@ -8,7 +8,7 @@ import type {
 	Model,
 	ToolCall,
 	Usage,
-} from "tau";
+} from "tau/ai";
 import { sdkName } from "./transcript.ts";
 
 type Frame = SDKPartialAssistantMessage["event"];

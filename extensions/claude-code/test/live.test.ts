@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { Message, Tool } from "tau";
+import type { Message, Tool } from "tau/ai";
 import { createModels, fauxProvider } from "tau/testing";
 import { claudeCode } from "../src/provider.ts";
 
