@@ -6,7 +6,7 @@ The extension name must match its folder. The [host reference](host.md#options) 
 
 ## Imports and helpers
 
-Import Tau's extension author API from `tau`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
+Import Tau's extension author API from `tau`, `tau/ai`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Tests can also import `tau/testing`. The [core package export tables](../core/README.md) list each name and its origin. Some names re-export pi packages so extensions share the same imports and dependency versions. Changes in pi-durable behavior still affect those re-exports.
 
 ```ts
 function options<T extends JsonObject>(

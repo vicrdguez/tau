@@ -238,6 +238,7 @@ async function extensionFixture(t) {
 		exports: Object.fromEntries(
 			[
 				".",
+				"./ai",
 				"./durable",
 				"./schema",
 				"./chord",
@@ -474,6 +475,7 @@ for (const [specifier, replacement] of [
 	["@earendil-works/pi-schema", "tau/schema"],
 	["@earendil-works/chord/context", "tau/chord"],
 	["@earendil-works/pi-telemetry", "tau/telemetry"],
+	["@earendil-works/pi-ai", "tau/ai"],
 	["@earendil-works/pi-ai/providers/faux", "tau/testing"],
 	["@earendil-works/future", "tau"],
 	["tau/dist/src/store/decisions.js", "tau"],
@@ -506,8 +508,10 @@ for (const [specifier, replacement] of [
 					(error) =>
 						error.includes(`${directory}/access.ts: ${specifier}`) &&
 						error.includes(
-							directory === "src" && name === "@earendil-works/pi-ai"
-								? "pi-ai is for tests only"
+							directory === "src" &&
+								name === "@earendil-works/pi-ai" &&
+								specifier !== name
+								? "pi-ai subpaths are for tests only"
 								: `use ${replacement}`,
 						),
 				),
@@ -561,6 +565,7 @@ test("extensions accept only canonical facade entries with testing limited to te
 			"library",
 			"library/subpath",
 			"tau",
+			"tau/ai",
 			"tau/durable",
 			"tau/schema",
 			"tau/chord",
@@ -573,8 +578,13 @@ test("extensions accept only canonical facade entries with testing limited to te
 		"extensions/w2/test/access.ts",
 		'import "tau/testing"; import "test-helper"; import "../src/local.ts";',
 	);
+	assert.deepEqual(await check(root), [
+		"extensions/w2/src/index.ts: tau/ai: forbidden workspace capability",
+	]);
+	policy["tau-w2"].tau.push("./ai");
+	await put("boundaries.json", policy);
 	assert.deepEqual(await check(root), []);
-	policy["tau-w2"]["tau"].push(
+	policy["tau-w2"].tau.push(
 		"./testing",
 		"./dist/src/index.js",
 		"./schema/../testing",
@@ -601,22 +611,20 @@ test("extensions accept only canonical facade entries with testing limited to te
 	}
 });
 
-test("extension source pi-ai diagnostics reserve pi-ai for tests", async (t) => {
+test("extension source pi-ai subpath diagnostics point to test-only use", async (t) => {
 	const { root, put } = await extensionFixture(t);
-	for (const specifier of [
-		"@earendil-works/pi-ai",
-		"@earendil-works/pi-ai/models",
-	]) {
-		await put("extensions/w2/src/index.ts", `import "${specifier}";`);
-		const errors = (await check(root)).join("\n");
-		assert.match(errors, /pi-ai is for tests only/);
-		assert.doesNotMatch(errors, /use tau\/testing/);
-	}
+	await put(
+		"extensions/w2/src/index.ts",
+		'import "@earendil-works/pi-ai/models";',
+	);
+	const errors = (await check(root)).join("\n");
+	assert.match(errors, /pi-ai subpaths are for tests only/);
+	assert.doesNotMatch(errors, /use tau\/testing/);
 });
 
 test("extension deep facade diagnostics name the public entry", async (t) => {
 	const { root, put } = await extensionFixture(t);
-	for (const entry of ["durable", "schema", "chord"]) {
+	for (const entry of ["ai", "durable", "schema", "chord"]) {
 		await put(
 			"extensions/w2/src/index.ts",
 			`import "tau/dist/src/${entry}.js";`,

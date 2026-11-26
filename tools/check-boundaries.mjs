@@ -65,7 +65,7 @@ export async function check(root, selections = []) {
 			return "tau at its author entries; tau/server is for starting a server";
 		if (spec === "tau/testing") return "tau/testing in test/ only";
 		const deepEntry =
-			/^tau\/dist\/src\/(durable|schema|chord|telemetry|testing)\.js$/.exec(
+			/^tau\/dist\/src\/(ai|durable|schema|chord|telemetry|testing)\.js$/.exec(
 				spec,
 			);
 		if (deepEntry) return `tau/${deepEntry[1]}`;
@@ -75,7 +75,7 @@ export async function check(root, selections = []) {
 				"@earendil-works/pi-schema": "tau/schema",
 				"@earendil-works/chord": "tau/chord",
 				"@earendil-works/pi-telemetry": "tau/telemetry",
-				"@earendil-works/pi-ai": "tau/testing",
+				"@earendil-works/pi-ai": spec === name ? "tau/ai" : "tau/testing",
 			}[name] ?? "tau"
 		);
 	}
@@ -93,6 +93,7 @@ export async function check(root, selections = []) {
 				!isTest &&
 				(spec === "tau" ||
 					[
+						"tau/ai",
 						"tau/durable",
 						"tau/schema",
 						"tau/chord",
@@ -156,14 +157,19 @@ export async function check(root, selections = []) {
 			permissions?.extension &&
 			(forbiddenExtensionDependency(name) ||
 				(name === "tau" &&
-					![".", "./durable", "./schema", "./chord", "./telemetry"].includes(
-						subpath,
-					) &&
+					![
+						".",
+						"./ai",
+						"./durable",
+						"./schema",
+						"./chord",
+						"./telemetry",
+					].includes(subpath) &&
 					!(isTest && subpath === "./testing")))
 		) {
 			const guidance =
-				name === "@earendil-works/pi-ai" && !isTest
-					? "pi-ai is for tests only"
+				name === "@earendil-works/pi-ai" && spec !== name && !isTest
+					? "pi-ai subpaths are for tests only"
 					: `use ${extensionEntry(name, spec)}`;
 			errors.push(`${label}: forbidden extension import; ${guidance}`);
 			return;

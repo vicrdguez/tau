@@ -11,6 +11,10 @@
 			"types": "./dist/src/extension/index.d.ts",
 			"import": "./dist/src/extension/index.js"
 		},
+		"./ai": {
+			"types": "./dist/src/extension/ai.d.ts",
+			"import": "./dist/src/extension/ai.js"
+		},
 		"./server": {
 			"types": "./dist/src/server.d.ts",
 			"import": "./dist/src/server.js"

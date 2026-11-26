@@ -15,7 +15,7 @@ Each core layer has a distinct job. The table also shows which of the other name
 | `core/src/command` | Starts and administers the server. | Store and host. |
 | `core/src/extension` | Exports the extension author API, including functions, helpers, and pi types. See the [extension guide](extensions.md). | Store, host, and command. |
 
-Core code stays independent of extension packages. Extensions import the extension author API through `tau`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Their tests may also import `tau/testing`. The workspace [import policy](../boundaries.json) and [boundary checker](../tools/check-boundaries.mjs) enforce these rules as part of `lint` and the build checks.
+Core code stays independent of extension packages. Extensions import the extension author API through `tau`, `tau/ai`, `tau/durable`, `tau/schema`, `tau/chord`, and `tau/telemetry`. Their tests may also import `tau/testing`. The workspace [import policy](../boundaries.json) and [boundary checker](../tools/check-boundaries.mjs) enforce these rules as part of `lint` and the build checks.
 
 Arrows show permitted imports between the core layers and the extension author API, not runtime calls.
 
