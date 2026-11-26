@@ -16,7 +16,7 @@ Tau has two execution modes. Checkout commands validate files as you edit them. 
 
 Packages do not depend on checks. Check derivations do not call checkout wrappers or invoke another Nix build. Workspace acceptance and local lint share the lint action, without sharing checkout preparation.
 
-The extension list comes from workspace records in the lockfile. Packages, extension checks, and named test commands use that list. The installed verifier explicitly covers W1, W2, and webkit. Adding another extension must also account for installed verification.
+The extension list comes from workspace records in the lockfile. Packages, extension checks, and named test commands use that list. The installed verifier explicitly covers claude-code, keel, W1, W2, and webkit. Adding another extension must also account for installed verification.
 
 ## Artifact builds
 
@@ -24,7 +24,7 @@ The Tau package compiles core, including its test sources, but runs no tests. In
 
 Extension packages contain TypeScript source and Markdown. They do not compile or execute tests. Their external runtime dependencies link to the shared npm tree. Tau supplies the public extension interface at runtime.
 
-The development npm derivation serves the workspace. It uses root manifests and lock records, not application source. This avoids reinstalling dependencies for ordinary source edits. Public `tau` keeps this broader dependency tree, including `lib/tau/node_modules/.bin/tsc` for extension testing.
+The development npm derivation serves the workspace. It uses root manifests and lock records, not application source. This avoids reinstalling dependencies for ordinary source edits. For the Claude Agent SDK, both npm trees use only the native binary record for the current system. The checked-in lock remains portable. Public `tau` keeps this broader dependency tree, including `lib/tau/node_modules/.bin/tsc` for extension testing.
 
 `workspace.runtimeModules` installs a separate production tree from core's runtime dependency fields and the existing version 3 lockfile. npm selects dependencies with `--omit=dev`. The synthetic root has no workspaces, development dependencies, or executable entry. Workspace-local nested dependency records are rejected rather than relocated. Dependency source files, declarations, and runtime executable links remain intact. Hidden npm locks are removed so their build-time archive paths do not enter the runtime closure.
 
@@ -111,7 +111,7 @@ Help and package listing do not link dependencies into the checkout or compile s
 | --- | --- |
 | `workspace` | Lock consistency, import boundaries, Biome, Nix formatting, and development-tool tests. |
 | `core` | Core compilation, emitted assets, and core tests. |
-| `extension-w1`, `extension-w2`, `extension-webkit` | Core dependency compilation and the selected extension's typechecking and tests. |
+| `extension-claude-code`, `extension-keel`, `extension-w1`, `extension-w2`, `extension-webkit` | Core dependency compilation and the selected extension's typechecking and tests. |
 | `e2e` | Typechecking and real-server tests, including restart and extension-loading behavior. |
 | `verify-build` | Actual public installed executable and extension artifact verification. |
 | `verify-runtime` | The same real-server verifier against the private runtime and all extension artifacts. |

@@ -7,7 +7,9 @@ let
   inherit (pkgs) lib;
   fullLock = lib.importJSON (root + "/package-lock.json");
   platform = pkgs.stdenv.hostPlatform;
-  sdkBinary = "node_modules/@anthropic-ai/claude-agent-sdk-${platform.parsed.kernel.name}-${if platform.isAarch64 then "arm64" else "x64"}";
+  sdkBinary = "node_modules/@anthropic-ai/claude-agent-sdk-${platform.parsed.kernel.name}-${
+    if platform.isAarch64 then "arm64" else "x64"
+  }";
   lock = fullLock // {
     packages = lib.filterAttrs (
       path: _: !(lib.hasPrefix "node_modules/@anthropic-ai/claude-agent-sdk-" path) || path == sdkBinary

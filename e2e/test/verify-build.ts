@@ -162,7 +162,13 @@ async function check(
 			return;
 		}
 		process.stdout.write("empty extensions []\n");
-		for (const [i, name] of ["claude-code", "keel", "w1", "w2", "webkit"].entries()) {
+		for (const [i, name] of [
+			"claude-code",
+			"keel",
+			"w1",
+			"w2",
+			"webkit",
+		].entries()) {
 			const output = outputs[i]!;
 			await access(join(output, "index.ts"));
 			for await (const file of glob("**/*.{js,mjs,cjs}", {
@@ -180,7 +186,9 @@ async function check(
 			added.stdout,
 		);
 		process.stdout.write(added.stdout);
-		const { items: [claudeCode, ...items] } = await post(url, "extensions", {}, token);
+		const {
+			items: [claudeCode, ...items],
+		} = await post(url, "extensions", {}, token);
 		assert.equal(claudeCode.name, "claude-code");
 		{
 			assert.deepEqual(
@@ -287,7 +295,11 @@ async function check(
 		assert.match(replaced.stdout, /^replaced w2; projects: p$/m);
 		process.stdout.write(replaced.stdout);
 		const models = await post(url, "models", {}, token);
-		assert.ok(models.items.some((item: { model: string }) => item.model.startsWith("claude-code/")));
+		assert.ok(
+			models.items.some((item: { model: string }) =>
+				item.model.startsWith("claude-code/"),
+			),
+		);
 		const listed = await run(command!, ["device", "list"], { env });
 		assert.match(listed.stdout, new RegExp(device));
 		process.stdout.write("models HTTP 200; paired device listed\n");
