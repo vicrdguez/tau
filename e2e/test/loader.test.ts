@@ -27,6 +27,7 @@ const TESTING =
 	"tau/testing is for tests. An extension cannot import it at run time.";
 const AUTHOR_ENTRIES = [
 	"tau",
+	"tau/ai",
 	"tau/durable",
 	"tau/schema",
 	"tau/chord",

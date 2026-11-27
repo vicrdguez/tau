@@ -1,4 +1,4 @@
-export type { ExtensionModule } from "../host/index.js";
+export type { ExtensionModule, ModelCatalog, Provider } from "../host/index.js";
 export type { DecisionInput, RequestDraft } from "../store/decisions.js";
 export { decision, request, withdraw } from "../store/decisions.js";
 export { emit, eventLog } from "../store/events.js";

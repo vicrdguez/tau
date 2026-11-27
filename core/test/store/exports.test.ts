@@ -3,12 +3,13 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("the core exposes exactly the seven tau entries", () => {
+test("the core exposes exactly the eight tau entries", () => {
 	const manifest = JSON.parse(
 		readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
 	);
 	assert.deepEqual(Object.keys(manifest.exports).sort(), [
 		".",
+		"./ai",
 		"./chord",
 		"./durable",
 		"./schema",

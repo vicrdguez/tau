@@ -1,3 +1,4 @@
+import type { MutableModels, Provider } from "@earendil-works/pi-ai";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import type { Extension } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
@@ -11,23 +12,21 @@ export const Codemode = createCodemodeExtension({
 
 export const builtInExtensions: readonly Extension[] = [CodingTools, Codemode];
 
-type Loaded = {
+export type Loaded = {
 	readonly module: ExtensionModule;
 	readonly options: Options | undefined;
+	readonly providers: readonly Provider[];
 };
 
 export class Catalogue {
 	readonly #entries: Readonly<Record<string, Loaded>>;
 
-	constructor(
-		modules: Readonly<Record<string, ExtensionModule>>,
-		options: ReadonlyMap<string, Options>,
-	) {
+	constructor(entries: Readonly<Record<string, Loaded>>) {
 		this.#entries = Object.freeze(
 			Object.fromEntries(
-				Object.entries(modules).map(([name, module]) => [
+				Object.entries(entries).map(([name, loaded]) => [
 					name,
-					Object.freeze({ module, options: options.get(name) }),
+					Object.freeze(loaded),
 				]),
 			),
 		);
@@ -57,4 +56,23 @@ export class Catalogue {
 				.map(({ module }) => module.extension),
 		];
 	}
+}
+
+export async function reconcileProviders(
+	models: MutableModels,
+	builtInProviders: ReadonlySet<string>,
+	catalogue: Catalogue,
+): Promise<void> {
+	const exported = new Map<string, Provider>();
+	for (const [, { providers }] of catalogue.entries())
+		for (const provider of providers) exported.set(provider.id, provider);
+	for (const { id } of models.getProviders())
+		if (!builtInProviders.has(id) && !exported.has(id))
+			models.deleteProvider(id);
+	for (const provider of exported.values()) models.setProvider(provider);
+	if (exported.size > 0)
+		await models.refresh({
+			allowNetwork: false,
+			providers: [...exported.keys()],
+		});
 }

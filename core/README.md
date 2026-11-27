@@ -1,6 +1,6 @@
 # tau
 
-These names are re-exports. They do not shield an extension from a change in pi-durable's behaviour.
+These names are re-exports. They do not shield an extension from changes in pi-ai or pi-durable.
 
 `./helpers.js` denotes the local helper module, not a public package path. Other relative origins name internal modules. Package origins name their source package and subpath. Only tests import `tau/testing`. Only server launchers import `tau/server`.
 
@@ -15,6 +15,8 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `DeviceId` | type | `../store/types.js` |
 | `ExtensionModule` | type | `../host/index.js` |
 | `EventData` | type | `../store/types.js` |
+| `ModelCatalog` | type | `../host/index.js` |
+| `Provider` | type | `../host/index.js` |
 | `RequestDraft` | type | `../store/decisions.js` |
 | `RoleSettings` | type | `./helpers.js` |
 | `decision` | value | `../store/decisions.js` |
@@ -26,6 +28,31 @@ These names are re-exports. They do not shield an extension from a change in pi-
 | `request` | value | `../store/decisions.js` |
 | `role` | value | `./helpers.js` |
 | `withdraw` | value | `../store/decisions.js` |
+
+## `tau/ai`
+
+| Name | Kind | Origin |
+| --- | --- | --- |
+| `Api` | type | `@earendil-works/pi-ai` |
+| `AssistantMessage` | type | `@earendil-works/pi-ai` |
+| `AssistantMessageEvent` | type | `@earendil-works/pi-ai` |
+| `AssistantMessageEventStream` | type | `@earendil-works/pi-ai` |
+| `ImageContent` | type | `@earendil-works/pi-ai` |
+| `Message` | type | `@earendil-works/pi-ai` |
+| `Model` | type | `@earendil-works/pi-ai` |
+| `SimpleStreamOptions` | type | `@earendil-works/pi-ai` |
+| `StreamOptions` | type | `@earendil-works/pi-ai` |
+| `TextContent` | type | `@earendil-works/pi-ai` |
+| `ThinkingContent` | type | `@earendil-works/pi-ai` |
+| `Tool` | type | `@earendil-works/pi-ai` |
+| `ToolCall` | type | `@earendil-works/pi-ai` |
+| `ToolResultMessage` | type | `@earendil-works/pi-ai` |
+| `TranscriptContext` | type | `@earendil-works/pi-ai` |
+| `Usage` | type | `@earendil-works/pi-ai` |
+| `UserMessage` | type | `@earendil-works/pi-ai` |
+| `createAssistantMessageEventStream` | value | `@earendil-works/pi-ai` |
+| `getCurrentSystemPrompt` | value | `@earendil-works/pi-ai` |
+| `getCurrentTools` | value | `@earendil-works/pi-ai` |
 
 ## `tau/durable`
 

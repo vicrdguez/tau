@@ -50,7 +50,7 @@ A project has a name, an absolute working directory on the server, and an ordere
 The server starts in this order:
 
 1. It loads extensions and prepares the Tau home.
-2. It loads devices and scans project directories. For each project, it takes the lock, opens telemetry, and opens the store with an empty registry.
+2. It loads devices, installs extension providers, and restores their saved catalogs without network access. It then scans project directories. For each project, it takes the lock, opens telemetry, and opens the store with an empty registry.
 3. It reads the project record and skips directories with invalid names, missing records, or records for another project.
 4. It finds the event log, installs the built-in `coding-tools` and `codemode` extensions and the available project extensions, builds the default selection, and resumes the project's harness.
 5. It reports task warnings, opens the admin socket, and listens for HTTP requests.
@@ -62,10 +62,13 @@ A repeated `bind` can finish opening a store that has no project record. A proje
 An extension can give the host this contract, from `core/src/host/index.ts`.
 
 ```ts
+export type ModelCatalog = Pick<Models, "getModels">;
+
 export type ExtensionModule = {
 	readonly extension: Extension;
 	readonly telemetry?: TelemetrySchemaDefinition;
 	readonly entry?: AgentChange | ((tx: Tx) => Promise<AgentChange>);
+	readonly providers?: (catalog: ModelCatalog) => readonly Provider[];
 	readonly options?: {
 		readonly schema: JsonSchema;
 		get(tx: Tx): Promise<JsonObject>;
@@ -77,6 +80,10 @@ export type ExtensionModule = {
 `options` returns the schema, set values, and validation errors for each loaded project extension that defines options. `setOptions` merges a patch with the value from `get`. A `null` patch value deletes the key. The host checks the merged value with top-level schema defaults and ignores required-field errors for a patch. It calls `set` only if the other checks pass, and it does not insert defaults into the stored value. When `create` starts a workflow conversation, it checks required fields too.
 
 The `model` format checks `provider/modelId` against the server's models. For secret storage and masking, see [extension options](extensions.md#imports-and-helpers).
+
+The host calls the `providers` function when it loads the extension. `catalog.getModels` reads the current chat catalog on each call. The host reports a non-function export, a thrown error, or an invalid result at the `providers` stage.
+
+The returned providers register models server-wide, regardless of a conversation's extension selection. Provider IDs must be non-empty, contain no `/`, and be unique across all exports. Extensions cannot replace built-in providers. An applied reload updates the registered providers and restores their saved catalogs without network access. A refused reload leaves them unchanged.
 
 ## Calls
 

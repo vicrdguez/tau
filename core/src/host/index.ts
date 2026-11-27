@@ -2,6 +2,12 @@ import { chmod, mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Server as NetServer } from "node:net";
 import type {
+	Api,
+	Models,
+	MutableModels,
+	Provider as PiProvider,
+} from "@earendil-works/pi-ai";
+import type {
 	AgentChange,
 	Extension,
 	HarnessOptions,
@@ -12,7 +18,7 @@ import type {
 import type { JsonSchema } from "@earendil-works/pi-schema";
 import type { TelemetrySchemaDefinition } from "@earendil-works/pi-telemetry";
 import { adminSocket, listenAdmin, refuseRunning } from "./admin.js";
-import { Catalogue } from "./catalogue.js";
+import { reconcileProviders } from "./catalogue.js";
 import { Devices } from "./devices.js";
 import { type ExtensionSource, loadExtensions } from "./extensions.js";
 import { handler } from "./http.js";
@@ -34,11 +40,17 @@ export { fromDirectory } from "./loader.js";
 export type { ReloadReport } from "./reload.js";
 export { taskLine } from "./task-reports.js";
 
+export type Provider<TApi extends Api = Api> = PiProvider<TApi>;
+
+/** Read-only view of the server's chat catalog, current at each call. */
+export type ModelCatalog = Pick<Models, "getModels">;
+
 // docs/host.md, "Options".
 export type ExtensionModule = {
 	readonly extension: Extension;
 	readonly telemetry?: TelemetrySchemaDefinition;
 	readonly entry?: AgentChange | ((tx: Tx) => Promise<AgentChange>);
+	readonly providers?: (catalog: ModelCatalog) => readonly Provider[];
 	readonly options?: {
 		readonly schema: JsonSchema;
 		get(tx: Tx): Promise<JsonObject>;
@@ -51,7 +63,7 @@ export type ServerOptions = {
 	readonly home: string;
 	/** Finds extension modules and any failures before projects open. */
 	readonly source: ExtensionSource;
-	readonly models: HarnessOptions["models"];
+	readonly models: MutableModels;
 	readonly env?: HarnessOptions["env"];
 	readonly now?: () => number;
 	/** Opens each project's storage. Defaults to Node SQLite at the given file. */
@@ -75,20 +87,22 @@ export type Server = {
 };
 
 export async function startServer(options: ServerOptions): Promise<Server> {
-	const loaded = await loadExtensions(options.source, options.models);
+	const { models } = options;
+	const builtInProviders = new Set(models.getProviders().map((p) => p.id));
+	const { catalogue } = await loadExtensions(
+		options.source,
+		models,
+		builtInProviders,
+	);
 	await mkdir(options.home, { recursive: true, mode: 0o700 });
 	await chmod(options.home, 0o700);
 	const socket = adminSocket(options.home);
-	const models = options.models;
-	const current = typeof models === "function" ? models : () => models;
-	const projects = new Projects(
-		options,
-		new Catalogue(loaded.modules, loaded.options),
-	);
+	const projects = new Projects(options, catalogue);
 	const structural = new StructuralQueue();
 	let admin: NetServer | undefined;
 	try {
 		const devices = await Devices.load(options.home, options.now ?? Date.now);
+		await reconcileProviders(models, builtInProviders, catalogue);
 		await projects.start();
 		for (const task of await inspectTasks(projects))
 			process.stderr.write(`tau: ${taskLine(task)}\n`);
@@ -97,7 +111,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
 		const host = {
 			projects,
 			devices,
-			models: current,
+			models: () => models,
 			structural,
 		};
 		const http = createServer(handler(host, options.allowedHosts ?? []));
@@ -116,7 +130,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
 			skipped: projects.skipped,
 			reload: () =>
 				structural.run(async () => {
-					const report = await reload(projects, options);
+					const report = await reload(projects, options, builtInProviders);
 					if (report.status === "restart_required") {
 						failure = new Error(
 							report.failures[0]?.message ??

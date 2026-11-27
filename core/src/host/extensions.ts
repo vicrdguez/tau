@@ -1,6 +1,7 @@
+import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry } from "@earendil-works/pi-durable";
-import { builtInExtensions } from "./catalogue.js";
-import type { ExtensionModule, ServerOptions } from "./index.js";
+import { builtInExtensions, Catalogue, type Loaded } from "./catalogue.js";
+import type { ExtensionModule } from "./index.js";
 import { Options } from "./options.js";
 import { PROJECT } from "./projects.js";
 
@@ -72,23 +73,68 @@ function check(name: string, value: unknown): ExtensionModule {
 	return value as ExtensionModule;
 }
 
+function checkProviders(
+	value: unknown,
+	owners: ReadonlyMap<string, string | null>,
+): ReadonlySet<string> {
+	const ids = new Set<string>();
+	if (!Array.isArray(value)) throw new Error("Providers must be an array");
+	for (const [index, provider] of value.entries()) {
+		if (
+			!object(provider) ||
+			typeof provider.id !== "string" ||
+			provider.id.length === 0 ||
+			provider.id.includes("/") ||
+			!object(provider.auth) ||
+			typeof provider.getModels !== "function" ||
+			typeof provider.stream !== "function" ||
+			typeof provider.streamSimple !== "function"
+		)
+			throw new Error(
+				`Provider at index ${index} requires a non-empty id without "/", an auth object, and callable getModels, stream, and streamSimple`,
+			);
+		const { id } = provider;
+		if (ids.has(id)) throw new Error(`Provider ${id} is exported twice`);
+		const owner = owners.get(id);
+		if (owner === null) throw new Error(`Provider ${id} is built in`);
+		if (owner !== undefined)
+			throw new Error(
+				`Provider ${id} is already installed by extension ${owner}`,
+			);
+		ids.add(id);
+	}
+	return ids;
+}
+
 export async function loadExtensions(
 	source: ExtensionSource,
-	models: ServerOptions["models"],
+	models: Models,
+	builtInProviders: ReadonlySet<string>,
 ) {
 	const found = await source();
 	const failures = [...found.failures];
-	const modules: Record<string, ExtensionModule> = Object.create(null);
-	const options = new Map<string, Options>();
-	const current = typeof models === "function" ? models : () => models;
+	const entries: Record<string, Loaded> = Object.create(null);
+	const current = () => models;
 	const registry = createRegistry();
 	for (const extension of builtInExtensions) registry.install(extension);
-	const owners = new Map<string, string>();
+	const taskOwners = new Map<string, string>();
+	const providerOwners = new Map<string, string | null>(
+		[...builtInProviders].map((id) => [id, null]),
+	);
 	for (const name of Object.keys(found.modules).sort()) {
 		const value = found.modules[name];
 		let stage = "shape";
 		try {
 			const module = check(name, value);
+			stage = "providers";
+			const factory = module.providers;
+			if (factory !== undefined && typeof factory !== "function")
+				throw new Error("The providers export must be a function");
+			const providers =
+				factory === undefined
+					? []
+					: factory({ getModels: (provider) => models.getModels(provider) });
+			const providerIds = checkProviders(providers, providerOwners);
 			stage = "options";
 			const contract =
 				module.options === undefined
@@ -98,15 +144,15 @@ export async function loadExtensions(
 			const tasks = (module.extension.tasks ?? []).map(
 				(task) => task.definition.name,
 			);
-			const shared = tasks.find((task) => owners.has(task));
+			const shared = tasks.find((task) => taskOwners.has(task));
 			if (shared !== undefined)
 				throw new Error(
-					`Task ${shared} of extension ${name} is already installed by extension ${owners.get(shared)}`,
+					`Task ${shared} of extension ${name} is already installed by extension ${taskOwners.get(shared)}`,
 				);
 			registry.install(module.extension);
-			for (const task of tasks) owners.set(task, name);
-			modules[name] = module;
-			if (contract !== undefined) options.set(name, contract);
+			for (const task of tasks) taskOwners.set(task, name);
+			for (const id of providerIds) providerOwners.set(id, name);
+			entries[name] = { module, options: contract, providers };
 		} catch (error) {
 			failures.push({ name, stage, error });
 		}
@@ -120,5 +166,5 @@ export async function loadExtensions(
 			`tau: extension ${failure.name}${failure.path === undefined ? "" : ` ${failure.path}`} [${failure.stage}]: ${message.split(/[\r\n]/, 1)[0]}\n`,
 		);
 	}
-	return { modules, options, failures };
+	return { catalogue: new Catalogue(entries), failures };
 }

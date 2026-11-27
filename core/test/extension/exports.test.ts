@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import * as chordContext from "@earendil-works/chord/context";
+import * as piAi from "@earendil-works/pi-ai";
 import * as aiModels from "@earendil-works/pi-ai/models";
 import * as aiFaux from "@earendil-works/pi-ai/providers/faux";
 import * as piDurable from "@earendil-works/pi-durable";
@@ -12,6 +13,7 @@ import * as durableTools from "@earendil-works/pi-durable/tools";
 import * as piSchema from "@earendil-works/pi-schema";
 import * as piTelemetry from "@earendil-works/pi-telemetry";
 import * as root from "tau";
+import * as ai from "tau/ai";
 import * as chord from "tau/chord";
 import * as durable from "tau/durable";
 import * as schema from "tau/schema";
@@ -34,6 +36,7 @@ const manifest = JSON.parse(
 );
 const entries = {
 	".": root,
+	"./ai": ai,
 	"./durable": durable,
 	"./schema": schema,
 	"./chord": chord,
@@ -42,7 +45,7 @@ const entries = {
 	"./server": server,
 };
 
-test("tau exposes exactly seven package entries", () => {
+test("tau exposes exactly eight package entries", () => {
 	assert.deepEqual(
 		Object.keys(manifest.exports).sort(),
 		Object.keys(entries).sort(),
@@ -98,8 +101,8 @@ test("README tables match every emitted value, type, and origin exactly once", (
 			if (/^@earendil-works\/pi-ai(?:\/|$)/.test(origin))
 				assert.equal(
 					entry,
-					"./testing",
-					`${title}.${name}: pi-ai is testing only`,
+					origin === "@earendil-works/pi-ai" ? "./ai" : "./testing",
+					`${title}.${name}: pi-ai belongs in tau/ai and pi-ai subpaths in tau/testing`,
 				);
 		}
 		const file = declarations[index];
@@ -179,6 +182,7 @@ test("extension re-exports preserve Tau and pi object identity", () => {
 		"./host/index.js": host,
 		"./host/loader.js": loader,
 		"@earendil-works/chord/context": chordContext,
+		"@earendil-works/pi-ai": piAi,
 		"@earendil-works/pi-ai/models": aiModels,
 		"@earendil-works/pi-ai/providers/faux": aiFaux,
 		"@earendil-works/pi-durable": piDurable,
