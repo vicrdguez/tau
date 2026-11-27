@@ -30,7 +30,7 @@ This change did not run the SDK's prebuilt Linux binary. On NixOS or in Tau's Li
 
 Tau keeps the durable conversation. Claude Code keeps a second copy so the subscription prompt cache can reuse earlier tool rounds. A new child resumes the file only when it matches Tau's transcript. Edits, compaction, or a lost file cause a rebuild. Requests without a conversation ID, summary requests, and concurrent requests for the same conversation use throwaway files.
 
-The child runs from `<config>/tau-work`, not from your project. `<config>` is `CLAUDE_CONFIG_DIR` or `~/.claude`. Claude Code stores conversation and tool data under `<config>/projects/<encoded-work-directory>/<uuid>.jsonl`. The provider stores private records and per-conversation lock files in `<config>/tau-work/sessions`.
+The child runs from `<config>/tau-work`, not from your project. `<config>` is `CLAUDE_CONFIG_DIR` or `~/.claude`. Claude Code stores conversation and tool data under `<config>/projects/<encoded-work-directory>/<uuid>.jsonl`. The provider stores private records in `<config>/tau-work/sessions`.
 
 ### Clear the cache
 
@@ -44,7 +44,7 @@ The child runs from `<config>/tau-work`, not from your project. `<config>` is `C
 
 3. Remove only the two printed directories. Leave other projects and login credentials intact.
 
-The next request rebuilds from Tau. There is no age-based cleanup. A crash can leave an orphaned file or a lock with the server PID and start time. Requests for a locked conversation use throwaways until you clear the lock while Tau is stopped.
+The next request rebuilds from Tau. There is no age-based cleanup. A crash can leave an orphaned file.
 
 ## Verification
 

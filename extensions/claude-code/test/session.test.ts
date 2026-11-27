@@ -85,6 +85,9 @@ test("a new provider resumes a text turn and discards crash leftovers", async (t
 	const leaf = file.messages.at(-1)!.uuid;
 	file.addUserMessage("unpublished");
 	file.save();
+	const [record] = records(f);
+	assert.ok(record);
+	writeFileSync(record.replace(/\.json$/, ".lock"), '{"pid":1}');
 	f.models.setProvider(f.newProvider());
 	const b = await ask(f, [
 		{ ...input[0]!, timestamp: 99 },
@@ -94,6 +97,7 @@ test("a new provider resumes a text turn and discards crash leftovers", async (t
 	]);
 	assert.equal(b.stopReason, "stop", b.errorMessage);
 	const r = f.requests[1]!;
+	assert.equal(r.path, first.path);
 	assert.equal(r.options.resume, file.sessionId);
 	assert.equal(r.rows.at(-1)?.parentUuid, leaf);
 	assert.equal(r.rows.at(-1)?.uuid, r.options.resumeSessionAt);

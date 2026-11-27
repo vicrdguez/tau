@@ -78,24 +78,19 @@ function replace(path: string, data: string) {
 		rmSync(tmp, { force: true });
 	}
 }
+const claimed = new Set<string>();
 function claim(cwd: string, options: SimpleStreamOptions) {
 	if (!options.sessionId || options.cacheRetention === "none") return;
 	const dir = join(cwd, "sessions"),
 		path = join(dir, hash(options.sessionId));
+	if (claimed.has(path)) return;
 	try {
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
-		writeFileSync(
-			path + ".lock",
-			JSON.stringify({
-				pid: process.pid,
-				startedAt: new Date(Date.now() - process.uptime() * 1000),
-			}),
-			{ flag: "wx", mode: 0o600 },
-		);
-		return path;
 	} catch {
 		return;
 	}
+	claimed.add(path);
+	return path;
 }
 function record(path: string): Kept | undefined {
 	try {
@@ -192,9 +187,9 @@ export function prepareSession(
 	mkdirSync(cwd, { recursive: true, mode: 0o700 });
 	mkdirSync(getProjectDir(cwd, claudeDir), { recursive: true, mode: 0o700 });
 	const params = { projectPath: cwd, cwd, claudeDir, model, version };
+	let file = createSession(params);
 	const key = claim(cwd, options),
 		old = key ? record(key + ".json") : undefined;
-	let file = createSession(params);
 	function cleanup(keep: boolean) {
 		try {
 			if (key && !keep) rmSync(key + ".json", { force: true });
@@ -204,12 +199,7 @@ export function prepareSession(
 		} catch {
 			/* Unreachable session files can be cleared while Tau is stopped. */
 		} finally {
-			if (key)
-				try {
-					rmSync(key + ".lock", { force: true });
-				} catch {
-					/* Later requests use throwaways until the lock is cleared. */
-				}
+			if (key) claimed.delete(key);
 		}
 	}
 	try {
