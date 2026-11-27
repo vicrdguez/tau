@@ -54,4 +54,4 @@ The next request rebuilds from Tau. There is no age-based cleanup. A crash can l
 nix develop -c env CLAUDE_CODE_LIVE=1 node extensions/claude-code/test/live.test.ts --live
 ```
 
-The test makes at most seven Haiku queries. It checks two sequential tool calls, a text follow-up, and a parallel tool batch. It prints cache writes and reads for each request. Each sequential continuation must read at least the previous request's read plus write count. The default test runner never passes `--live`.
+The test makes at most seven Haiku queries. It checks two sequential tool calls, a text follow-up, and a parallel tool batch. It prints cache writes and reads for each request. Each continuation must read at least the previous request's read plus write count. The default test runner never passes `--live`.

@@ -83,6 +83,7 @@ test("bundled Claude Code subscription smoke", {
 		(_, i) =>
 			`Reference row ${i}: amber coral lemon olive plum silver ivory; warehouse notebook compass window carpet.`,
 	).join("\n");
+	const cacheShortfalls: string[] = [];
 	for (const [sequence, prompt] of [
 		[
 			"sequential",
@@ -98,7 +99,7 @@ test("bundled Claude Code subscription smoke", {
 		const messages: Message[] = [
 			{
 				role: "user",
-				content: `${sequence === "sequential" ? sessionId + "\n" + padding + "\n" : ""}${prompt}`,
+				content: `${sessionId}\n${padding}\n${prompt}`,
 				timestamp: 0,
 			},
 		];
@@ -161,18 +162,18 @@ test("bundled Claude Code subscription smoke", {
 			} else assert.match(JSON.stringify(m.content), /46/);
 		}
 		assert.equal(new Set(sessions.slice(first)).size, 1);
-		if (sequence === "sequential")
-			for (const i of [1, 2]) {
-				const prefix = uses[i - 1]!.read + uses[i - 1]!.write;
-				assert.ok(
-					prefix > 0 && uses[i]!.read >= prefix,
-					`round ${i + 1} read ${uses[i]!.read} of ${prefix}`,
+		for (let i = 1; i < uses.length; i++) {
+			const prefix = uses[i - 1]!.read + uses[i - 1]!.write;
+			if (prefix === 0 || uses[i]!.read < prefix)
+				cacheShortfalls.push(
+					`${sequence} round ${i + 1} read ${uses[i]!.read} of ${prefix}`,
 				);
-			}
+		}
 	}
 	for (const pid of pids)
 		assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 	assert.equal(fences, 7);
 	assert.equal(exits.length, count);
 	assert.ok(exits.every((e) => e.signal === null));
+	assert.deepEqual(cacheShortfalls, []);
 });
