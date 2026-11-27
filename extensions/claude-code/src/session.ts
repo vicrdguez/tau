@@ -12,10 +12,10 @@ import {
 	createSession,
 	deleteSession,
 	getProjectDir,
-	openSession,
-	serializeJsonl,
-	Session,
 	type JsonlRecord,
+	openSession,
+	Session,
+	serializeJsonl,
 	type UserContentBlock,
 } from "cc-session-io";
 import type {
@@ -24,7 +24,7 @@ import type {
 	SimpleStreamOptions,
 	TranscriptContext,
 } from "tau/ai";
-import { compile, type Compiled } from "./transcript.ts";
+import { type Compiled, compile } from "./transcript.ts";
 
 const { claudeCodeVersion: version }: { claudeCodeVersion: string } =
 	JSON.parse(
@@ -152,13 +152,17 @@ function resume(
 		return;
 	const chain = chainAt(file, kept.leaf);
 	if (hash(serializeJsonl(chain)) !== kept.chainHash) return;
-	const draft = new Session({ ...file, records: chain, version });
+	const draft = new Session({
+		sessionId: file.sessionId,
+		jsonlPath: file.jsonlPath,
+		projectPath: file.projectPath,
+		records: chain,
+		version,
+	});
 	// compile groups results before steers and takes the final user prompt out of history.
+	const userRows = rest.filter((m) => m.role === "user").length;
 	const count =
-		Number(results.length > 0) +
-		rest.length -
-		results.length -
-		Number(rest.at(-1)?.role === "user");
+		userRows + Number(pending.size > 0) - Number(rest.at(-1)?.role === "user");
 	let at = kept.leaf;
 	for (const row of request.history.slice(request.history.length - count)) {
 		if (row.role !== "user") return;
@@ -191,16 +195,21 @@ export function prepareSession(
 	const key = claim(cwd, options),
 		old = key ? record(key + ".json") : undefined;
 	let file = createSession(params);
-	function discard(id: string) {
-		deleteSession(id, cwd, claudeDir);
-	}
-	function finish(keep: boolean) {
+	function cleanup(keep: boolean) {
 		try {
 			if (key && !keep) rmSync(key + ".json", { force: true });
-			if (!keep) discard(file.sessionId);
-			if (old && old.sessionId !== file.sessionId) discard(old.sessionId);
+			if (!keep) deleteSession(file.sessionId, cwd, claudeDir);
+			if (old && old.sessionId !== file.sessionId)
+				deleteSession(old.sessionId, cwd, claudeDir);
+		} catch {
+			/* Unreachable session files can be cleared while Tau is stopped. */
 		} finally {
-			if (key) rmSync(key + ".lock", { force: true });
+			if (key)
+				try {
+					rmSync(key + ".lock", { force: true });
+				} catch {
+					/* Later requests use throwaways until the lock is cleared. */
+				}
 		}
 	}
 	try {
@@ -288,12 +297,12 @@ export function prepareSession(
 				} catch {
 					/* Cache publication cannot fail the model turn. */
 				} finally {
-					finish(keep);
+					cleanup(keep);
 				}
 			},
 		};
 	} catch (e) {
-		finish(false);
+		cleanup(false);
 		throw e;
 	}
 }
