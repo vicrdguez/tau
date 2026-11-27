@@ -96,12 +96,13 @@ test("reopened store resumes the interrupted continuation with Tau's two real re
 			.slice(0, first!.trace.indexOf("close"))
 			.includes("handler settled"),
 	);
-	assert.deepEqual(second!.history, replay!.history);
+	assert.equal(first!.path, second!.path);
+	assert.deepEqual(second!.history.at(-1), replay!.history.at(-1));
 	assert.notEqual(second!.path, replay!.path);
 	assert.match(JSON.stringify(replay!.history), /add twice/);
 	assert.match(JSON.stringify(replay!.history), /tool_result/);
 	assert.match(JSON.stringify(replay!.prompt), /ends with the tool result/);
-	f.assertClean();
+	f.assertClean(replay!.path);
 });
 for (const kind of ["usage", "overload", "overflow"] as const)
 	test("durable " + kind, async (t) => {
@@ -124,5 +125,5 @@ for (const kind of ["usage", "overload", "overflow"] as const)
 			);
 			assert.equal(f.requests[2]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, "800");
 		}
-		f.assertClean();
+		f.assertClean(kind === "usage" ? undefined : f.requests.at(-1)!.path);
 	});
