@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readSession } from "cc-session-io";
@@ -172,7 +178,50 @@ test("cacheRetention none and unkeyed requests leave the kept session alone", as
 	assert.equal(f.requests[3]!.path, f.requests[0]!.path);
 });
 
-test("a failed continuation removes the record before retry", async (t) => {
+for (const mode of ["resume", "rebuild"] as const)
+	test("an aborted " + mode + " preserves the published session", async (t) => {
+		const frames = text().frames.filter(
+			(m) => m.type === "stream_event" && m.event.type !== "message_stop",
+		);
+		const f = fakeClaudeCode(t, text(), { frames }, text());
+		const a = await ask(f, input);
+		assert.equal(a.stopReason, "stop", a.errorMessage);
+		const path = f.requests[0]!.path;
+		const [record] = records(f);
+		assert.ok(record);
+		const checkpoint = readFileSync(record, "utf8");
+		const abortedPrompt = user("aborted prompt");
+		const messages =
+			mode === "resume" ? [...input, a, abortedPrompt] : [abortedPrompt];
+		const ac = new AbortController();
+		const stream = f.models.streamSimple(
+			f.model,
+			{ messages },
+			{ ...key, signal: ac.signal },
+		);
+		let beforeAbort: string | undefined;
+		for await (const event of stream) {
+			if (event.type === "text_delta") {
+				beforeAbort = readFileSync(path, "utf8");
+				ac.abort();
+			}
+		}
+		assert.equal((await stream.result()).stopReason, "aborted");
+		assert.ok(beforeAbort);
+		const attempt = f.requests[1]!;
+		assert.equal(attempt.path === path, mode === "resume");
+		assert.match(beforeAbort, mode === "resume" ? /aborted prompt/ : /first/);
+		assert.equal(readFileSync(record, "utf8"), checkpoint);
+		assert.equal(readFileSync(path, "utf8"), beforeAbort);
+		f.assertClean(path);
+
+		const b = await ask(f, [...input, a, user("retry")]);
+		assert.equal(b.stopReason, "stop", b.errorMessage);
+		assert.equal(f.requests[2]!.path, path);
+		assert.doesNotMatch(JSON.stringify(f.requests[2]!.rows), /aborted prompt/);
+	});
+
+test("a failed continuation removes the record and session before retry", async (t) => {
 	const f = fakeClaudeCode(
 		t,
 		text(),
@@ -184,6 +233,7 @@ test("a failed continuation removes the record before retry", async (t) => {
 	assert.equal((await ask(f, next)).stopReason, "error");
 	assert.equal(f.requests[1]!.path, f.requests[0]!.path);
 	assert.deepEqual(records(f), []);
+	f.assertClean();
 	assert.equal((await ask(f, next)).stopReason, "stop");
 	assert.notEqual(f.requests[2]!.path, f.requests[0]!.path);
 });

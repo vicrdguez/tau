@@ -348,7 +348,9 @@ export function run(
 			stream.end();
 			published = message;
 		} finally {
-			session.finish(published);
+			session.finish(
+				published ?? (options.signal?.aborted ? "aborted" : undefined),
+			);
 		}
 	}
 }

@@ -98,9 +98,18 @@ test("reopened store resumes the interrupted continuation with Tau's two real re
 	);
 	assert.equal(first!.path, second!.path);
 	assert.deepEqual(second!.history.at(-1), replay!.history.at(-1));
-	assert.notEqual(second!.path, replay!.path);
+	assert.equal(replay!.path, first!.path);
 	assert.match(JSON.stringify(replay!.history), /add twice/);
-	assert.match(JSON.stringify(replay!.history), /tool_result/);
+	const results = replay!.history.at(-1)?.content;
+	assert.ok(Array.isArray(results));
+	assert.deepEqual(
+		results.map((b) => (b.type === "tool_result" ? b.content : undefined)),
+		["42", "78"],
+	);
+	assert.doesNotMatch(
+		JSON.stringify(replay!.rows),
+		/User rejected tool use|Request interrupted by user/,
+	);
 	assert.match(JSON.stringify(replay!.prompt), /ends with the tool result/);
 	f.assertClean(replay!.path);
 });

@@ -18,7 +18,7 @@ Inference uses the CLI bundled with the extension. You do not need `claude` on t
 | Overload, transient rate limit, server failure, lost child or timeout | Tau applies the conversation's retry policy. |
 | Unsupported root tool schema or unpaired history | The request fails before launch. Check the named tool or call ID. |
 | Unknown tool, malformed arguments or incomplete batch | Tau executes none of the calls in that message. |
-| Caller stops the run | The provider returns an aborted turn after cleanup. |
+| Caller stops the run | The provider returns an aborted turn and keeps the last published session for reuse. |
 
 ## Working directory and Linux support
 

@@ -190,11 +190,16 @@ export function prepareSession(
 	let file = createSession(params);
 	const key = claim(cwd, options),
 		old = key ? record(key + ".json") : undefined;
-	function cleanup(keep: boolean) {
+	function cleanup(keepSessionId?: string) {
 		try {
-			if (key && !keep) rmSync(key + ".json", { force: true });
-			if (!keep) deleteSession(file.sessionId, cwd, claudeDir);
-			if (old && old.sessionId !== file.sessionId)
+			if (key && !keepSessionId) rmSync(key + ".json", { force: true });
+			if (file.sessionId !== keepSessionId)
+				deleteSession(file.sessionId, cwd, claudeDir);
+			if (
+				old &&
+				old.sessionId !== file.sessionId &&
+				old.sessionId !== keepSessionId
+			)
 				deleteSession(old.sessionId, cwd, claudeDir);
 		} catch {
 			/* Unreachable session files can be cleared while Tau is stopped. */
@@ -243,10 +248,14 @@ export function prepareSession(
 						? { resume: file.sessionId }
 						: { sessionId: file.sessionId }),
 			},
-			finish(message?: AssistantMessage) {
-				let keep = false;
+			finish(message?: AssistantMessage | "aborted") {
+				let keepSessionId: string | undefined;
 				try {
-					if (!key || !message || !message.responseId) return;
+					if (message === "aborted") {
+						keepSessionId = old?.sessionId;
+						return;
+					}
+					if (!key || !message?.responseId) return;
 					const saved = openSession({ ...params, sessionId: file.sessionId });
 					const leaf = saved.messages.findLast(
 						(r) =>
@@ -283,16 +292,16 @@ export function prepareSession(
 						pending: calls.map((c, i) => [c.id, actual[i]!.id]),
 					};
 					replace(key + ".json", JSON.stringify(next));
-					keep = true;
+					keepSessionId = file.sessionId;
 				} catch {
 					/* Cache publication cannot fail the model turn. */
 				} finally {
-					cleanup(keep);
+					cleanup(keepSessionId);
 				}
 			},
 		};
 	} catch (e) {
-		cleanup(false);
+		cleanup();
 		throw e;
 	}
 }

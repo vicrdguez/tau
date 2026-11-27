@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,13 +23,18 @@ import { createModels, fauxProvider } from "tau/testing";
 import { claudeCode } from "../src/provider.ts";
 import type { QueryFn } from "../src/run.ts";
 
-export const fixture = (name: "text" | "parallel"): SDKMessage[] =>
-	JSON.parse(
+export function fixture(name: "text" | "parallel"): SDKMessage[] {
+	const frames: SDKMessage[] = JSON.parse(
 		readFileSync(
 			new URL("./fixtures/" + name + ".json", import.meta.url),
 			"utf8",
 		),
 	);
+	for (const frame of frames)
+		if (frame.type === "stream_event" && frame.event.type === "message_start")
+			frame.event.message.id = randomUUID();
+	return frames;
+}
 export const failure = (result: string): SDKMessage[] => [
 	{ type: "result", subtype: "success", is_error: true, result } as SDKMessage,
 ];
