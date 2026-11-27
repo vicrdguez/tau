@@ -10,6 +10,7 @@
 let
   inherit (pkgs) lib;
   verifiedExtensions = [
+    "claude-code"
     "keel"
     "w1"
     "w2"

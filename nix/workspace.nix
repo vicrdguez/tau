@@ -5,11 +5,21 @@
 }:
 let
   inherit (pkgs) lib;
-  lock = lib.importJSON (root + "/package-lock.json");
+  fullLock = lib.importJSON (root + "/package-lock.json");
+  platform = pkgs.stdenv.hostPlatform;
+  sdkBinary = "node_modules/@anthropic-ai/claude-agent-sdk-${platform.parsed.kernel.name}-${
+    if platform.isAarch64 then "arm64" else "x64"
+  }";
+  lock = fullLock // {
+    packages = lib.filterAttrs (
+      path: _: !(lib.hasPrefix "node_modules/@anthropic-ai/claude-agent-sdk-" path) || path == sdkBinary
+    ) fullLock.packages;
+  };
   manifests = lib.filterAttrs (
     directory: _: directory != "" && !(lib.hasInfix "node_modules" directory)
   ) lock.packages;
   npmDeps = pkgs.importNpmLock.buildNodeModules {
+    packageLock = lock;
     npmRoot = lib.fileset.toSource {
       inherit root;
       fileset = lib.fileset.unions [
