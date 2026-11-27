@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,18 +13,28 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { getSessionPath, openSession } from "cc-session-io";
+import {
+	type ContentBlock,
+	createSession,
+	getSessionPath,
+	openSession,
+} from "cc-session-io";
 import { createModels, fauxProvider } from "tau/testing";
 import { claudeCode } from "../src/provider.ts";
 import type { QueryFn } from "../src/run.ts";
 
-export const fixture = (name: "text" | "parallel"): SDKMessage[] =>
-	JSON.parse(
+export function fixture(name: "text" | "parallel"): SDKMessage[] {
+	const frames: SDKMessage[] = JSON.parse(
 		readFileSync(
 			new URL("./fixtures/" + name + ".json", import.meta.url),
 			"utf8",
 		),
 	);
+	for (const frame of frames)
+		if (frame.type === "stream_event" && frame.event.type === "message_start")
+			frame.event.message.id = randomUUID();
+	return frames;
+}
 export const failure = (result: string): SDKMessage[] => [
 	{ type: "result", subtype: "success", is_error: true, result } as SDKMessage,
 ];
@@ -34,6 +45,7 @@ export type Reply = {
 	stall?: boolean;
 	onPrompt?: () => void;
 	parked?: boolean;
+	wait?: Promise<void>;
 };
 const login: AccountInfo = {
 	apiProvider: "firstParty",
@@ -44,7 +56,8 @@ export function fakeClaudeCode(t: TestContext, ...replies: Reply[]) {
 	t.after(() => rmSync(home, { recursive: true, force: true }));
 	const requests: {
 		options: Options;
-		history: unknown[];
+		history: { role: string; content: string | ContentBlock[] }[];
+		rows: ReturnType<typeof openSession>["records"];
 		path: string;
 		pid: number;
 		env: NodeJS.ProcessEnv;
@@ -61,11 +74,12 @@ export function fakeClaudeCode(t: TestContext, ...replies: Reply[]) {
 			claudeDir = options.env!.CLAUDE_CONFIG_DIR!,
 			sessionId = (options.resume ?? options.sessionId)!;
 		const path = getSessionPath(sessionId, cwd, claudeDir);
-		const history = options.resume
-			? openSession({ projectPath: cwd, sessionId, claudeDir }).messages.map(
-					({ message: { role, content } }) => ({ role, content }),
-				)
-			: [];
+		const params = { projectPath: cwd, sessionId, claudeDir };
+		const file = options.resume ? openSession(params) : createSession(params);
+		const history = file.messages.map(({ message: { role, content } }) => ({
+			role,
+			content,
+		}));
 		const child = options.spawnClaudeCodeProcess!({
 			command: process.execPath,
 			args: [
@@ -83,6 +97,7 @@ export function fakeClaudeCode(t: TestContext, ...replies: Reply[]) {
 		const req: (typeof requests)[number] = {
 			options,
 			history,
+			rows: file.records,
 			path,
 			pid: (child as import("node:child_process").ChildProcess).pid!,
 			env: {},
@@ -124,6 +139,53 @@ export function fakeClaudeCode(t: TestContext, ...replies: Reply[]) {
 				if (!req.prompt) return;
 				started.resolve();
 				reply.onPrompt?.();
+				await reply.wait;
+				file.addUserMessage(req.prompt.message.content as string);
+				file.addAttachment({ type: "fixture_context" });
+				const start = reply.frames.find(
+					(m) => m.type === "stream_event" && m.event.type === "message_start",
+				);
+				if (
+					start?.type === "stream_event" &&
+					start.event.type === "message_start"
+				) {
+					const id = start.event.message.id;
+					const calls = reply.frames.flatMap((m) =>
+						m.type === "stream_event" &&
+						m.event.type === "content_block_start" &&
+						m.event.content_block.type === "tool_use"
+							? [m.event.content_block]
+							: [],
+					);
+					const blocks: ContentBlock[] = [
+						{ type: "thinking", thinking: "", signature: "test-signature" },
+						...(calls.length
+							? calls.map((c, i) => ({
+									type: "tool_use" as const,
+									id: c.id,
+									name: c.name,
+									input: i ? { a: 71, b: 7 } : { a: 19, b: 23 },
+								}))
+							: [{ type: "text" as const, text: "PROBE:BLUE" }]),
+					];
+					for (const block of blocks) {
+						file.addAssistantMessage([block]);
+						const row = file.messages.at(-1)!;
+						if (row.type === "assistant") row.message.id = id;
+					}
+					if (calls.length) {
+						file.addToolResults(
+							calls.map((c) => ({
+								toolUseId: c.id,
+								content: "User rejected tool use",
+								isError: true,
+							})),
+						);
+						file.addAttachment({ type: "prompt_snapshot" });
+						file.addUserMessage("[Request interrupted by user for tool use]");
+					}
+				}
+				file.save();
 				let client: Client | undefined;
 				try {
 					if (reply.parked) {
@@ -171,26 +233,29 @@ export function fakeClaudeCode(t: TestContext, ...replies: Reply[]) {
 	const source = fauxProvider({
 		models: [{ id: "test", contextWindow: 500000 }],
 	}).models[0];
-	const provider = claudeCode({
-		catalog: { getModels: () => [source] },
-		query,
-		env: {
-			HOME: home,
-			CLAUDE_CONFIG_DIR: join(home, "claude"),
-			ANTHROPIC_API_KEY: "parent",
-			CLAUDE_CODE_USE_BEDROCK: "1",
-		},
-	});
+	const newProvider = () =>
+		claudeCode({
+			catalog: { getModels: () => [source] },
+			query,
+			env: {
+				HOME: home,
+				CLAUDE_CONFIG_DIR: join(home, "claude"),
+				ANTHROPIC_API_KEY: "parent",
+				CLAUDE_CODE_USE_BEDROCK: "1",
+			},
+		});
+	const provider = newProvider();
 	models.setProvider(provider);
 	const model = provider.getModels()[0]!;
-	const assertClean = () => {
+	const assertClean = (kept?: string) => {
 		for (const r of requests) {
 			assert.throws(() => process.kill(r.pid, 0), { code: "ESRCH" });
-			assert.equal(existsSync(r.path), false);
+			assert.equal(existsSync(r.path), r.path === kept);
 		}
 	};
 	return {
 		home,
+		newProvider,
 		attempts: () => attempts,
 		models,
 		model,

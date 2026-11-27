@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Message, Tool } from "tau/ai";
@@ -12,6 +13,7 @@ test("bundled Claude Code subscription smoke", {
 	const id = "claude-haiku-4-5";
 	const base = fauxProvider({ models: [{ id }] }).models[0];
 	const pids: number[] = [];
+	const sessions: (string | undefined)[] = [];
 	const exits: { code: number | null; signal: NodeJS.Signals | null }[] = [];
 	let count = 0,
 		fences = 0;
@@ -21,7 +23,8 @@ test("bundled Claude Code subscription smoke", {
 	const provider = claudeCode({
 		catalog: { getModels: () => [base] },
 		query: (args) => {
-			assert.ok(++count <= 5);
+			assert.ok(++count <= 7);
+			sessions.push(args.options.resume ?? args.options.sessionId);
 			const spawn = args.options.spawnClaudeCodeProcess!;
 			const q = query({
 				...args,
@@ -75,59 +78,102 @@ test("bundled Claude Code subscription smoke", {
 			required: ["a", "b"],
 		},
 	};
-	for (const [n, prompt] of [
-		[0, "Reply only BLUE."],
-		[1, "Use add once for 19+23. Then report the result."],
+	const padding = Array.from(
+		{ length: 384 },
+		(_, i) =>
+			`Reference row ${i}: amber coral lemon olive plum silver ivory; warehouse notebook compass window carpet.`,
+	).join("\n");
+	const cacheShortfalls: string[] = [];
+	for (const [sequence, prompt] of [
 		[
-			2,
+			"sequential",
+			"First call add for 17+24. Wait for the result. Call add with that result and 5. Wait for the result and reply with its number only.",
+		],
+		["text", "Remember the word BLUE. Reply only BLUE."],
+		[
+			"parallel",
 			"Use add for 19+23 and 71+7. Call both tools in parallel in ONE assistant message. Then report both results.",
 		],
 	] as const) {
+		const sessionId = randomUUID();
 		const messages: Message[] = [
-			{ role: "user", content: prompt, timestamp: Date.now() },
+			{
+				role: "user",
+				content: `${sessionId}\n${padding}\n${prompt}`,
+				timestamp: 0,
+			},
 		];
-		const ask = () =>
-			models.completeSimple(
+		const first = sessions.length;
+		const uses: { read: number; write: number }[] = [];
+		const rounds = sequence === "sequential" ? 3 : 2;
+		for (let round = 0; round < rounds; round++) {
+			const m = await models.completeSimple(
 				model,
 				{
 					messages,
-					tools: n ? [tool] : [],
+					tools: sequence === "text" ? [] : [tool],
 					systemPrompt:
 						"Follow the arithmetic fixture exactly. Keep answers terse.",
 				},
-				{ timeoutMs: 60000 },
+				{ sessionId, timeoutMs: 60000 },
 			);
-		const m = await ask();
-		assert.equal(m.stopReason, n ? "toolUse" : "stop", m.errorMessage);
-		const calls = m.content.filter((b) => b.type === "toolCall");
-		assert.equal(calls.length, n);
-		if (n) {
+			const usage = { read: m.usage.cacheRead, write: m.usage.cacheWrite };
+			uses.push(usage);
+			t.diagnostic(JSON.stringify({ sequence, round: round + 1, ...usage }));
+			const calls = m.content.filter((b) => b.type === "toolCall");
+			const toolRound = sequence !== "text" && round + 1 < rounds;
+			assert.equal(
+				m.stopReason,
+				toolRound ? "toolUse" : "stop",
+				m.errorMessage,
+			);
+			assert.equal(
+				calls.length,
+				toolRound ? (sequence === "parallel" ? 2 : 1) : 0,
+			);
 			messages.push(m);
-			for (const c of calls) {
-				assert.equal(c.name, "add");
+			if (toolRound)
+				for (const c of calls) {
+					assert.equal(c.name, "add");
+					messages.push({
+						role: "toolResult",
+						toolName: c.name,
+						toolCallId: c.id,
+						content: [
+							{
+								type: "text",
+								text: String(Number(c.arguments.a) + Number(c.arguments.b)),
+							},
+						],
+						isError: false,
+						timestamp: Date.now(),
+					});
+				}
+			else if (sequence === "text") {
+				assert.match(JSON.stringify(m.content), /BLUE/);
 				messages.push({
-					role: "toolResult",
-					toolName: c.name,
-					toolCallId: c.id,
-					content: [
-						{
-							type: "text",
-							text: String(Number(c.arguments.a) + Number(c.arguments.b)),
-						},
-					],
-					isError: false,
+					role: "user",
+					content: "Repeat the word you remembered.",
 					timestamp: Date.now(),
 				});
-			}
-			const final = await ask();
-			assert.equal(final.stopReason, "stop", final.errorMessage);
-			assert.match(JSON.stringify(final.content), /42/);
-			if (n === 2) assert.match(JSON.stringify(final.content), /78/);
-		} else assert.match(JSON.stringify(m.content), /BLUE/);
+			} else if (sequence === "parallel") {
+				assert.match(JSON.stringify(m.content), /42/);
+				assert.match(JSON.stringify(m.content), /78/);
+			} else assert.match(JSON.stringify(m.content), /46/);
+		}
+		assert.equal(new Set(sessions.slice(first)).size, 1);
+		for (let i = 1; i < uses.length; i++) {
+			const prefix = uses[i - 1]!.read + uses[i - 1]!.write;
+			if (prefix === 0 || uses[i]!.read < prefix)
+				cacheShortfalls.push(
+					`${sequence} round ${i + 1} read ${uses[i]!.read} of ${prefix}`,
+				);
+		}
 	}
 	for (const pid of pids)
 		assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-	assert.equal(fences, 5);
+	assert.equal(fences, 7);
 	assert.equal(exits.length, count);
 	assert.ok(exits.every((e) => e.signal === null));
+	assert.deepEqual(cacheShortfalls, []);
 });

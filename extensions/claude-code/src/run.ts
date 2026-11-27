@@ -1,7 +1,4 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import {
 	type AccountInfo,
 	type Options,
@@ -14,7 +11,6 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createSession, deleteSession, getProjectDir } from "cc-session-io";
 import {
 	createAssistantMessageEventStream,
 	type Model,
@@ -22,7 +18,8 @@ import {
 	type Tool,
 	type TranscriptContext,
 } from "tau/ai";
-import { type Compiled, compile } from "./transcript.ts";
+import { prepareSession } from "./session.ts";
+import type { Compiled } from "./transcript.ts";
 import { failureText, initialTurn, step } from "./turn.ts";
 
 type Query = AsyncIterable<SDKMessage> & {
@@ -36,15 +33,6 @@ export type QueryFn = (args: {
 	options: Options;
 }) => Query;
 export type RunDeps = { query?: QueryFn; env?: NodeJS.ProcessEnv };
-const { claudeCodeVersion }: { claudeCodeVersion: string } = JSON.parse(
-	readFileSync(
-		new URL(
-			"./package.json",
-			import.meta.resolve("@anthropic-ai/claude-agent-sdk"),
-		),
-		"utf8",
-	),
-);
 const grace = 5000;
 const workdirGuidance =
 	"The working directory in your environment information belongs to the model runtime, not to this project. Tools run in the project's working directory, so use paths relative to it.";
@@ -81,41 +69,6 @@ function childEnv(
 		...(maxTokens !== undefined
 			? { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxTokens) }
 			: {}),
-	};
-}
-function prepareSession(
-	history: Compiled["history"],
-	model: string,
-	env: NodeJS.ProcessEnv,
-) {
-	const claudeDir =
-			env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".claude"),
-		cwd = join(claudeDir, "tau-work");
-	mkdirSync(cwd, { recursive: true, mode: 0o700 });
-	mkdirSync(getProjectDir(cwd, claudeDir), { recursive: true, mode: 0o700 });
-	const session = createSession({
-		projectPath: cwd,
-		cwd,
-		claudeDir,
-		model,
-		version: claudeCodeVersion,
-	});
-	const dispose = () => deleteSession(session.sessionId, cwd, claudeDir);
-	try {
-		session.importMessages(history);
-		session.save();
-	} catch (error) {
-		dispose();
-		throw error;
-	}
-	return {
-		options: {
-			cwd,
-			...(history.length
-				? { resume: session.sessionId }
-				: { sessionId: session.sessionId }),
-		},
-		dispose,
 	};
 }
 function parkingServer(tools: Tool[], closed: Promise<void>) {
@@ -229,9 +182,7 @@ async function oneTurn(
 		prompt: input(),
 		options: {
 			...options,
-			systemPrompt: request.systemPrompt
-				? `${request.systemPrompt}\n\n${workdirGuidance}`
-				: workdirGuidance,
+			systemPrompt: request.systemPrompt,
 			settingSources: [],
 			settings: { includeGitInstructions: false },
 			tools: [],
@@ -335,60 +286,71 @@ export function run(
 				? AbortSignal.any([options.signal, deadline])
 				: deadline;
 		signal.throwIfAborted();
-		const request = compile(context);
-		if ("error" in request) throw new Error(request.error);
-		state = initialTurn(
-			model,
-			request.tools.map((t) => t.name),
-			state.message.timestamp,
+		const env = childEnv(deps.env ?? process.env, options.maxTokens);
+		const session = prepareSession(
+			env,
+			model.id,
+			options,
+			context,
+			workdirGuidance,
 		);
-		const env = childEnv(deps.env ?? process.env, options.maxTokens),
-			session = prepareSession(request.history, model.id, env);
-		let captured: ReturnType<typeof step> | undefined;
+		const { request } = session;
+		let published: typeof state.message | undefined;
 		try {
-			await withChild(env, (spawnClaudeCodeProcess) =>
-				oneTurn(
-					deps.query ?? sdkQuery,
-					{
-						...session.options,
-						...thinking,
-						env,
-						model: model.id,
-						spawnClaudeCodeProcess,
-					},
-					request,
-					signal,
-					(message) => {
-						const update = step(state, message);
-						if (update.decision === "capture") captured = update;
-						else {
-							state = update.state;
-							for (const event of update.events) stream.push(event);
-						}
-						return update.decision;
-					},
-				),
+			state = initialTurn(
+				model,
+				request.tools.map((t) => t.name),
+				state.message.timestamp,
 			);
-		} catch (e) {
-			const detail = e instanceof Error ? e.message : String(e);
-			if (deadline.aborted) throw new Error("Claude Code request timed out");
-			throw new Error(
-				failureText(detail, "Claude Code process terminated: " + detail),
-			);
+			let captured: ReturnType<typeof step> | undefined;
+			try {
+				await withChild(env, (spawnClaudeCodeProcess) =>
+					oneTurn(
+						deps.query ?? sdkQuery,
+						{
+							...session.options,
+							...thinking,
+							env,
+							model: model.id,
+							spawnClaudeCodeProcess,
+						},
+						request,
+						signal,
+						(message) => {
+							const update = step(state, message);
+							if (update.decision === "capture") captured = update;
+							else {
+								state = update.state;
+								for (const event of update.events) stream.push(event);
+							}
+							return update.decision;
+						},
+					),
+				);
+			} catch (e) {
+				const detail = e instanceof Error ? e.message : String(e);
+				if (deadline.aborted) throw new Error("Claude Code request timed out");
+				throw new Error(
+					failureText(detail, "Claude Code process terminated: " + detail),
+				);
+			}
+			signal.throwIfAborted();
+			const message = (captured?.state ?? state).message;
+			if (message.stopReason === "error") throw new Error(message.errorMessage);
+			if (
+				message.stopReason !== "stop" &&
+				message.stopReason !== "toolUse" &&
+				message.stopReason !== "length"
+			)
+				throw new Error("Claude Code ended without a completed turn");
+			for (const event of captured?.events ?? []) stream.push(event);
+			stream.push({ type: "done", reason: message.stopReason, message });
+			stream.end();
+			published = message;
 		} finally {
-			session.dispose();
+			session.finish(
+				published ?? (options.signal?.aborted ? "aborted" : undefined),
+			);
 		}
-		signal.throwIfAborted();
-		const message = (captured?.state ?? state).message;
-		if (message.stopReason === "error") throw new Error(message.errorMessage);
-		if (
-			message.stopReason !== "stop" &&
-			message.stopReason !== "toolUse" &&
-			message.stopReason !== "length"
-		)
-			throw new Error("Claude Code ended without a completed turn");
-		for (const event of captured?.events ?? []) stream.push(event);
-		stream.push({ type: "done", reason: message.stopReason, message });
-		stream.end();
 	}
 }
